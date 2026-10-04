@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   LayoutDashboard,
   WalletCards,
@@ -22,8 +22,13 @@ import {
   ChevronDown,
   User,
   Shield,
+  Briefcase,
   AlertCircle,
   ExternalLink,
+  Link2,
+  Copy,
+  Check,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BenniniLogo } from "@/components/BenniniLogo";
@@ -37,7 +42,8 @@ import { UsersPermissionsModule } from "@/components/modules/UsersPermissionsMod
 import { AuditLogModule } from "@/components/modules/AuditLogModule";
 import { FieldMobilePortal } from "@/components/modules/FieldMobilePortal";
 import { IndependentLoginPortal } from "@/components/modules/IndependentLoginPortal";
-import { useAuth } from "@/context/AuthContext";
+import { DedicatedPortalsHubModal } from "@/components/modules/DedicatedPortalsHubModal";
+import { useAuth, type PortalType, type AccountCategory } from "@/context/AuthContext";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -46,12 +52,12 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "المنصة الشاملة لإدارة العمليات المالية، المشتريات، المخزون، الشيكات، الكراء، الآليات، والبوابة الميدانية لشركة BENNINI ETPI.",
+          "المنصة الشاملة لإدارة العمليات المالية، المشتريات، المخزون، الشيكات، الكراء، الآليات، والبوابة الميدانية لشركة BENNINI ETPI مع روابط مخصصة للمدير والموظفين والعمال.",
       },
       { property: "og:title", content: "BENNINI ETPI - النظام المتكامل" },
       {
         property: "og:description",
-        content: "إدارة موحدة للأشغال والعمليات المالية والميدانية للشركة.",
+        content: "إدارة موحدة للأشغال والعمليات المالية والميدانية للشركة مع روابط وصول مستقلة.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -73,64 +79,97 @@ export type Section =
   | "portal";
 
 function IndexPage() {
-  const { currentUser, profile, logout, signInWithGoogle, hasPermission } = useAuth();
+  const {
+    currentUser,
+    profile,
+    logout,
+    hasPermission,
+    currentPortal,
+    switchPortal,
+    getPortalUrl,
+    loginAsRole,
+  } = useAuth();
+
   const [section, setSection] = useState<Section>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [isLinksModalOpen, setIsLinksModalOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
-  // If user wants to view the independent worker portal exclusively
+  // If user wants to view the login portal explicitly
   const [showIndependentLogin, setShowIndependentLogin] = useState(false);
 
-  const isMainAdmin =
-    profile?.role.includes("المدير") || profile?.email === "mohamedharoun329@gmail.com";
+  // Automatically adjust view based on active portal
+  useEffect(() => {
+    if (currentPortal === "field") {
+      setSection("field");
+    } else if (currentPortal === "staff") {
+      setSection((prev) =>
+        prev === "finance" || prev === "users" || prev === "audit" ? "inventory" : prev,
+      );
+    }
+  }, [currentPortal]);
 
-  // Sidebar items filtered strictly by RBAC permissions
+  const isMainAdmin =
+    profile?.accountCategory === "manager" ||
+    profile?.role.includes("المدير") ||
+    profile?.email === "mohamedharoun329@gmail.com";
+
+  const isStaff = profile?.accountCategory === "staff";
+  const isWorker = profile?.accountCategory === "worker";
+
+  // Sidebar items filtered strictly by RBAC permissions and portal
   const visibleNavItems = useMemo(() => {
     const items = [
-      { id: "dashboard" as const, label: "الرئيسية", icon: LayoutDashboard, allow: true },
+      {
+        id: "dashboard" as const,
+        label: "الرئيسية",
+        icon: LayoutDashboard,
+        allow: !isWorker, // workers have field portal as primary
+      },
       {
         id: "finance" as const,
         label: "التسيير المالي 💰",
         icon: WalletCards,
-        allow: isMainAdmin || hasPermission("canViewFinance"),
+        allow: isMainAdmin || (!isWorker && hasPermission("canViewFinance")),
       },
       {
         id: "inventory" as const,
         label: "المشتريات والمخزون 📦",
         icon: Package,
-        allow: isMainAdmin || hasPermission("canViewInventory"),
+        allow: !isWorker && (isMainAdmin || hasPermission("canViewInventory")),
       },
       {
         id: "cheques" as const,
         label: "إدارة الشيكات 🧾",
         icon: FileText,
-        allow: isMainAdmin || hasPermission("canViewCheques"),
+        allow: !isWorker && (isMainAdmin || hasPermission("canViewCheques")),
       },
       {
         id: "rentals" as const,
         label: "الكراء والمعدات 🏗️",
         icon: Truck,
-        allow: isMainAdmin || hasPermission("canViewRentals"),
+        allow: !isWorker && (isMainAdmin || hasPermission("canViewRentals")),
       },
       {
         id: "machinery" as const,
         label: "المركبات والآليات وقطع الغيار 🚜",
         icon: Wrench,
-        allow: isMainAdmin || hasPermission("canViewMachinery"),
+        allow: !isWorker && (isMainAdmin || hasPermission("canViewMachinery")),
       },
       {
         id: "field" as const,
         label: "تطبيق رئيس الأشغال 📱",
         icon: HardHat,
-        allow: isMainAdmin || hasPermission("canViewFieldPortal"),
+        allow: true,
       },
       {
         id: "users" as const,
         label: "المستخدمون والصلاحيات 👥",
         icon: Users,
-        allow: isMainAdmin || hasPermission("canManageUsers"),
+        allow: isMainAdmin,
       },
       {
         id: "audit" as const,
@@ -141,9 +180,16 @@ function IndexPage() {
     ];
 
     return items.filter((item) => item.allow);
-  }, [isMainAdmin, hasPermission]);
+  }, [isMainAdmin, isWorker, hasPermission]);
 
   const handleNavigate = (newSection: string) => {
+    // Guard against worker accessing executive sections
+    if (isWorker && newSection !== "field") {
+      showToast(
+        "عذراً، هذا القسم إداري ومتاح فقط للمدير العام والموظفين. حسابك مخصص للورشة الميدانية.",
+      );
+      return;
+    }
     setSection(newSection as Section);
     setSidebarOpen(false);
   };
@@ -155,19 +201,156 @@ function IndexPage() {
     }, 4500);
   };
 
+  const handleCopyLink = (portalKey: PortalType, url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedLink(portalKey);
+    showToast(
+      `✓ تم نسخ ${portalKey === "manager" ? "رابط المدير" : portalKey === "staff" ? "رابط الموظفين" : "رابط العمال"} بنجاح!`,
+    );
+    setTimeout(() => setCopiedLink(null), 3000);
+  };
+
   if (showIndependentLogin) {
     return (
       <IndependentLoginPortal
         onSuccessLogin={() => {
           setShowIndependentLogin(false);
-          setSection("dashboard");
+          setSection(currentPortal === "field" ? "field" : "dashboard");
         }}
       />
     );
   }
 
+  const managerUrl = getPortalUrl ? getPortalUrl("manager") : "/?portal=manager";
+  const staffUrl = getPortalUrl ? getPortalUrl("staff") : "/?portal=staff";
+  const fieldUrl = getPortalUrl ? getPortalUrl("field") : "/?portal=field";
+
   return (
     <div dir="rtl" className="min-h-screen bg-[#f8fafc] font-sans text-[#07152f]">
+      {/* Top Banner: Dedicated Portals & Role Links */}
+      <div className="bg-[#07152f] text-white border-b border-[#13274c] px-4 py-2.5 sm:px-6 shadow-md">
+        <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row items-center justify-between gap-2.5 text-xs">
+          {/* Active Portal Indicator */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[#7fa9c7] font-bold">بوابة الدخول الحالية:</span>
+            <span
+              className={`px-3 py-1 rounded-full font-black text-xs flex items-center gap-1.5 shadow-sm ${
+                currentPortal === "manager"
+                  ? "bg-[#f5b41e] text-[#07152f]"
+                  : currentPortal === "staff"
+                    ? "bg-[#0555a8] text-white"
+                    : "bg-emerald-600 text-white"
+              }`}
+            >
+              {currentPortal === "manager" && <Shield className="h-3.5 w-3.5" />}
+              {currentPortal === "staff" && <Briefcase className="h-3.5 w-3.5" />}
+              {currentPortal === "field" && <HardHat className="h-3.5 w-3.5" />}
+              {currentPortal === "manager"
+                ? "👑 بوابة المدير العام (تحكم كامل)"
+                : currentPortal === "staff"
+                  ? "💼 بوابة الموظفين والمستخدمين"
+                  : "📱 بوابة وتطبيق رئيس الأشغال والعمال"}
+            </span>
+
+            {/* Quick Portal Switch buttons */}
+            <div className="hidden sm:flex items-center gap-1 mr-2 border-r border-[#13274c] pr-2">
+              <button
+                onClick={() => {
+                  switchPortal("manager");
+                  setSection("dashboard");
+                }}
+                className={`px-2.5 py-0.5 rounded text-[11px] font-bold transition-all ${
+                  currentPortal === "manager"
+                    ? "bg-white/20 text-[#f5b41e]"
+                    : "text-[#7fa9c7] hover:text-white"
+                }`}
+              >
+                المدير
+              </button>
+              <button
+                onClick={() => {
+                  switchPortal("staff");
+                  setSection("inventory");
+                }}
+                className={`px-2.5 py-0.5 rounded text-[11px] font-bold transition-all ${
+                  currentPortal === "staff"
+                    ? "bg-white/20 text-white"
+                    : "text-[#7fa9c7] hover:text-white"
+                }`}
+              >
+                الموظفون
+              </button>
+              <button
+                onClick={() => {
+                  switchPortal("field");
+                  setSection("field");
+                }}
+                className={`px-2.5 py-0.5 rounded text-[11px] font-bold transition-all ${
+                  currentPortal === "field"
+                    ? "bg-white/20 text-[#f5b41e]"
+                    : "text-[#7fa9c7] hover:text-white"
+                }`}
+              >
+                العمال
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Copy Dedicated Links */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[#7fa9c7] text-[11px] hidden lg:inline">نسخ الرابط المخصص:</span>
+            <button
+              onClick={() => handleCopyLink("manager", managerUrl)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#0a1f44] hover:bg-[#132d5c] border border-[#132d5c] text-[11px] font-bold text-amber-300 hover:text-amber-200 transition-colors"
+              title="نسخ رابط المدير العام"
+            >
+              {copiedLink === "manager" ? (
+                <Check className="h-3 w-3 text-emerald-400" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+              رابط المدير
+            </button>
+
+            <button
+              onClick={() => handleCopyLink("staff", staffUrl)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#0a1f44] hover:bg-[#132d5c] border border-[#132d5c] text-[11px] font-bold text-blue-300 hover:text-blue-200 transition-colors"
+              title="نسخ رابط الموظفين"
+            >
+              {copiedLink === "staff" ? (
+                <Check className="h-3 w-3 text-emerald-400" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+              رابط الموظفين
+            </button>
+
+            <button
+              onClick={() => handleCopyLink("field", fieldUrl)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#0a1f44] hover:bg-[#132d5c] border border-[#132d5c] text-[11px] font-bold text-emerald-300 hover:text-emerald-200 transition-colors"
+              title="نسخ رابط العمال ورئيس الأشغال"
+            >
+              {copiedLink === "field" ? (
+                <Check className="h-3 w-3 text-emerald-400" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
+              رابط العمال 📱
+            </button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsLinksModalOpen(true)}
+              className="h-7 px-3 text-[11px] font-bold border-[#f5b41e] text-[#f5b41e] hover:bg-[#f5b41e] hover:text-[#07152f]"
+            >
+              <Link2 className="h-3.5 w-3.5 ml-1" />
+              كل الروابط والصلاحيات
+            </Button>
+          </div>
+        </div>
+      </div>
+
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
         <button
@@ -197,16 +380,24 @@ function IndexPage() {
           </Button>
         </div>
 
-        {/* Navigation label */}
+        {/* Navigation label with Role Badge */}
         <div className="px-6 pt-5 pb-2 text-[11px] font-bold uppercase tracking-wider text-[#7fa9c7] flex justify-between items-center">
           <span>أقسام المنظومة</span>
-          <span className="text-[10px] bg-[#13274c] px-2 py-0.5 rounded text-white font-mono">
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+              isMainAdmin
+                ? "bg-[#f5b41e] text-[#07152f]"
+                : isStaff
+                  ? "bg-[#0555a8] text-white"
+                  : "bg-emerald-600 text-white"
+            }`}
+          >
             {profile?.role || "مستخدم"}
           </span>
         </div>
 
         {/* Navigation list */}
-        <nav className="flex-1 space-y-1 px-3 overflow-y-auto max-h-[calc(100vh-250px)]">
+        <nav className="flex-1 space-y-1 px-3 overflow-y-auto max-h-[calc(100vh-270px)]">
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const active = section === item.id;
@@ -228,14 +419,22 @@ function IndexPage() {
           })}
         </nav>
 
-        {/* Independent Portal Link in Sidebar */}
-        <div className="p-3 border-t border-[#13274c]">
+        {/* Portals Hub in Sidebar */}
+        <div className="p-3 border-t border-[#13274c] space-y-1.5">
+          <button
+            onClick={() => setIsLinksModalOpen(true)}
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#0a1b3a] hover:bg-[#13274c] border border-[#13274c] py-2 text-xs text-[#f5b41e] font-bold transition-colors"
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            روابط الدخول المستقلة للمنظومة
+          </button>
+
           <button
             onClick={() => setShowIndependentLogin(true)}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#0a1b3a] hover:bg-[#13274c] border border-[#13274c] py-2.5 text-xs text-[#7fa9c7] hover:text-white font-bold transition-colors"
+            className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#083c7a]/40 hover:bg-[#083c7a] border border-[#13274c] py-2 text-xs text-white font-bold transition-colors"
           >
-            <ExternalLink className="h-3.5 w-3.5 text-[#f5b41e]" />
-            بوابة دخول العمال المستقلة
+            <LogIn className="h-3.5 w-3.5 text-[#f5b41e]" />
+            بوابة تسجيل الدخول المخصصة
           </button>
         </div>
 
@@ -273,8 +472,19 @@ function IndexPage() {
                 <BenniniLogo size="sm" variant="colored" showText={false} />
               </div>
               <div>
-                <h1 className="text-base sm:text-lg font-black text-[#07152f]">
+                <h1 className="text-base sm:text-lg font-black text-[#07152f] flex items-center gap-2">
                   BENNINI ETPI • النظام المتكامل
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      isMainAdmin
+                        ? "bg-amber-100 text-amber-900 border border-amber-300"
+                        : isStaff
+                          ? "bg-blue-100 text-blue-900 border border-blue-300"
+                          : "bg-emerald-100 text-emerald-900 border border-emerald-300"
+                    }`}
+                  >
+                    {isMainAdmin ? "الإدارة العليا" : isStaff ? "الموظفون" : "الميدان والورشة"}
+                  </span>
                 </h1>
                 <p className="text-[11px] text-muted-foreground hidden sm:block">
                   مؤسسة عتاد الأشغال العمومية والصناعية • الأحد، 04 أكتوبر 2026
@@ -285,11 +495,17 @@ function IndexPage() {
 
           {/* Header Actions */}
           <div className="flex items-center gap-2.5">
-            {/* Quick Mobile Field Toggle */}
+            {/* Quick Switch to Field Application */}
             <Button
               variant={section === "field" ? "default" : "outline"}
               size="sm"
-              onClick={() => setSection(section === "field" ? "dashboard" : "field")}
+              onClick={() => {
+                if (section === "field") {
+                  setSection(isWorker ? "field" : "dashboard");
+                } else {
+                  setSection("field");
+                }
+              }}
               className={`text-xs font-bold gap-1.5 ${
                 section === "field"
                   ? "bg-[#f5b41e] text-[#07152f] hover:bg-[#e4a515]"
@@ -298,7 +514,11 @@ function IndexPage() {
             >
               <Smartphone className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">
-                {section === "field" ? "لوحة الإدارة" : "تطبيق رئيس الأشغال 📱"}
+                {section === "field"
+                  ? isWorker
+                    ? "تطبيق الورشة"
+                    : "لوحة الإدارة"
+                  : "تطبيق رئيس الأشغال 📱"}
               </span>
             </Button>
 
@@ -376,7 +596,11 @@ function IndexPage() {
                 onClick={() => setUserMenuOpen(!userMenuOpen)}
                 className="flex items-center gap-2 border-r border-border pr-2.5 text-right hover:opacity-85 transition-opacity"
               >
-                <div className="grid h-9 w-9 place-items-center rounded-full bg-[#083c7a] font-bold text-white text-xs shadow-sm">
+                <div
+                  className={`grid h-9 w-9 place-items-center rounded-full font-bold text-white text-xs shadow-sm ${
+                    isMainAdmin ? "bg-[#083c7a]" : isStaff ? "bg-[#0555a8]" : "bg-emerald-700"
+                  }`}
+                >
                   {profile?.name ? profile.name.slice(0, 2) : "م ب"}
                 </div>
                 <div className="hidden md:block">
@@ -391,55 +615,94 @@ function IndexPage() {
               </button>
 
               {userMenuOpen && (
-                <div className="absolute left-0 mt-2 w-56 rounded-2xl bg-white p-3 shadow-2xl border border-border z-50 text-right space-y-1 text-xs font-bold">
-                  <div className="p-2 border-b border-border">
-                    <p className="text-[11px] text-muted-foreground">مسجل الدخول كـ:</p>
+                <div className="absolute left-0 mt-2 w-64 rounded-2xl bg-white p-3 shadow-2xl border border-border z-50 text-right space-y-1.5 text-xs font-bold">
+                  <div className="p-2 border-b border-border bg-slate-50 rounded-xl mb-1">
+                    <p className="text-[10px] text-muted-foreground">الحساب المتصل حالياً:</p>
                     <p className="text-xs text-[#07152f] truncate font-extrabold">
-                      {currentUser?.email || "المدير العام"}
+                      {profile?.name}
                     </p>
+                    <p className="text-[10px] text-[#083c7a] font-mono mt-0.5">{profile?.email}</p>
+                  </div>
+
+                  <div className="text-[10px] text-muted-foreground font-bold px-2 pt-1">
+                    تبديل الحساب التجريبي:
                   </div>
 
                   <button
-                    onClick={() => {
-                      setSection("field");
+                    onClick={async () => {
+                      await loginAsRole("manager");
                       setUserMenuOpen(false);
+                      setSection("dashboard");
                     }}
-                    className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 text-slate-700"
+                    className={`w-full flex items-center justify-between p-2 rounded-lg text-xs ${
+                      isMainAdmin
+                        ? "bg-amber-50 text-amber-900 font-black"
+                        : "hover:bg-slate-50 text-slate-700"
+                    }`}
                   >
-                    <Smartphone className="h-4 w-4 text-[#083c7a]" /> تطبيق رئيس الأشغال
+                    <span className="flex items-center gap-1.5">
+                      <Shield className="h-3.5 w-3.5 text-[#f5b41e]" /> حساب المدير العام
+                    </span>
+                    {isMainAdmin && <span className="text-[10px]">✓ نشط</span>}
                   </button>
 
                   <button
-                    onClick={() => {
-                      setShowIndependentLogin(true);
+                    onClick={async () => {
+                      await loginAsRole("staff");
                       setUserMenuOpen(false);
+                      setSection("inventory");
                     }}
-                    className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 text-slate-700"
+                    className={`w-full flex items-center justify-between p-2 rounded-lg text-xs ${
+                      isStaff
+                        ? "bg-blue-50 text-blue-900 font-black"
+                        : "hover:bg-slate-50 text-slate-700"
+                    }`}
                   >
-                    <ExternalLink className="h-4 w-4 text-[#f5b41e]" /> بوابة دخول العمال
+                    <span className="flex items-center gap-1.5">
+                      <Briefcase className="h-3.5 w-3.5 text-[#0555a8]" /> حساب موظف (محاسب/مخزن)
+                    </span>
+                    {isStaff && <span className="text-[10px]">✓ نشط</span>}
                   </button>
 
-                  {isMainAdmin && (
+                  <button
+                    onClick={async () => {
+                      await loginAsRole("worker");
+                      setUserMenuOpen(false);
+                      setSection("field");
+                    }}
+                    className={`w-full flex items-center justify-between p-2 rounded-lg text-xs ${
+                      isWorker
+                        ? "bg-emerald-50 text-emerald-900 font-black"
+                        : "hover:bg-slate-50 text-slate-700"
+                    }`}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <HardHat className="h-3.5 w-3.5 text-emerald-600" /> حساب رئيس أشغال (ميداني)
+                    </span>
+                    {isWorker && <span className="text-[10px]">✓ نشط</span>}
+                  </button>
+
+                  <div className="border-t border-border pt-1">
                     <button
                       onClick={() => {
-                        setSection("users");
+                        setIsLinksModalOpen(true);
                         setUserMenuOpen(false);
                       }}
-                      className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 text-slate-700"
+                      className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 text-[#083c7a]"
                     >
-                      <Shield className="h-4 w-4 text-[#0555a8]" /> إدارة الصلاحيات
+                      <Link2 className="h-3.5 w-3.5" /> عرض ونسخ الروابط المخصصة
                     </button>
-                  )}
 
-                  <button
-                    onClick={() => {
-                      logout();
-                      setUserMenuOpen(false);
-                    }}
-                    className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-rose-50 text-rose-600 border-t border-border mt-1"
-                  >
-                    <LogOut className="h-4 w-4" /> تسجيل الخروج
-                  </button>
+                    <button
+                      onClick={() => {
+                        logout();
+                        setUserMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-rose-50 text-rose-600 mt-1"
+                    >
+                      <LogOut className="h-3.5 w-3.5" /> تسجيل الخروج
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -462,6 +725,26 @@ function IndexPage() {
           </div>
         )}
 
+        {/* Worker Alert Barrier: If worker is on main page, show dedicated worker view */}
+        {isWorker && section !== "field" && (
+          <div className="m-4 p-4 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+              <span>
+                أنت مسجل الدخول كـ <strong>{profile?.name} (رئيس أشغال)</strong>. الأقسام المالية
+                والإدارية المركزية محجوبة، ويرجى استخدام تطبيق الورشة الميداني المخصص.
+              </span>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => setSection("field")}
+              className="bg-[#083c7a] text-white hover:bg-[#05326f] text-xs font-bold"
+            >
+              فتح تطبيق الورشة 📱
+            </Button>
+          </div>
+        )}
+
         {/* Dynamic Section Rendering */}
         <div className="flex-1 p-4 sm:p-7 max-w-[1600px] w-full mx-auto">
           {section === "dashboard" && (
@@ -471,7 +754,20 @@ function IndexPage() {
             />
           )}
 
-          {section === "finance" && <FinanceModule />}
+          {section === "finance" &&
+            (isMainAdmin || hasPermission("canViewFinance") ? (
+              <FinanceModule />
+            ) : (
+              <div className="p-8 text-center bg-white rounded-2xl border border-slate-200">
+                <AlertCircle className="h-10 w-10 text-amber-500 mx-auto mb-2" />
+                <h4 className="font-bold text-base text-[#07152f]">
+                  هذا القسم مخصص للإدارة والمدير العام
+                </h4>
+                <p className="text-xs text-muted-foreground mt-1">
+                  ليس لديك صلاحية عرض التسيير المالي والخزينة.
+                </p>
+              </div>
+            ))}
 
           {section === "inventory" && <InventoryModule />}
 
@@ -484,19 +780,47 @@ function IndexPage() {
           {section === "field" && (
             <div className="py-2">
               <div className="text-center mb-5">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 font-bold text-xs mb-2">
+                  <HardHat className="h-3.5 w-3.5 text-emerald-700" />
+                  رابط مخصص لرؤساء الأشغال والعمال:{" "}
+                  <span className="font-mono text-[11px] underline">/?portal=field</span>
+                </div>
                 <h3 className="text-xl font-bold text-[#07152f]">تطبيق رئيس الأشغال الميداني 📱</h3>
-                <p className="text-xs text-muted-foreground mt-1">
-                  تسجيل المصاريف، المازوت، قطع الغيار، ورفع الوصولات مع مزامنة فورية في قاعدة
-                  البيانات المركزية.
+                <p className="text-xs text-muted-foreground mt-1 max-w-xl mx-auto">
+                  تسجيل المصاريف، المازوت والوقود، قطع الغيار المستعجلة، ورفع الوصولات مع المزامنة
+                  الفورية في قاعدة البيانات المركزية لشركة BENNINI ETPI.
                 </p>
               </div>
               <FieldMobilePortal />
             </div>
           )}
 
-          {section === "users" && <UsersPermissionsModule />}
+          {section === "users" &&
+            (isMainAdmin ? (
+              <UsersPermissionsModule />
+            ) : (
+              <div className="p-8 text-center bg-white rounded-2xl border border-slate-200">
+                <Shield className="h-10 w-10 text-rose-500 mx-auto mb-2" />
+                <h4 className="font-bold text-base text-[#07152f]">
+                  الصلاحيات مخصصة للمدير العام فقط
+                </h4>
+                <p className="text-xs text-muted-foreground mt-1">
+                  لا يمكن للموظفين أو العمال إدارة الصلاحيات.
+                </p>
+              </div>
+            ))}
 
-          {section === "audit" && <AuditLogModule />}
+          {section === "audit" &&
+            (isMainAdmin ? (
+              <AuditLogModule />
+            ) : (
+              <div className="p-8 text-center bg-white rounded-2xl border border-slate-200">
+                <History className="h-10 w-10 text-slate-500 mx-auto mb-2" />
+                <h4 className="font-bold text-base text-[#07152f]">
+                  سجل التدقيق متاح للمدير العام فقط
+                </h4>
+              </div>
+            ))}
         </div>
 
         {/* Global Footer */}
@@ -504,6 +828,12 @@ function IndexPage() {
           BENNINI ETPI — جميع الحقوق محفوظة © 2026 • مؤسسة عتاد الأشغال العمومية والصناعية
         </footer>
       </main>
+
+      {/* Modal for viewing all dedicated links and their roles */}
+      <DedicatedPortalsHubModal
+        isOpen={isLinksModalOpen}
+        onClose={() => setIsLinksModalOpen(false)}
+      />
     </div>
   );
 }

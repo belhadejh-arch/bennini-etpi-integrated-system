@@ -31,6 +31,7 @@ import {
 import { collection, onSnapshot, query, orderBy, limit } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "@/lib/firebase";
 import { useAuth } from "@/context/AuthContext";
+import { formatCurrency } from "@/lib/utils";
 
 interface DashboardProps {
   onNavigate: (section: string) => void;
@@ -289,7 +290,7 @@ export function DashboardModule({ onNavigate, onOpenQuickEntry }: DashboardProps
           </div>
           <p className="mt-4 text-xs font-semibold text-muted-foreground">الرصيد الحالي بالصندوق</p>
           <h3 className="mt-1 text-2xl font-extrabold text-[#07152f]">
-            {currentBalance.toLocaleString()} دج
+            {formatCurrency(currentBalance)} دج
           </h3>
           <p className="mt-1 text-xs text-emerald-600 font-medium">انقر لعرض حركة الصندوق</p>
         </div>
@@ -312,10 +313,10 @@ export function DashboardModule({ onNavigate, onOpenQuickEntry }: DashboardProps
           </p>
           <div className="mt-1 flex items-baseline justify-between">
             <span className="text-lg font-black text-emerald-700">
-              +{totalIncome.toLocaleString()}
+              +{formatCurrency(totalIncome)}
             </span>
             <span className="text-sm font-bold text-amber-700">
-              -{totalExpense.toLocaleString()}
+              -{formatCurrency(totalExpense)}
             </span>
           </div>
           <p className="mt-1 text-xs text-[#66839e]">صافي التدفقات المسجلة</p>
@@ -338,10 +339,10 @@ export function DashboardModule({ onNavigate, onOpenQuickEntry }: DashboardProps
             إجمالي المشتريات وقيمة المخزون
           </p>
           <h3 className="mt-1 text-2xl font-extrabold text-[#07152f]">
-            {totalPurchases.toLocaleString()} دج
+            {formatCurrency(totalPurchases)} دج
           </h3>
           <p className="mt-1 text-xs text-[#66839e]">
-            قيمة المواد بالمخزن: {totalInventoryStockValue.toLocaleString()} دج
+            قيمة المواد بالمخزن: {formatCurrency(totalInventoryStockValue)} دج
           </p>
         </div>
 
@@ -362,10 +363,10 @@ export function DashboardModule({ onNavigate, onOpenQuickEntry }: DashboardProps
             الشيكات قيد الانتظار والكراء
           </p>
           <h3 className="mt-1 text-2xl font-extrabold text-[#07152f]">
-            {pendingChequesTotal.toLocaleString()} دج
+            {formatCurrency(pendingChequesTotal)} دج
           </h3>
           <p className="mt-1 text-xs text-amber-700 font-medium">
-            متبقي في الكراء: {remainingRentalTotal.toLocaleString()} دج
+            متبقي في الكراء: {formatCurrency(remainingRentalTotal)} دج
           </p>
         </div>
       </section>
@@ -500,7 +501,7 @@ export function DashboardModule({ onNavigate, onOpenQuickEntry }: DashboardProps
                 </div>
                 <div className="text-left">
                   <strong className="block text-xs font-black text-[#07152f]">
-                    {Number(t.amount).toLocaleString()} دج
+                    {formatCurrency(t.amount)} دج
                   </strong>
                   <span className="text-[10px] text-muted-foreground">{t.date}</span>
                 </div>
@@ -551,7 +552,7 @@ export function DashboardModule({ onNavigate, onOpenQuickEntry }: DashboardProps
                 </div>
                 <div className="text-left">
                   <strong className="block text-xs font-black text-[#07152f]">
-                    {Number(f.amount).toLocaleString()} دج
+                    {formatCurrency(f.amount)} دج
                   </strong>
                   <span className="text-[10px] text-emerald-700 font-bold">✓ متزامن</span>
                 </div>
