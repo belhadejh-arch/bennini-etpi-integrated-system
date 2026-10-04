@@ -1,0 +1,5 @@
+{
+  "name": "Bennini ETPI",
+  "description": "النظام المتكامل لإدارة الأشغال العمومية والصناعية - Bennini ETPI",
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
