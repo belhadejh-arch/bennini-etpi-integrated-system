@@ -1,10 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState, type ComponentType } from "react";
 import {
-  Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip,
-  XAxis, YAxis,
-} from "recharts";
-import {
   Bell, Box, Building2, CalendarDays, Camera, ChevronLeft, CircleDollarSign,
   ClipboardCheck, FileText, HardHat, LayoutDashboard, Menu, Package, Plus,
   Search, Send, Settings, TrendingUp, Truck, WalletCards, X,
@@ -135,7 +131,7 @@ function Dashboard({ onNavigate }: { onNavigate: (id: Section) => void }) {
     </section>
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{kpis.map(({ title, value, change, icon: Icon, tone }) => <article key={title} className="rounded-2xl border border-border bg-card p-5 shadow-card"><div className="flex items-start justify-between"><div className={`grid h-11 w-11 place-items-center rounded-xl ${tone}`}><Icon /></div><span className="text-xs font-semibold text-muted-foreground">{change}</span></div><p className="mt-5 text-sm text-muted-foreground">{title}</p><strong className="mt-1 block text-2xl font-bold">{value}</strong></article>)}</section>
     <section className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_minmax(300px,0.85fr)]">
-      <article className="rounded-2xl border border-border bg-card p-5 shadow-card"><div className="mb-6 flex items-center justify-between"><div><h3 className="font-bold">تحليل التدفقات المالية</h3><p className="text-xs text-muted-foreground">بالآلاف دج — آخر 6 أشهر</p></div><span className="rounded-lg bg-success-soft px-3 py-1 text-xs font-semibold text-success">+18.6%</span></div><div className="h-72" dir="ltr"><ResponsiveContainer width="100%" height="100%"><AreaChart data={cashflow}><defs><linearGradient id="income" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="var(--chart-income)" stopOpacity={0.32}/><stop offset="95%" stopColor="var(--chart-income)" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="4 4" vertical={false} stroke="var(--chart-grid)"/><XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}/><YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--muted-foreground)", fontSize: 12 }}/><Tooltip/><Area type="monotone" dataKey="income" name="المداخيل" stroke="var(--chart-income)" strokeWidth={3} fill="url(#income)"/><Area type="monotone" dataKey="expense" name="المصاريف" stroke="var(--chart-expense)" strokeWidth={2} fill="transparent"/></AreaChart></ResponsiveContainer></div></article>
+      <article className="rounded-2xl border border-border bg-card p-5 shadow-card"><div className="mb-6 flex items-center justify-between"><div><h3 className="font-bold">تحليل التدفقات المالية</h3><p className="text-xs text-muted-foreground">بالآلاف دج — آخر 6 أشهر</p></div><span className="rounded-lg bg-success-soft px-3 py-1 text-xs font-semibold text-success">+18.6%</span></div><CashflowChart /></article>
       <article className="rounded-2xl border border-border bg-card p-5 shadow-card"><div className="mb-5 flex items-center justify-between"><h3 className="font-bold">تنبيهات اليوم</h3><span className="grid h-7 w-7 place-items-center rounded-full bg-brand-yellow text-xs font-bold text-brand-yellow-foreground">3</span></div><div className="space-y-3"><Alert icon={Package} title="مخزون الإسمنت منخفض" text="تبقى 18 كيساً في مخزن البليدة"/><Alert icon={FileText} title="شيك يستحق خلال يومين" text="CH-00979 — بقيمة 720,000 دج"/><Alert icon={Truck} title="عقد كراء ينتهي قريباً" text="رافعة 25 طن — 20 أكتوبر"/></div><Button variant="outline" className="mt-5 w-full" onClick={() => onNavigate("cheques")}>عرض كل التنبيهات <ChevronLeft /></Button></article>
     </section>
     <section className="grid gap-5 lg:grid-cols-3"><Project name="تهيئة الطريق الولائي رقم 14" place="البليدة" progress={68}/><Project name="إنجاز شبكة الصرف الصحي" place="البويرة" progress={42}/><Project name="تهيئة المنطقة الصناعية" place="رويبة" progress={81}/></section>
@@ -143,6 +139,18 @@ function Dashboard({ onNavigate }: { onNavigate: (id: Section) => void }) {
 }
 
 function Alert({ icon: Icon, title, text }: { icon: IconType; title: string; text: string }) { return <div className="flex gap-3 rounded-xl bg-muted p-3"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-warning-soft"><Icon className="h-5 w-5 text-warning"/></div><div className="min-w-0"><b className="block truncate text-sm">{title}</b><span className="text-xs text-muted-foreground">{text}</span></div></div>; }
+function CashflowChart() {
+  return <div className="h-72" dir="ltr">
+    <div className="grid h-[238px] grid-cols-6 items-end gap-3 border-b border-border px-2 sm:gap-6">
+      {cashflow.map((item) => <div key={item.month} className="flex h-full items-end justify-center gap-1 sm:gap-2">
+        <div className="w-2 rounded-t-md bg-primary sm:w-4" style={{ height: `${item.income / 52}%` }} title={`المداخيل: ${item.income} ألف دج`} />
+        <div className="w-2 rounded-t-md bg-brand-yellow sm:w-4" style={{ height: `${item.expense / 52}%` }} title={`المصاريف: ${item.expense} ألف دج`} />
+      </div>)}
+    </div>
+    <div className="grid grid-cols-6 px-2 pt-2 text-center text-[10px] text-muted-foreground sm:text-xs">{cashflow.map((item) => <span key={item.month}>{item.month}</span>)}</div>
+    <div className="mt-3 flex justify-center gap-5 text-xs"><span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-primary"/>المداخيل</span><span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm bg-brand-yellow"/>المصاريف</span></div>
+  </div>;
+}
 function Project({ name, place, progress }: { name: string; place: string; progress: number }) { return <article className="rounded-2xl border border-border bg-card p-5 shadow-card"><div className="flex items-start justify-between"><div className="grid h-10 w-10 place-items-center rounded-xl bg-primary-soft"><Building2 className="text-primary"/></div><span className="rounded-full bg-success-soft px-2.5 py-1 text-xs font-semibold text-success">قيد الإنجاز</span></div><h3 className="mt-4 font-bold">{name}</h3><p className="text-sm text-muted-foreground">{place}</p><div className="mt-5 h-2 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }}/></div><div className="mt-2 flex justify-between text-xs"><span className="text-muted-foreground">نسبة التقدم</span><b>{progress}%</b></div></article>; }
 
 function ModulePage({ section, search, setSearch, onAdd }: { section: Exclude<Section,"dashboard"|"field">; search: string; setSearch: (v:string)=>void; onAdd:()=>void }) {
