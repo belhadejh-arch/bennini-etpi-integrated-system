@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: bennini-etpi-api
+    runtime: node
+    buildCommand: npm ci
+    startCommand: npm run start:api
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: FIREBASE_DATABASE_ID
+        value: ai-studio-benninietpiinteg-20e1b3b8-f183-47b0-9a52-a1af769eb6ab
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: FRONTEND_ORIGINS
+        sync: false

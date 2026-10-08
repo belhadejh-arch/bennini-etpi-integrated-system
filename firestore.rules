@@ -10,6 +10,10 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.role == 'admin';
+    }
+
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
@@ -66,8 +70,15 @@ service cloud.firestore {
 
     // User Profiles Collection
     match /userProfiles/{userId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+      allow read: if isAdmin() || isOwner(userId);
+      allow create: if isAdmin() || (
+        isOwner(userId) &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.accountCategory in ['staff', 'worker'] &&
+        request.resource.data.canManageUsers == false &&
+        request.resource.data.canDeleteRecords == false
+      );
+      allow update, delete: if isAdmin();
     }
 
     // Notifications Collection

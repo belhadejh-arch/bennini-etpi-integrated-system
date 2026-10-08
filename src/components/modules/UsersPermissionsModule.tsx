@@ -7,7 +7,7 @@ import { db, handleFirestoreError, OperationType } from "@/lib/firebase";
 import { useAuth, type UserProfile, type UserPermissions } from "@/context/AuthContext";
 
 export function UsersPermissionsModule() {
-  const { profile, recordAuditLog, hasPermission } = useAuth();
+  const { isAdmin, recordAuditLog } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
@@ -62,6 +62,7 @@ export function UsersPermissionsModule() {
         name: newName,
         email: newEmail,
         role: newRole,
+        accountCategory: "staff",
         canViewFinance: newRole === "محاسب" || newRole.includes("مدير"),
         canEditFinance: newRole === "محاسب" || newRole.includes("مدير"),
         canViewInventory: true,
@@ -93,7 +94,7 @@ export function UsersPermissionsModule() {
     }
   };
 
-  const isMainAdmin = profile?.role.includes("المدير");
+  const isMainAdmin = isAdmin;
 
   return (
     <div className="space-y-6">

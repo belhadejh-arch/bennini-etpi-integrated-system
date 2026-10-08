@@ -20,7 +20,7 @@ interface DedicatedPortalsHubModalProps {
 }
 
 export function DedicatedPortalsHubModal({ isOpen, onClose }: DedicatedPortalsHubModalProps) {
-  const { currentPortal, switchPortal, getPortalUrl, loginAsRole } = useAuth();
+  const { currentPortal, switchPortal, getPortalUrl } = useAuth();
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -206,35 +206,16 @@ export function DedicatedPortalsHubModal({ isOpen, onClose }: DedicatedPortalsHu
                   <div className="text-[10px] text-muted-foreground bg-slate-50 p-2 rounded-lg">
                     {p.notice}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        switchPortal(p.targetPortal);
-                        onClose();
-                      }}
-                      className="w-full bg-[#083c7a] hover:bg-[#05326f] text-white text-xs font-bold"
-                    >
-                      <ExternalLink className="h-3 w-3 ml-1" /> فتح البوابة
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        await loginAsRole(
-                          p.targetPortal === "manager"
-                            ? "manager"
-                            : p.targetPortal === "staff"
-                              ? "staff"
-                              : "worker",
-                        );
-                        onClose();
-                      }}
-                      className="w-full border-[#083c7a] text-[#083c7a] hover:bg-blue-50 text-xs font-bold"
-                    >
-                      تجربة الدخول
-                    </Button>
-                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      switchPortal(p.targetPortal);
+                      onClose();
+                    }}
+                    className="w-full bg-[#083c7a] hover:bg-[#05326f] text-white text-xs font-bold"
+                  >
+                    <ExternalLink className="h-3 w-3 ml-1" /> فتح البوابة
+                  </Button>
                 </div>
               </div>
             );

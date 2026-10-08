@@ -86,6 +86,44 @@ Prefer working locally? You need Node.js and npm — [install with nvm](https://
 ```sh
 git clone <this-repository-url>
 cd <repository-name>
-npm i
+npm ci
 npm run dev
 ```
+
+## النشر على Vercel وRender
+
+تُستضاف واجهة TanStack Start على Vercel، وتُستضاف خدمة API الموثوقة على Render. تبقى بيانات التطبيق في قاعدة Cloud Firestore الحالية؛ لا يُنشأ أو يُنقل أي مخطط PostgreSQL. خدمة Render الحالية مخصصة للتحقق من حساب المدير ومنحه الصلاحية، بينما تتصل وحدات التطبيق الحالية بـFirestore مباشرة من المتصفح. نقل عمليات البيانات كلها إلى Render يحتاج عملاً منفصلاً.
+
+### Vercel — الواجهة
+
+1. استورد المستودع إلى Vercel واختر إعداد `TanStack Start` (المحدد أيضاً في `vercel.json`).
+2. أمر البناء: `npm run build:vercel`. أمر التثبيت: `npm ci`.
+3. بعد إنشاء خدمة Render، أضف متغير البيئة `VITE_API_BASE_URL` بقيمة عنوان Render الأساسي، مثل `https://your-render-api.onrender.com`، ثم أعد النشر.
+4. أضف نطاق Vercel إلى النطاقات المصرح بها في Firebase Authentication، وفعّل Google كمزوّد تسجيل دخول.
+
+### Render — API
+
+1. أنشئ Web Service من هذا المستودع باستخدام مخطط `render.yaml`.
+2. أمر البناء: `npm ci`. أمر التشغيل: `npm run start:api`. فحص الصحة: `/health`.
+3. أضف المتغيرات التالية من لوحة Render:
+   - `FIREBASE_SERVICE_ACCOUNT_JSON`: JSON حساب خدمة Firebase للمشروع نفسه. احفظه كمتغير سري في Render فقط ولا تضعه في المستودع أو Vercel.
+   - `ADMIN_EMAIL`: البريد الموثّق الذي تريد منحه دور المدير.
+   - `FRONTEND_ORIGINS`: نطاق واجهة Vercel الدقيق، بلا مسار؛ يمكن إضافة نطاقات مفصولة بفواصل.
+   - `FIREBASE_DATABASE_ID`: معرف قاعدة Firestore ذات الاسم المخصص. قيمة قاعدة المشروع موجودة في `firebase-applet-config.json` ومعبأة في `render.yaml`.
+4. في Firebase Console، فعّل تسجيل الدخول عبر Google وأضف نطاق Vercel إلى Authorized domains. انشر محتوى `firestore.rules` على قاعدة Firestore ذات المعرف أعلاه.
+5. سجّل الدخول في الواجهة بحساب Google الذي يطابق `ADMIN_EMAIL`. عند أول تسجيل دخول موثّق، يمنحه Render مطالبة `role=admin` ويُنشئ ملفه في `userProfiles`. سجّل الخروج ثم الدخول مجدداً إذا لم يظهر الدور مباشرة.
+
+### التشغيل محلياً
+
+```sh
+npm ci
+npm run dev
+```
+
+لتجربة API محلياً، شغّل في نافذة طرفية ثانية:
+
+```sh
+npm run dev:api
+```
+
+وعرّف `VITE_API_BASE_URL`, `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_DATABASE_ID`, `ADMIN_EMAIL`, و`FRONTEND_ORIGINS` في بيئة التطوير المناسبة. لا تضع بيانات حساب الخدمة في `.env` مرفوع إلى Git.

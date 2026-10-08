@@ -3,7 +3,6 @@ import {
   Lock,
   LogIn,
   ShieldAlert,
-  CheckCircle2,
   UserCheck,
   Smartphone,
   Shield,
@@ -16,12 +15,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BenniniLogo } from "@/components/BenniniLogo";
-import {
-  useAuth,
-  type PortalType,
-  type AccountCategory,
-  PRESET_ACCOUNTS,
-} from "@/context/AuthContext";
+import { useAuth, type PortalType } from "@/context/AuthContext";
 import { DedicatedPortalsHubModal } from "@/components/modules/DedicatedPortalsHubModal";
 
 interface PortalProps {
@@ -38,7 +32,6 @@ export function IndependentLoginPortal({ onSuccessLogin, initialPortal }: Portal
     currentPortal,
     switchPortal,
     getPortalUrl,
-    loginAsRole,
   } = useAuth();
   const [loggingIn, setLoggingIn] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -58,16 +51,6 @@ export function IndependentLoginPortal({ onSuccessLogin, initialPortal }: Portal
     }
   };
 
-  const handleDirectRoleLogin = async (category: AccountCategory) => {
-    setLoggingIn(true);
-    try {
-      await loginAsRole(category);
-      onSuccessLogin();
-    } finally {
-      setLoggingIn(false);
-    }
-  };
-
   const portalDetails = {
     manager: {
       badge: "بوابة دخول الإدارة والمدير العام 👑",
@@ -75,8 +58,6 @@ export function IndependentLoginPortal({ onSuccessLogin, initialPortal }: Portal
       desc: "تحكم شامل في جميع العمليات المالية، الخزينة، الأرباح، الشيكات، إدارة الصلاحيات، وسجل العمليات الرقابي.",
       icon: Shield,
       accentColor: "border-[#f5b41e] bg-amber-500/10 text-[#f5b41e]",
-      presetAccount: PRESET_ACCOUNTS.manager,
-      category: "manager" as const,
     },
     staff: {
       badge: "بوابة دخول الموظفين والمستخدمين 💼",
@@ -84,8 +65,6 @@ export function IndependentLoginPortal({ onSuccessLogin, initialPortal }: Portal
       desc: "خاص بالمحاسبين وأمناء المخازن ومسؤولي العتاد لإدارة المشتريات والمخزون وحركات السلع وفق الصلاحيات الممنوحة.",
       icon: Briefcase,
       accentColor: "border-[#7fa9c7] bg-blue-500/10 text-[#0555a8]",
-      presetAccount: PRESET_ACCOUNTS.staff,
-      category: "staff" as const,
     },
     field: {
       badge: "بوابة دخول رؤساء الأشغال والعمال 📱",
@@ -93,8 +72,6 @@ export function IndependentLoginPortal({ onSuccessLogin, initialPortal }: Portal
       desc: "واجهة سريعة للهاتف لتسجيل مصاريف المازوت والوقود، قطع الغيار، ومشتريات الورشة مع تصوير الفواتير ومتابعة المهام.",
       icon: HardHat,
       accentColor: "border-[#f5b41e] bg-[#f5b41e]/15 text-[#f5b41e]",
-      presetAccount: PRESET_ACCOUNTS.worker,
-      category: "worker" as const,
     },
   }[activePortal];
 
@@ -246,19 +223,6 @@ export function IndependentLoginPortal({ onSuccessLogin, initialPortal }: Portal
           </div>
         ) : (
           <div className="mt-6 space-y-3">
-            {/* Quick entry for the role */}
-            <Button
-              onClick={() => handleDirectRoleLogin(portalDetails.category)}
-              disabled={loggingIn}
-              className="w-full h-12 bg-[#083c7a] hover:bg-[#05326f] text-white font-black text-sm shadow-md gap-2"
-            >
-              <LogIn className="h-4 w-4 text-[#f5b41e]" />
-              {loggingIn
-                ? "جاري الدخول..."
-                : `الدخول الفوري كـ ${portalDetails.presetAccount.name}`}
-            </Button>
-
-            {/* Google Login Option */}
             <Button
               variant="outline"
               onClick={handleSignInGoogle}
@@ -266,7 +230,7 @@ export function IndependentLoginPortal({ onSuccessLogin, initialPortal }: Portal
               className="w-full h-11 border-slate-300 text-slate-700 hover:bg-slate-50 font-bold text-xs gap-2"
             >
               <UserCheck className="h-4 w-4 text-[#083c7a]" />
-              تسجيل الدخول بحساب Google معتمد
+              {loggingIn ? "جارٍ تسجيل الدخول..." : "تسجيل الدخول بحساب Google"}
             </Button>
 
             <div className="rounded-xl border border-dashed border-slate-200 p-3 text-xs text-muted-foreground flex items-center gap-2 text-right bg-slate-50/50">

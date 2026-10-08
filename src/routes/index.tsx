@@ -43,7 +43,7 @@ import { AuditLogModule } from "@/components/modules/AuditLogModule";
 import { FieldMobilePortal } from "@/components/modules/FieldMobilePortal";
 import { IndependentLoginPortal } from "@/components/modules/IndependentLoginPortal";
 import { DedicatedPortalsHubModal } from "@/components/modules/DedicatedPortalsHubModal";
-import { useAuth, type PortalType, type AccountCategory } from "@/context/AuthContext";
+import { useAuth, type PortalType } from "@/context/AuthContext";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -82,12 +82,13 @@ function IndexPage() {
   const {
     currentUser,
     profile,
+    isAdmin,
+    loading,
     logout,
     hasPermission,
     currentPortal,
     switchPortal,
     getPortalUrl,
-    loginAsRole,
   } = useAuth();
 
   const [section, setSection] = useState<Section>("dashboard");
@@ -112,10 +113,7 @@ function IndexPage() {
     }
   }, [currentPortal]);
 
-  const isMainAdmin =
-    profile?.accountCategory === "manager" ||
-    profile?.role.includes("المدير") ||
-    profile?.email === "mohamedharoun329@gmail.com";
+  const isMainAdmin = isAdmin;
 
   const isStaff = profile?.accountCategory === "staff";
   const isWorker = profile?.accountCategory === "worker";
@@ -210,7 +208,15 @@ function IndexPage() {
     setTimeout(() => setCopiedLink(null), 3000);
   };
 
-  if (showIndependentLogin) {
+  if (loading) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#07152f] text-white" dir="rtl">
+        <div className="text-sm font-bold">جارٍ التحقق من الحساب…</div>
+      </div>
+    );
+  }
+
+  if (showIndependentLogin || !currentUser || !profile) {
     return (
       <IndependentLoginPortal
         onSuccessLogin={() => {
@@ -601,14 +607,14 @@ function IndexPage() {
                     isMainAdmin ? "bg-[#083c7a]" : isStaff ? "bg-[#0555a8]" : "bg-emerald-700"
                   }`}
                 >
-                  {profile?.name ? profile.name.slice(0, 2) : "م ب"}
+                  {profile?.name ? profile.name.slice(0, 2) : "م"}
                 </div>
                 <div className="hidden md:block">
                   <div className="text-xs font-extrabold text-[#07152f]">
-                    {profile?.name || "محمد بنيني"}
+                    {profile?.name || "مستخدم"}
                   </div>
                   <div className="text-[10px] text-muted-foreground">
-                    {profile?.role || "المدير العام"}
+                    {profile?.role || "مستخدم"}
                   </div>
                 </div>
                 <ChevronDown className="h-3.5 w-3.5 text-muted-foreground hidden sm:block" />
@@ -625,62 +631,26 @@ function IndexPage() {
                   </div>
 
                   <div className="text-[10px] text-muted-foreground font-bold px-2 pt-1">
-                    تبديل الحساب التجريبي:
+                    الانتقال إلى بوابة:
                   </div>
 
-                  <button
-                    onClick={async () => {
-                      await loginAsRole("manager");
-                      setUserMenuOpen(false);
-                      setSection("dashboard");
-                    }}
-                    className={`w-full flex items-center justify-between p-2 rounded-lg text-xs ${
-                      isMainAdmin
-                        ? "bg-amber-50 text-amber-900 font-black"
-                        : "hover:bg-slate-50 text-slate-700"
-                    }`}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <Shield className="h-3.5 w-3.5 text-[#f5b41e]" /> حساب المدير العام
-                    </span>
-                    {isMainAdmin && <span className="text-[10px]">✓ نشط</span>}
-                  </button>
-
-                  <button
-                    onClick={async () => {
-                      await loginAsRole("staff");
-                      setUserMenuOpen(false);
-                      setSection("inventory");
-                    }}
-                    className={`w-full flex items-center justify-between p-2 rounded-lg text-xs ${
-                      isStaff
-                        ? "bg-blue-50 text-blue-900 font-black"
-                        : "hover:bg-slate-50 text-slate-700"
-                    }`}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <Briefcase className="h-3.5 w-3.5 text-[#0555a8]" /> حساب موظف (محاسب/مخزن)
-                    </span>
-                    {isStaff && <span className="text-[10px]">✓ نشط</span>}
-                  </button>
-
-                  <button
-                    onClick={async () => {
-                      await loginAsRole("worker");
-                      setUserMenuOpen(false);
-                      setSection("field");
-                    }}
-                    className={`w-full flex items-center justify-between p-2 rounded-lg text-xs ${
-                      isWorker
-                        ? "bg-emerald-50 text-emerald-900 font-black"
-                        : "hover:bg-slate-50 text-slate-700"
-                    }`}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <HardHat className="h-3.5 w-3.5 text-emerald-600" /> حساب رئيس أشغال (ميداني)
-                    </span>
-                    {isWorker && <span className="text-[10px]">✓ نشط</span>}
-                  </button>
+                  {(["manager", "staff", "field"] as const).map((portal) => (
+                    <button
+                      key={portal}
+                      onClick={() => {
+                        switchPortal(portal);
+                        setUserMenuOpen(false);
+                        setSection(portal === "field" ? "field" : "dashboard");
+                      }}
+                      className="w-full rounded-lg p-2 text-right text-xs text-slate-700 hover:bg-slate-50"
+                    >
+                      {portal === "manager"
+                        ? "الإدارة"
+                        : portal === "staff"
+                          ? "الموظفون"
+                          : "الميدان والورشة"}
+                    </button>
+                  ))}
 
                   <div className="border-t border-border pt-1">
                     <button

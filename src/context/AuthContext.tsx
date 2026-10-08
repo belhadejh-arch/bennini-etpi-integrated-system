@@ -92,45 +92,14 @@ const DEFAULT_WORKER_PERMISSIONS: UserPermissions = {
   canUploadFiles: true,
 };
 
-export const PRESET_ACCOUNTS = {
-  manager: {
-    uid: "manager_bennini_main",
-    name: "محمد هارون بن نيني (المدير العام)",
-    email: "mohamedharoun329@gmail.com",
-    role: "المدير العام / الإدارة العليا",
-    accountCategory: "manager" as const,
-    siteAssigned: "المقر الرئيسي - الإدارة المركزية",
-    permissions: DEFAULT_ADMIN_PERMISSIONS,
-  },
-  staff: {
-    uid: "staff_yassine_ops",
-    name: "ياسين بن عمارة (موظف إداري)",
-    email: "staff.yassine@bennini-etpi.dz",
-    role: "موظف إداري / محاسب وأمين مخزن",
-    accountCategory: "staff" as const,
-    siteAssigned: "مكتب الإدارة والمخزن المركزي",
-    permissions: DEFAULT_STAFF_PERMISSIONS,
-  },
-  worker: {
-    uid: "worker_ahmed_field",
-    name: "أحمد قادري (رئيس أشغال)",
-    email: "worker.ahmed@bennini-etpi.dz",
-    role: "رئيس أشغال ورشة الطريق الولائي 14",
-    accountCategory: "worker" as const,
-    workerCode: "WRK-014",
-    siteAssigned: "ورشة الطريق الولائي رقم 14 - البليدة",
-    permissions: DEFAULT_WORKER_PERMISSIONS,
-  },
-};
-
 interface AuthContextType {
   currentUser: User | null;
   profile: UserProfile | null;
+  isAdmin: boolean;
   loading: boolean;
   currentPortal: PortalType;
   switchPortal: (portal: PortalType) => void;
   getPortalUrl: (portal: PortalType) => string;
-  loginAsRole: (category: AccountCategory, customName?: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   recordAuditLog: (action: string, section: string, details: string) => Promise<void>;
@@ -155,45 +124,13 @@ function detectPortalFromUrl(): PortalType {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentPortal, setCurrentPortal] = useState<PortalType>("manager");
 
-  // Read URL params on mount
   useEffect(() => {
     const portal = detectPortalFromUrl();
     setCurrentPortal(portal);
-
-    // Default to corresponding role if not logged in
-    const storedRole = localStorage.getItem("bennini_active_role") as AccountCategory | null;
-    if (storedRole && PRESET_ACCOUNTS[storedRole]) {
-      const preset = PRESET_ACCOUNTS[storedRole];
-      setProfile({
-        id: preset.uid,
-        uid: preset.uid,
-        name: preset.name,
-        email: preset.email,
-        role: preset.role,
-        accountCategory: preset.accountCategory,
-        siteAssigned: preset.siteAssigned,
-        workerCode: "workerCode" in preset ? preset.workerCode : undefined,
-        createdAt: new Date().toISOString(),
-        ...preset.permissions,
-      });
-    } else {
-      // Default to manager for full access initially
-      const preset = PRESET_ACCOUNTS.manager;
-      setProfile({
-        id: preset.uid,
-        uid: preset.uid,
-        name: preset.name,
-        email: preset.email,
-        role: preset.role,
-        accountCategory: preset.accountCategory,
-        siteAssigned: preset.siteAssigned,
-        createdAt: new Date().toISOString(),
-        ...preset.permissions,
-      });
-    }
 
     const handlePopState = () => {
       setCurrentPortal(detectPortalFromUrl());
@@ -205,49 +142,94 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
-      if (user) {
-        try {
-          const userDocRef = doc(db, "userProfiles", user.uid);
-          const userSnap = await getDoc(userDocRef);
+      setProfile(null);
+      setIsAdmin(false);
 
-          const isMainAdmin =
-            user.email === "mohamedharoun329@gmail.com" ||
-            user.email?.toLowerCase().includes("bennini");
-
-          if (userSnap.exists()) {
-            const data = userSnap.data() as UserProfile;
-            if (isMainAdmin) {
-              setProfile({
-                ...data,
-                ...DEFAULT_ADMIN_PERMISSIONS,
-                accountCategory: "manager",
-                role: "المدير العام / المدير",
-              });
-            } else {
-              setProfile(data);
-            }
-          } else {
-            // First time registration
-            const accountCategory: AccountCategory = isMainAdmin ? "manager" : "staff";
-            const newProfile: UserProfile = {
-              id: user.uid,
-              uid: user.uid,
-              name: user.displayName || user.email?.split("@")[0] || "مستخدم جديد",
-              email: user.email || "",
-              role: isMainAdmin ? "المدير العام / المدير" : "موظف / رئيس أشغال",
-              accountCategory,
-              ...(isMainAdmin ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS),
-              createdAt: new Date().toISOString(),
-            };
-
-            await setDoc(userDocRef, newProfile);
-            setProfile(newProfile);
-          }
-        } catch (error) {
-          console.error("Error fetching user profile:", error);
-        }
+      if (!user) {
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      setLoading(true);
+      try {
+        let tokenResult = await user.getIdTokenResult();
+        const apiBaseUrl = import.meta.env["VITE_API_BASE_URL"]?.trim();
+
+        if (apiBaseUrl) {
+          try {
+            const response = await fetch(`${apiBaseUrl.replace(/\/+$/, "")}/api/admin/bootstrap`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${await user.getIdToken()}`,
+                "Content-Type": "application/json",
+              },
+              body: "{}",
+            });
+            if (!response.ok) {
+              throw new Error(`Admin bootstrap failed (${response.status})`);
+            }
+            await response.json();
+            await user.getIdToken(true);
+            tokenResult = await user.getIdTokenResult();
+          } catch (error) {
+            const isUnauthorized = error instanceof Error && error.message.includes("(403)");
+            if (!isUnauthorized) {
+              console.error("Could not verify the administrator role with the Render API:", error);
+            }
+            if (isUnauthorized) {
+              await user.getIdToken(true);
+              tokenResult = await user.getIdTokenResult();
+            }
+          }
+        }
+
+        const hasAdminClaim = tokenResult.claims["role"] === "admin";
+        setIsAdmin(hasAdminClaim);
+
+        const userDocRef = doc(db, "userProfiles", user.uid);
+        const userSnap = await getDoc(userDocRef);
+        let userProfile: UserProfile;
+
+        if (userSnap.exists()) {
+          const data = userSnap.data() as UserProfile;
+          const accountCategory: AccountCategory = hasAdminClaim
+            ? "manager"
+            : data.accountCategory === "worker"
+              ? "worker"
+              : "staff";
+          userProfile = {
+            ...data,
+            id: user.uid,
+            uid: user.uid,
+            name: user.displayName || data.name || user.email?.split("@")[0] || "مستخدم",
+            email: user.email || data.email || "",
+            accountCategory,
+            role: hasAdminClaim
+              ? "المدير العام / المدير"
+              : accountCategory === "worker"
+                ? "رئيس أشغال"
+                : "موظف / رئيس أشغال",
+            ...(hasAdminClaim ? DEFAULT_ADMIN_PERMISSIONS : {}),
+          };
+        } else {
+          userProfile = {
+            id: user.uid,
+            uid: user.uid,
+            name: user.displayName || user.email?.split("@")[0] || "مستخدم",
+            email: user.email || "",
+            role: hasAdminClaim ? "المدير العام / المدير" : "موظف / رئيس أشغال",
+            accountCategory: hasAdminClaim ? "manager" : "staff",
+            ...(hasAdminClaim ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_STAFF_PERMISSIONS),
+            createdAt: new Date().toISOString(),
+          };
+          await setDoc(userDocRef, userProfile);
+        }
+        setProfile(userProfile);
+      } catch (error) {
+        console.error("Error loading the signed-in user's profile:", error);
+      } finally {
+        setLoading(false);
+      }
     });
 
     return () => unsubscribe();
@@ -267,46 +249,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return `${window.location.origin}/?portal=${portal}`;
   };
 
-  const loginAsRole = async (category: AccountCategory, customName?: string) => {
-    const preset = PRESET_ACCOUNTS[category];
-    const newProfile: UserProfile = {
-      id: preset.uid,
-      uid: preset.uid,
-      name: customName || preset.name,
-      email: preset.email,
-      role: preset.role,
-      accountCategory: preset.accountCategory,
-      siteAssigned: preset.siteAssigned,
-      workerCode: "workerCode" in preset ? preset.workerCode : undefined,
-      createdAt: new Date().toISOString(),
-      ...preset.permissions,
-    };
-
-    localStorage.setItem("bennini_active_role", category);
-    setProfile(newProfile);
-
-    // Switch to corresponding portal
-    if (category === "worker") {
-      switchPortal("field");
-    } else if (category === "staff") {
-      switchPortal("staff");
-    } else {
-      switchPortal("manager");
-    }
-
-    try {
-      // Sync to Firestore userProfiles
-      await setDoc(doc(db, "userProfiles", preset.uid), newProfile);
-      await recordAuditLog(
-        "تسجيل دخول بالدور",
-        "الأمان والمصادقة",
-        `دخول ${newProfile.name} بدور ${newProfile.role} عبر البوابة المخصصة`,
-      );
-    } catch (e) {
-      console.warn("Could not sync role to Firestore:", e);
-    }
-  };
-
   const signInWithGoogle = async () => {
     try {
       const provider = new GoogleAuthProvider();
@@ -317,11 +259,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    localStorage.removeItem("bennini_active_role");
     await firebaseSignOut(auth);
-    // Reset to worker or staff portal if currently logged out
-    const preset = PRESET_ACCOUNTS.manager;
     setProfile(null);
+    setIsAdmin(false);
   };
 
   const recordAuditLog = async (action: string, section: string, details: string) => {
@@ -341,13 +281,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const hasPermission = (permKey: keyof UserPermissions): boolean => {
     if (!profile) return false;
-    if (
-      profile.accountCategory === "manager" ||
-      profile.role.includes("المدير العام") ||
-      profile.role.includes("المدير")
-    ) {
-      return true;
-    }
+    if (isAdmin) return true;
     return Boolean(profile[permKey]);
   };
 
@@ -356,11 +290,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         currentUser,
         profile,
+        isAdmin,
         loading,
         currentPortal,
         switchPortal,
         getPortalUrl,
-        loginAsRole,
         signInWithGoogle,
         logout,
         recordAuditLog,
