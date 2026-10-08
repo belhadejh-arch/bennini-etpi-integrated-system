@@ -20,7 +20,7 @@ class MainViewModel : ViewModel() {
     private val _transactions = MutableStateFlow(
         listOf(
             Transaction("tx-1", "دخل", 3500000.0, "شركة سوناطراك", "دفعة مشروع الأشغال العمومية", "2026-10-01", "تحويل بنكي", 12840000.0, "تم التحويل بنجاح", "محمد بنيني", true),
-            Transaction("tx-2", "مصروف", 450000.0, "مؤسسة التجهيز", "شراء عتاد وصيانة", "2026-10-03", "شك", 9340000.0, "صيانة دورية للرافعة", "عبد القادر محاسب", true),
+            Transaction("tx-2", "مصروف", 450000.0, "مؤسسة التجهيز", "شراء عتاد وصيانة", "2026-10-03", "شيك", 9340000.0, "صيانة دورية للرافعة", "عبد القادر محاسب", true),
             Transaction("tx-3", "دخل", 1800000.0, "مديرية الأشغال العمومية", "مستحقات شطر أول", "2026-10-05", "نقداً", 11140000.0, "استلام نقدي بالصندوق", "محمد بنيني", false)
         )
     )
@@ -28,9 +28,54 @@ class MainViewModel : ViewModel() {
 
     private val _inventory = MutableStateFlow(
         listOf(
-            InventoryItem("inv-1", "حديد تسليح Ø16", 120, 14500.0, 1740000.0, 85),
-            InventoryItem("inv-2", "أسمنت برتلاندي CEM II", 500, 950.0, 475000.0, 210),
-            InventoryItem("inv-3", "أنابيب صرف صحي PVC 400مم", 45, 28000.0, 1260000.0, 30)
+            InventoryItem(
+                id = "inv-1",
+                name = "حديد تسليح Ø16",
+                quantity = 100,
+                buyPrice = 500.0,
+                totalCost = 50000.0,
+                sellPrice = 700.0,
+                expectedProfit = 20000.0,
+                realizedProfit = 12000.0,
+                remainingQuantity = 60,
+                supplier = "مؤسسة الحديد والصلب الجزائري",
+                invoiceNumber = "INV-2026-001",
+                purchaseDate = "2026-10-02",
+                notes = "حديد عالي الجودة للمشروع الرئيسي",
+                hasDocument = true
+            ),
+            InventoryItem(
+                id = "inv-2",
+                name = "أسمنت برتلاندي CEM II",
+                quantity = 500,
+                buyPrice = 950.0,
+                totalCost = 475000.0,
+                sellPrice = 1200.0,
+                expectedProfit = 125000.0,
+                realizedProfit = 75000.5,
+                remainingQuantity = 210,
+                supplier = "مصنع الأسمنت رويبة",
+                invoiceNumber = "INV-2026-002",
+                purchaseDate = "2026-10-04",
+                notes = "أكياس أسمنت مقاوم للرطوبة",
+                hasDocument = true
+            ),
+            InventoryItem(
+                id = "inv-3",
+                name = "أنابيب صرف صحي PVC 400مم",
+                quantity = 50,
+                buyPrice = 28000.0,
+                totalCost = 1400000.0,
+                sellPrice = 35000.0,
+                expectedProfit = 350000.0,
+                realizedProfit = 210000.0,
+                remainingQuantity = 20,
+                supplier = "شركة البلاستيك والصناعة",
+                invoiceNumber = "INV-2026-003",
+                purchaseDate = "2026-10-06",
+                notes = "أنابيب لشبكة الصرف الصحي الكبرى",
+                hasDocument = false
+            )
         )
     )
     val inventory: StateFlow<List<InventoryItem>> = _inventory.asStateFlow()
@@ -150,6 +195,42 @@ class MainViewModel : ViewModel() {
         }
     }
 
+    fun addInventoryItem(
+        name: String,
+        quantity: Int,
+        buyPrice: Double,
+        sellPrice: Double,
+        supplier: String,
+        invoiceNumber: String,
+        notes: String,
+        hasDocument: Boolean
+    ) {
+        val totalCost = quantity * buyPrice
+        val expectedSales = quantity * sellPrice
+        val expectedProfit = expectedSales - totalCost
+        val newItem = InventoryItem(
+            id = "inv-${System.currentTimeMillis()}",
+            name = name,
+            quantity = quantity,
+            buyPrice = buyPrice,
+            totalCost = totalCost,
+            sellPrice = sellPrice,
+            expectedProfit = expectedProfit,
+            realizedProfit = 0.0,
+            remainingQuantity = quantity,
+            supplier = supplier,
+            invoiceNumber = invoiceNumber.ifBlank { "INV-${System.currentTimeMillis().toString().takeLast(4)}" },
+            purchaseDate = "2026-10-08",
+            notes = notes,
+            hasDocument = hasDocument
+        )
+        _inventory.update { listOf(newItem) + it }
+    }
+
+    fun deleteInventoryItem(id: String) {
+        _inventory.update { list -> list.filter { it.id != id } }
+    }
+
     fun addFieldExpense(category: String, amount: Double, siteName: String, details: String, fuelLiters: Double?) {
         val newExp = FieldExpense(
             id = "fld-${System.currentTimeMillis()}",
@@ -162,19 +243,6 @@ class MainViewModel : ViewModel() {
             fuelLiters = fuelLiters
         )
         _fieldExpenses.update { listOf(newExp) + it }
-    }
-
-    fun addInventoryItem(name: String, quantity: Int, buyPrice: Double) {
-        val total = quantity * buyPrice
-        val newItem = InventoryItem(
-            id = "inv-${System.currentTimeMillis()}",
-            name = name,
-            quantity = quantity,
-            buyPrice = buyPrice,
-            totalCost = total,
-            remainingQuantity = quantity
-        )
-        _inventory.update { listOf(newItem) + it }
     }
 
     fun addCheque(chequeNumber: String, amount: Double, beneficiary: String, dueDate: String) {

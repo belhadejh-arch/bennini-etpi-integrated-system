@@ -16,11 +16,19 @@ data class Transaction(
 
 data class InventoryItem(
     val id: String,
-    val name: String,
-    val quantity: Int,
-    val buyPrice: Double,
-    val totalCost: Double,
-    val remainingQuantity: Int
+    val name: String, // اسم السلعة
+    val quantity: Int, // الكمية الإجمالية المشراة
+    val buyPrice: Double, // سعر الشراء للوحدة
+    val totalCost: Double, // إجمالي التكلفة = الكمية × سعر الشراء
+    val sellPrice: Double, // سعر البيع للوحدة
+    val expectedProfit: Double, // قيمة الربح المتوقعة = (الكمية × سعر البيع) - إجمالي التكلفة
+    val realizedProfit: Double, // الربح المحقق
+    val remainingQuantity: Int, // الكمية المتبقية في المخزون
+    val supplier: String, // المورد
+    val invoiceNumber: String, // رقم الفاتورة
+    val purchaseDate: String, // تاريخ الشراء
+    val notes: String = "", // ملاحظات
+    val hasDocument: Boolean = false // الفاتورة أو الوثيقة المرفقة
 )
 
 data class ChequeItem(
