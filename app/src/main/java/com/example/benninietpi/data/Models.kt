@@ -33,19 +33,33 @@ data class InventoryItem(
 
 data class ChequeItem(
     val id: String,
-    val chequeNumber: String,
-    val amount: Double,
-    val beneficiary: String,
-    val dueDate: String,
-    val status: String // "قيد الانتظار", "مدفوع", "ملغي"
+    val chequeNumber: String, // رقم الشيك
+    val invoiceNumber: String, // رقم الفاتورة المرتبطة
+    val amount: Double, // المبلغ
+    val beneficiary: String, // المستفيد
+    val bank: String, // البنك
+    val issueDate: String, // تاريخ الإصدار
+    val dueDate: String, // تاريخ الاستحقاق
+    val status: String, // "قيد الانتظار", "مدفوع", "ملغى"
+    val notes: String = "", // ملاحظات
+    val hasImage: Boolean = true, // صورة الشيك
+    val hasDocument: Boolean = true // الفاتورة أو الوثيقة المرتبطة
 )
 
 data class RentalItem(
     val id: String,
-    val equipment: String,
-    val clientOrOwner: String,
-    val remainingAmount: Double,
-    val status: String // "جاري", "منتهي"
+    val equipment: String, // الشيء المؤجر
+    val clientOrOwner: String, // اسم المستأجر / المؤجر
+    val startDate: String, // تاريخ بداية الكراء
+    val endDate: String, // تاريخ نهاية الكراء
+    val duration: String, // مدة الكراء
+    val rate: String, // السعر اليومي أو الشهري
+    val totalAmount: Double, // المبلغ الإجمالي
+    val paidAmount: Double, // المبلغ المدفوع
+    val remainingAmount: Double, // المبلغ المتبقي
+    val status: String, // "جاري", "منتهي"
+    val notes: String = "", // ملاحظات
+    val hasDocument: Boolean = true // العقد والوثائق المرفقة
 )
 
 data class FieldExpense(

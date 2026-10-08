@@ -59,22 +59,6 @@ class MainViewModel : ViewModel() {
                 purchaseDate = "2026-10-04",
                 notes = "أكياس أسمنت مقاوم للرطوبة",
                 hasDocument = true
-            ),
-            InventoryItem(
-                id = "inv-3",
-                name = "أنابيب صرف صحي PVC 400مم",
-                quantity = 50,
-                buyPrice = 28000.0,
-                totalCost = 1400000.0,
-                sellPrice = 35000.0,
-                expectedProfit = 350000.0,
-                realizedProfit = 210000.0,
-                remainingQuantity = 20,
-                supplier = "شركة البلاستيك والصناعة",
-                invoiceNumber = "INV-2026-003",
-                purchaseDate = "2026-10-06",
-                notes = "أنابيب لشبكة الصرف الصحي الكبرى",
-                hasDocument = false
             )
         )
     )
@@ -82,18 +66,99 @@ class MainViewModel : ViewModel() {
 
     private val _cheques = MutableStateFlow(
         listOf(
-            ChequeItem("chq-1", "CHQ-98214", 850000.0, "مجمع البناء الجزائري", "2026-10-20", "قيد الانتظار"),
-            ChequeItem("chq-2", "CHQ-98215", 1200000.0, "شركة الآليات الكبرى", "2026-10-15", "قيد الانتظار"),
-            ChequeItem("chq-3", "CHQ-98210", 430000.0, "مجموعة النقل السريع", "2026-09-28", "مدفوع")
+            ChequeItem(
+                id = "chq-1",
+                chequeNumber = "CHQ-98214",
+                invoiceNumber = "INV-2026-101",
+                amount = 850000.0,
+                beneficiary = "مجمع البناء الجزائري",
+                bank = "بنك الجزائر الخارجي (BAE)",
+                issueDate = "2026-09-20",
+                dueDate = "2026-10-12", // approaching due date
+                status = "قيد الانتظار",
+                notes = "شيك ضمان المشروع الأول",
+                hasImage = true,
+                hasDocument = true
+            ),
+            ChequeItem(
+                id = "chq-2",
+                chequeNumber = "CHQ-98215",
+                invoiceNumber = "INV-2026-102",
+                amount = 1200000.0,
+                beneficiary = "شركة الآليات الكبرى",
+                bank = "الوطني الجزائري (BNA)",
+                issueDate = "2026-09-25",
+                dueDate = "2026-10-18",
+                status = "قيد الانتظار",
+                notes = "دفعة كراء الحفار",
+                hasImage = true,
+                hasDocument = true
+            ),
+            ChequeItem(
+                id = "chq-3",
+                chequeNumber = "CHQ-98210",
+                invoiceNumber = "INV-2026-099",
+                amount = 430000.0,
+                beneficiary = "مجموعة النقل السريع",
+                bank = "القرض الشعبي الجزائري (CPA)",
+                issueDate = "2026-09-01",
+                dueDate = "2026-09-28",
+                status = "مدفوع",
+                notes = "تم الصرف بنجاح",
+                hasImage = true,
+                hasDocument = true
+            )
         )
     )
     val cheques: StateFlow<List<ChequeItem>> = _cheques.asStateFlow()
 
     private val _rentals = MutableStateFlow(
         listOf(
-            RentalItem("rnt-1", "رافعة برجية CAT-500", "شركة الأشغال الكبرى", 240000.0, "جاري"),
-            RentalItem("rnt-2", "شاحنة قلاب رينو 6x4", "مؤسسة الطرقات", 0.0, "منتهي"),
-            RentalItem("rnt-3", "حفار هيدروليكي JCB 220", "المقاولات العامة", 150000.0, "جاري")
+            RentalItem(
+                id = "rnt-1",
+                equipment = "رافعة برجية CAT-500",
+                clientOrOwner = "شركة الأشغال الكبرى",
+                startDate = "2026-08-01",
+                endDate = "2026-11-01",
+                duration = "3 أشهر",
+                rate = "80,000 دج / شهرياً",
+                totalAmount = 240000.0,
+                paidAmount = 160000.0,
+                remainingAmount = 80000.0,
+                status = "جاري",
+                notes = "موقع ورشة رويبة الكبرى",
+                hasDocument = true
+            ),
+            RentalItem(
+                id = "rnt-2",
+                equipment = "شاحنة قلاب رينو 6x4",
+                clientOrOwner = "مؤسسة الطرقات الوطنية",
+                startDate = "2026-07-10",
+                endDate = "2026-09-10",
+                duration = "شهرين",
+                rate = "35,000 دج / شهرياً",
+                totalAmount = 70000.0,
+                paidAmount = 70000.0,
+                remainingAmount = 0.0,
+                status = "منتهي",
+                notes = "تم تسليم الشاحنة بحالة ممتازة",
+                hasDocument = true
+            ),
+            RentalItem(
+                id = "rnt-3",
+                equipment = "حفار هيدروليكي JCB 220",
+                clientOrOwner = "المقاولات العامة للصناعة",
+                startDate = "2026-09-01",
+                endDate = "2026-12-01",
+                duration = "3 أشهر",
+                rate = "150,000 دج / شهرياً",
+                totalAmount = 450000.0,
+                paidAmount = 300000.0,
+                remainingAmount = 150000.0,
+                status = "جاري",
+                notes = "أعمال الحفر والتهيئة",
+                hasDocument = true
+            )
         )
     )
     val rentals: StateFlow<List<RentalItem>> = _rentals.asStateFlow()
@@ -231,6 +296,79 @@ class MainViewModel : ViewModel() {
         _inventory.update { list -> list.filter { it.id != id } }
     }
 
+    fun addCheque(
+        chequeNumber: String,
+        invoiceNumber: String,
+        amount: Double,
+        beneficiary: String,
+        bank: String,
+        issueDate: String,
+        dueDate: String,
+        status: String,
+        notes: String
+    ) {
+        val newChq = ChequeItem(
+            id = "chq-${System.currentTimeMillis()}",
+            chequeNumber = chequeNumber,
+            invoiceNumber = invoiceNumber.ifBlank { "INV-000" },
+            amount = amount,
+            beneficiary = beneficiary,
+            bank = bank.ifBlank { "بنك الجزائر الخارجي" },
+            issueDate = issueDate.ifBlank { "2026-10-01" },
+            dueDate = dueDate.ifBlank { "2026-10-25" },
+            status = status,
+            notes = notes,
+            hasImage = true,
+            hasDocument = true
+        )
+        _cheques.update { listOf(newChq) + it }
+    }
+
+    fun deleteCheque(id: String) {
+        _cheques.update { list -> list.filter { it.id != id } }
+    }
+
+    fun updateChequeStatus(id: String, newStatus: String) {
+        _cheques.update { list ->
+            list.map { chq -> if (chq.id == id) chq.copy(status = newStatus) else chq }
+        }
+    }
+
+    fun addRental(
+        equipment: String,
+        clientOrOwner: String,
+        startDate: String,
+        endDate: String,
+        duration: String,
+        rate: String,
+        totalAmount: Double,
+        paidAmount: Double,
+        status: String,
+        notes: String
+    ) {
+        val remaining = totalAmount - paidAmount
+        val newRnt = RentalItem(
+            id = "rnt-${System.currentTimeMillis()}",
+            equipment = equipment,
+            clientOrOwner = clientOrOwner,
+            startDate = startDate.ifBlank { "2026-10-01" },
+            endDate = endDate.ifBlank { "2026-12-01" },
+            duration = duration.ifBlank { "شهر واحد" },
+            rate = rate.ifBlank { "50,000 دج" },
+            totalAmount = totalAmount,
+            paidAmount = paidAmount,
+            remainingAmount = remaining,
+            status = status,
+            notes = notes,
+            hasDocument = true
+        )
+        _rentals.update { listOf(newRnt) + it }
+    }
+
+    fun deleteRental(id: String) {
+        _rentals.update { list -> list.filter { it.id != id } }
+    }
+
     fun addFieldExpense(category: String, amount: Double, siteName: String, details: String, fuelLiters: Double?) {
         val newExp = FieldExpense(
             id = "fld-${System.currentTimeMillis()}",
@@ -243,17 +381,5 @@ class MainViewModel : ViewModel() {
             fuelLiters = fuelLiters
         )
         _fieldExpenses.update { listOf(newExp) + it }
-    }
-
-    fun addCheque(chequeNumber: String, amount: Double, beneficiary: String, dueDate: String) {
-        val newChq = ChequeItem(
-            id = "chq-${System.currentTimeMillis()}",
-            chequeNumber = chequeNumber,
-            amount = amount,
-            beneficiary = beneficiary,
-            dueDate = dueDate,
-            status = "قيد الانتظار"
-        )
-        _cheques.update { listOf(newChq) + it }
     }
 }
