@@ -4,11 +4,14 @@ data class Transaction(
     val id: String,
     val type: String, // "دخل" or "مصروف"
     val amount: Double,
-    val party: String,
-    val reason: String,
-    val date: String,
-    val paymentMethod: String,
-    val balanceAfter: Double
+    val party: String, // مصدر المبلغ أو الجهة المستفيدة
+    val reason: String, // سبب العملية
+    val date: String, // التاريخ
+    val paymentMethod: String, // "نقداً", "شيك", "تحويل بنكي"
+    val balanceAfter: Double, // المبلغ المتبقي في الصندوق
+    val notes: String = "", // ملاحظات
+    val recordedBy: String = "محمد بنيني", // المستخدم الذي سجل العملية
+    val hasDocument: Boolean = false // إرفاق فاتورة أو وصل أو وثيقة
 )
 
 data class InventoryItem(

@@ -19,9 +19,9 @@ class MainViewModel : ViewModel() {
 
     private val _transactions = MutableStateFlow(
         listOf(
-            Transaction("tx-1", "دخل", 3500000.0, "شركة سوناطراك", "دفعة مشروع الأشغال العمومية", "2026-10-01", "تحويل بنكي", 12840000.0),
-            Transaction("tx-2", "مصروف", 450000.0, "مؤسسة التجهيز", "شراء عتاد وصيانة", "2026-10-03", "صك", 9340000.0),
-            Transaction("tx-3", "دخل", 1800000.0, "مديرية الأشغال العمومية", "مستحقات شطر أول", "2026-10-05", "صك", 11140000.0)
+            Transaction("tx-1", "دخل", 3500000.0, "شركة سوناطراك", "دفعة مشروع الأشغال العمومية", "2026-10-01", "تحويل بنكي", 12840000.0, "تم التحويل بنجاح", "محمد بنيني", true),
+            Transaction("tx-2", "مصروف", 450000.0, "مؤسسة التجهيز", "شراء عتاد وصيانة", "2026-10-03", "شك", 9340000.0, "صيانة دورية للرافعة", "عبد القادر محاسب", true),
+            Transaction("tx-3", "دخل", 1800000.0, "مديرية الأشغال العمومية", "مستحقات شطر أول", "2026-10-05", "نقداً", 11140000.0, "استلام نقدي بالصندوق", "محمد بنيني", false)
         )
     )
     val transactions: StateFlow<List<Transaction>> = _transactions.asStateFlow()
@@ -92,7 +92,15 @@ class MainViewModel : ViewModel() {
         _currentRoute.value = route
     }
 
-    fun addTransaction(type: String, amount: Double, party: String, reason: String, paymentMethod: String) {
+    fun addTransaction(
+        type: String,
+        amount: Double,
+        party: String,
+        reason: String,
+        paymentMethod: String,
+        notes: String,
+        hasDocument: Boolean
+    ) {
         val currentBal = _transactions.value.firstOrNull()?.balanceAfter ?: 10000000.0
         val newBal = if (type == "دخل") currentBal + amount else currentBal - amount
         val newTx = Transaction(
@@ -103,9 +111,43 @@ class MainViewModel : ViewModel() {
             reason = reason,
             date = "2026-10-08",
             paymentMethod = paymentMethod,
-            balanceAfter = newBal
+            balanceAfter = newBal,
+            notes = notes,
+            recordedBy = _profile.value.name,
+            hasDocument = hasDocument
         )
         _transactions.update { listOf(newTx) + it }
+    }
+
+    fun deleteTransaction(id: String) {
+        _transactions.update { list -> list.filter { it.id != id } }
+    }
+
+    fun updateTransaction(
+        id: String,
+        type: String,
+        amount: Double,
+        party: String,
+        reason: String,
+        paymentMethod: String,
+        notes: String,
+        hasDocument: Boolean
+    ) {
+        _transactions.update { list ->
+            list.map { tx ->
+                if (tx.id == id) {
+                    tx.copy(
+                        type = type,
+                        amount = amount,
+                        party = party,
+                        reason = reason,
+                        paymentMethod = paymentMethod,
+                        notes = notes,
+                        hasDocument = hasDocument
+                    )
+                } else tx
+            }
+        }
     }
 
     fun addFieldExpense(category: String, amount: Double, siteName: String, details: String, fuelLiters: Double?) {
