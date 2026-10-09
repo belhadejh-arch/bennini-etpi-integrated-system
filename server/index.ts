@@ -11,6 +11,7 @@ import {
   effectivePermissions,
   hasPermission,
   permissionActions,
+  type MemberCapabilities,
   type MemberPermissions,
   type PermissionAction,
 } from "../shared/access";
@@ -50,6 +51,7 @@ type Member = {
   allowed_sections: string[];
   role_name?: string;
   permissions?: MemberPermissions;
+  capabilities?: MemberCapabilities;
 };
 
 type AuthenticatedRequest = Request & {
@@ -64,6 +66,8 @@ function ensureMemberSchema() {
     memberSchemaPromise = pool.query(`
       ALTER TABLE members ADD COLUMN IF NOT EXISTS role_name TEXT NOT NULL DEFAULT '';
       ALTER TABLE members ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{}'::jsonb;
+      ALTER TABLE members ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL
+        DEFAULT '{"uploadFiles":true,"viewFinancialData":true,"manageOperations":true}'::jsonb;
     `).then(() => undefined);
   }
   return memberSchemaPromise;
@@ -108,7 +112,7 @@ async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Mem
   }
 
   let result = await pool.query<Member>(
-    "SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions FROM members WHERE clerk_user_id = $1",
+    "SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities FROM members WHERE clerk_user_id = $1",
     [auth.userId],
   );
 
@@ -130,7 +134,7 @@ async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Mem
       `INSERT INTO members (clerk_user_id, email, name, role, active, allowed_sections)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (clerk_user_id) DO UPDATE SET email = EXCLUDED.email
-       RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions`,
+       RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
       [
         auth.userId,
         email,
@@ -207,6 +211,14 @@ function requireAnyPermission(section: SectionId, ...actions: PermissionAction[]
     }
     next();
   };
+}
+
+function requireFileUpload(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  if (req.member?.role !== "admin" && req.member?.capabilities?.uploadFiles === false) {
+    fail(res, 403, "ليس لديك صلاحية رفع الملفات والصور.");
+    return;
+  }
+  next();
 }
 
 async function writeAudit(member: Member, action: string, details: string) {
@@ -677,16 +689,19 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), requireFiel
         incoming: canSeeFinance ? incoming : 0,
         outgoing: canSeeFinance ? outgoing : 0,
         balance: canSeeFinance ? incoming - outgoing : 0,
-        purchases: canSeeInventory ? Number(purchases.rows[0].total) : 0,
-        inventoryValue: canSeeInventory ? Number(inventory.rows[0].total) : 0,
-        pendingCheques: canSeeCheques ? Number(cheques.rows[0].pending_amount) : 0,
+        purchases: canSeeFinance && canSeeInventory ? Number(purchases.rows[0].total) : 0,
+        inventoryValue: canSeeFinance && canSeeInventory ? Number(inventory.rows[0].total) : 0,
+        pendingCheques: canSeeFinance && canSeeCheques ? Number(cheques.rows[0].pending_amount) : 0,
         pendingChequeCount: canSeeCheques ? Number(cheques.rows[0].pending_count) : 0,
-        dueCheques: canSeeCheques ? Number(cheques.rows[0].due_amount) : 0,
+        dueCheques: canSeeFinance && canSeeCheques ? Number(cheques.rows[0].due_amount) : 0,
         dueChequeCount: canSeeCheques ? Number(cheques.rows[0].due_count) : 0,
-        rentalRemaining: canSeeRentals ? Number(rentals.rows[0].remaining) : 0,
+        rentalRemaining: canSeeFinance && canSeeRentals ? Number(rentals.rows[0].remaining) : 0,
       },
       recentOperations: canSeeFinance ? recent.rows : [],
-      fieldExpenses: field.rows,
+      fieldExpenses: field.rows.map((expense) => ({
+        ...expense,
+        amount: canSeeFinance ? expense.amount : null,
+      })),
     });
   } catch (error) {
     console.error("Dashboard query failed:", error);
@@ -1147,7 +1162,7 @@ app.delete("/api/cheques/:id", authenticate, requireSection("cheques"), requireP
   }
 });
 
-app.post("/api/cheques/:id/attachments", authenticate, requireSection("cheques"), requireAnyPermission("cheques", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/cheques/:id/attachments", authenticate, requireSection("cheques"), requireAnyPermission("cheques", "create", "edit"), requireFileUpload, uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
@@ -1339,7 +1354,7 @@ app.delete("/api/rentals/:id", requireRentalSchema, authenticate, requireSection
   }
 });
 
-app.post("/api/rentals/:id/attachments", requireRentalSchema, authenticate, requireSection("rentals"), requireAnyPermission("rentals", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/rentals/:id/attachments", requireRentalSchema, authenticate, requireSection("rentals"), requireAnyPermission("rentals", "create", "edit"), requireFileUpload, uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
@@ -1442,9 +1457,6 @@ app.patch("/api/record-notes/:entity/:id", requireRecordNotesSchema, authenticat
   } else {
     const id = Number(rawId);
     if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم السجل غير صالح.");
-    if (target.section === "audit" && member.role !== "admin") {
-      return fail(res, 403, "ملاحظات سجل التدقيق متاحة للمدير فقط.");
-    }
     if (!hasPermission(member, target.section, "edit")) {
       return fail(res, 403, "ليس لديك صلاحية الوصول إلى هذا القسم.");
     }
@@ -1611,7 +1623,7 @@ app.post("/api/machinery/spare-parts", requireMachinerySchema, authenticate, req
   }
 });
 
-app.post("/api/machinery/spare-parts/:id/attachments", requireMachinerySchema, authenticate, requireSection("machinery"), requireAnyPermission("machinery", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/machinery/spare-parts/:id/attachments", requireMachinerySchema, authenticate, requireSection("machinery"), requireAnyPermission("machinery", "create", "edit"), requireFileUpload, uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
@@ -1680,9 +1692,7 @@ app.get("/api/machinery/spare-part-attachments/:id", requireMachinerySchema, aut
 app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest, res) => {
   const section = req.params.section as SectionId;
   if (!allSectionIds.includes(section)) return fail(res, 404, "القسم غير موجود.");
-  if (section === "users" || section === "audit") {
-    if (req.member?.role !== "admin") return fail(res, 403, "هذه الصفحة متاحة للمدير فقط.");
-  } else if (!hasPermission(req.member, section, "view")) {
+  if (!hasPermission(req.member, section, "view")) {
     return fail(res, 403, "ليس لديك صلاحية الوصول إلى هذا القسم.");
   }
 
@@ -1824,7 +1834,7 @@ app.delete("/api/transactions/:id", authenticate, requireSection("finance"), req
   }
 });
 
-app.post("/api/transactions/:id/attachments", authenticate, requireSection("finance"), requireAnyPermission("finance", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/transactions/:id/attachments", authenticate, requireSection("finance"), requireAnyPermission("finance", "create", "edit"), requireFileUpload, uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
@@ -1882,7 +1892,7 @@ app.get("/api/transaction-attachments/:id", authenticate, requireSection("financ
   }
 });
 
-app.post("/api/inventory/:id/attachments", authenticate, requireSection("inventory"), requireAnyPermission("inventory", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/inventory/:id/attachments", authenticate, requireSection("inventory"), requireAnyPermission("inventory", "create", "edit"), requireFileUpload, uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
@@ -2046,7 +2056,7 @@ app.patch("/api/field-expenses/:id/review", requireFieldExpenseSchema, authentic
   }
 });
 
-app.post("/api/field-expenses/:id/attachments", requireFieldExpenseSchema, authenticate, requireSection("field"), requireAnyPermission("field", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/field-expenses/:id/attachments", requireFieldExpenseSchema, authenticate, requireSection("field"), requireAnyPermission("field", "create", "edit"), requireFileUpload, uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || !files.length) return fail(res, 400, "اختر صورة أو وثيقة واحدة على الأقل.");
@@ -2132,35 +2142,59 @@ app.get("/api/field-expense-attachments/:id", requireFieldExpenseSchema, authent
   }
 });
 
-app.get("/api/members", requireRecordNotesSchema, authenticate, requireAdmin, async (_req, res) => {
+app.get("/api/members", requireRecordNotesSchema, authenticate, requireSection("users"), async (req: AuthenticatedRequest, res) => {
   const result = await pool.query(
-    "SELECT clerk_user_id, email, name, role, role_name, active, allowed_sections, permissions, notes, created_at FROM members ORDER BY created_at",
+    "SELECT clerk_user_id, email, name, role, role_name, active, allowed_sections, permissions, capabilities, notes, created_at FROM members ORDER BY created_at",
   );
+  const isAdmin = req.member?.role === "admin";
   res.json({
     members: result.rows.map((item) => ({
-      ...item,
-      permissions: effectivePermissions(item as Member),
+      clerk_user_id: item.clerk_user_id,
+      email: item.email,
+      name: item.name,
+      role: item.role,
+      role_name: item.role_name,
+      active: item.active,
+      created_at: item.created_at,
+      ...(isAdmin ? {
+        allowed_sections: item.allowed_sections,
+        notes: item.notes,
+        capabilities: item.capabilities ?? {},
+        permissions: effectivePermissions({
+          ...(item as Member),
+          capabilities: { uploadFiles: true, viewFinancialData: true, manageOperations: true },
+        }),
+      } : {}),
     })),
   });
 });
 
 app.patch("/api/members/:id", authenticate, requireAdmin, async (req: AuthenticatedRequest, res) => {
   const targetId = req.params.id;
-  const { active, permissions, roleName } = req.body ?? {};
+  const { active, permissions, capabilities, roleName } = req.body ?? {};
   if (targetId === req.member?.clerk_user_id) return fail(res, 400, "لا يمكن تعديل صلاحيات حساب المدير الحالي.");
   if (typeof active !== "boolean" || typeof roleName !== "string" ||
       !roleName.trim() || roleName.trim().length > 80 ||
-      !permissions || typeof permissions !== "object" || Array.isArray(permissions)) {
+      !permissions || typeof permissions !== "object" || Array.isArray(permissions) ||
+      !capabilities || typeof capabilities !== "object" || Array.isArray(capabilities)) {
     return fail(res, 400, "بيانات الصلاحيات غير صالحة.");
   }
   const cleanPermissions: MemberPermissions = Object.fromEntries(
-    allSectionIds
-      .filter((section) => section !== "users" && section !== "audit")
-      .map((section) => [
+    allSectionIds.map((section) => [
         section,
         { view: false, create: false, edit: false, delete: false },
       ]),
   ) as MemberPermissions;
+  const cleanCapabilities: Required<MemberCapabilities> = {
+    uploadFiles: (capabilities as MemberCapabilities).uploadFiles === true,
+    viewFinancialData: (capabilities as MemberCapabilities).viewFinancialData === true,
+    manageOperations: (capabilities as MemberCapabilities).manageOperations === true,
+  };
+  if (Object.keys(capabilities as object).some((key) =>
+    !["uploadFiles", "viewFinancialData", "manageOperations"].includes(key),
+  ) || Object.values(capabilities as Record<string, unknown>).some((value) => typeof value !== "boolean")) {
+    return fail(res, 400, "إحدى الصلاحيات الإضافية غير صالحة.");
+  }
   for (const [section, raw] of Object.entries(permissions as Record<string, unknown>)) {
     if (!allSectionIds.includes(section as SectionId) || !raw || typeof raw !== "object" || Array.isArray(raw)) {
       return fail(res, 400, "قائمة الصلاحيات تحتوي على بيانات غير صالحة.");
@@ -2171,32 +2205,29 @@ app.patch("/api/members/:id", authenticate, requireAdmin, async (req: Authentica
         return fail(res, 400, "إحدى صلاحيات القسم غير صالحة.");
       }
     }
-    if (section === "users" || section === "audit") {
-      if (Object.values(sectionRules).some(Boolean)) {
-        return fail(res, 400, "إدارة المستخدمين وسجل التدقيق متاحان للمدير فقط.");
-      }
-      continue;
-    }
     const rules = Object.fromEntries(
       permissionActions.map((action) => [action, sectionRules[action] === true]),
     );
+    if (section === "users" && (rules.create || rules.edit || rules.delete)) {
+      return fail(res, 400, "يمكن منح صلاحية عرض المستخدمين فقط؛ إدارتهم متاحة للمدير.");
+    }
+    if (section === "audit" && (rules.create || rules.delete)) {
+      return fail(res, 400, "سجل التدقيق يدعم العرض وتعديل الملاحظات فقط.");
+    }
     if (rules.create || rules.edit || rules.delete) rules.view = true;
     cleanPermissions[section as SectionId] = rules;
   }
   cleanPermissions.dashboard = { view: true, create: false, edit: false, delete: false };
-  const sections = allSectionIds.filter((section) =>
-    section !== "users" && section !== "audit" &&
-    cleanPermissions[section]?.view === true,
-  );
+  const sections = allSectionIds.filter((section) => cleanPermissions[section]?.view === true);
   if (!sections.includes("dashboard")) sections.push("dashboard");
   const safeRoleName = roleName.trim();
   try {
     const result = await pool.query(
       `UPDATE members SET active = $1, allowed_sections = $2, role_name = $3,
-        permissions = $4::jsonb, updated_at = NOW()
-       WHERE clerk_user_id = $5
-       RETURNING clerk_user_id, email, name, role, role_name, active, allowed_sections, permissions, created_at`,
-      [active, sections, safeRoleName, JSON.stringify(cleanPermissions), targetId],
+        permissions = $4::jsonb, capabilities = $5::jsonb, updated_at = NOW()
+       WHERE clerk_user_id = $6
+       RETURNING clerk_user_id, email, name, role, role_name, active, allowed_sections, permissions, capabilities, created_at`,
+      [active, sections, safeRoleName, JSON.stringify(cleanPermissions), JSON.stringify(cleanCapabilities), targetId],
     );
     if (!result.rowCount) return fail(res, 404, "العضو غير موجود.");
     await writeAudit(req.member!, "تعديل صلاحيات عضو", `تحديث الوصول للحساب ${result.rows[0].email}.`);
@@ -2207,7 +2238,7 @@ app.patch("/api/members/:id", authenticate, requireAdmin, async (req: Authentica
   }
 });
 
-app.get("/api/audit", authenticate, requireAdmin, async (_req, res) => {
+app.get("/api/audit", authenticate, requireSection("audit"), async (_req, res) => {
   const result = await pool.query(
     "SELECT id, action, details, performed_by_name, created_at FROM audit_logs ORDER BY created_at DESC LIMIT 100",
   );

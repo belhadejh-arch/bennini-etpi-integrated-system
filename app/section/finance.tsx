@@ -10,7 +10,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
-import { hasPermission } from "../../shared/access";
+import { canUploadFiles, hasPermission } from "../../shared/access";
 
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type Transaction = {
@@ -79,6 +79,7 @@ export default function FinanceSection() {
   const canCreate = hasPermission(member, "finance", "create");
   const canEdit = hasPermission(member, "finance", "edit");
   const canManage = canCreate || canEdit;
+  const canAddAttachments = canManage && canUploadFiles(member);
   const queryString = useMemo(() => {
     const params = new URLSearchParams({ page: String(page) });
     if (appliedFilters.from) params.set("from", appliedFilters.from);
@@ -357,13 +358,15 @@ export default function FinanceSection() {
             </View>
             <Text style={styles.label}>ملاحظات</Text>
             <TextInput style={[styles.input, styles.multiline]} value={notes} onChangeText={setNotes} multiline placeholder="ملاحظات إضافية (اختياري)" placeholderTextColor="#98A5B4" />
-            <View style={styles.docsRow}>
-              <Pressable onPress={() => void chooseDocuments()} style={styles.attachButton}>
-                <FilePlus2 size={16} color={colors.blue} />
-                <Text style={styles.attachText}>إرفاق فاتورة أو وصل</Text>
-              </Pressable>
-              <Text style={styles.helperText}>PDF أو صورة أو ملف Office، حتى 8 م.ب للملف</Text>
-            </View>
+            {canAddAttachments ? (
+              <View style={styles.docsRow}>
+                <Pressable onPress={() => void chooseDocuments()} style={styles.attachButton}>
+                  <FilePlus2 size={16} color={colors.blue} />
+                  <Text style={styles.attachText}>إرفاق فاتورة أو وصل</Text>
+                </Pressable>
+                <Text style={styles.helperText}>PDF أو صورة أو ملف Office، حتى 8 م.ب للملف</Text>
+              </View>
+            ) : null}
             {pickedDocs.length ? (
               <View style={styles.pickedList}>
                 {pickedDocs.map((doc, index) => (
@@ -461,7 +464,7 @@ export default function FinanceSection() {
                       <View style={[styles.tableCell, styles.actionsCell, { width: 250 }]}>
                         <ActionButton label="عرض" onPress={() => setExpandedId(expandedId === item.id ? null : item.id)} icon={<Eye size={14} color={colors.blue} />} />
                         {canEdit ? <ActionButton label="تعديل" onPress={() => beginEdit(item)} icon={<Pencil size={14} color={colors.blue} />} /> : null}
-                        {canManage ? <ActionButton label="مرفق" onPress={() => void chooseDocuments(item.id)} icon={<FilePlus2 size={14} color={colors.blue} />} /> : null}
+                        {canAddAttachments ? <ActionButton label="مرفق" onPress={() => void chooseDocuments(item.id)} icon={<FilePlus2 size={14} color={colors.blue} />} /> : null}
                         {hasPermission(member, "finance", "delete") ? <ActionButton label="حذف" danger onPress={() => deleteTransaction(item.id)} icon={<Trash2 size={14} color={colors.red} />} /> : null}
                       </View>
                     </View>

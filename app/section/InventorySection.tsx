@@ -13,7 +13,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
-import { hasPermission } from "../../shared/access";
+import { canUploadFiles, hasPermission } from "../../shared/access";
 
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type InventoryItem = {
@@ -130,6 +130,7 @@ export default function InventorySection() {
   const canCreate = hasPermission(member, "inventory", "create");
   const canEdit = hasPermission(member, "inventory", "edit");
   const canManage = canCreate || canEdit;
+  const canAddAttachments = canManage && canUploadFiles(member);
   const queryString = useMemo(() => {
     const params = new URLSearchParams({ page: String(page) });
     for (const [key, value] of Object.entries(appliedFilters)) {
@@ -434,13 +435,15 @@ export default function InventorySection() {
               <Calculation label="قيمة البيع المتوقعة" value={formatDzd(expectedSales)} />
               <Calculation label="الربح المتوقع" value={formatDzd(expectedProfit)} highlight />
             </View>
-            <View style={styles.actionsRow}>
-              <Pressable onPress={() => void chooseDocuments()} style={styles.outlineButton} disabled={saving}>
-                <FilePlus2 size={16} color={colors.blue} />
-                <Text style={styles.outlineButtonText}>إرفاق فاتورة أو وثيقة</Text>
-              </Pressable>
-              <Text style={styles.mutedText}>حتى 5 مستندات، 8 MB للملف</Text>
-            </View>
+            {canAddAttachments ? (
+              <View style={styles.actionsRow}>
+                <Pressable onPress={() => void chooseDocuments()} style={styles.outlineButton} disabled={saving}>
+                  <FilePlus2 size={16} color={colors.blue} />
+                  <Text style={styles.outlineButtonText}>إرفاق فاتورة أو وثيقة</Text>
+                </Pressable>
+                <Text style={styles.mutedText}>حتى 5 مستندات، 8 MB للملف</Text>
+              </View>
+            ) : null}
             {pickedDocs.length ? (
               <View style={styles.fileList}>
                 {pickedDocs.map((doc, index) => (

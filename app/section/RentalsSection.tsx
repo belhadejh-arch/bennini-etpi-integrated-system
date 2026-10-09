@@ -14,7 +14,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
-import { hasPermission } from "../../shared/access";
+import { canUploadFiles, hasPermission } from "../../shared/access";
 
 type Status = "active" | "completed" | "cancelled";
 type RatePeriod = "daily" | "monthly";
@@ -126,6 +126,7 @@ export default function RentalsSection() {
   const canCreate = hasPermission(member, "rentals", "create");
   const canEdit = hasPermission(member, "rentals", "edit");
   const canManage = canCreate || canEdit;
+  const canAddAttachments = canManage && canUploadFiles(member);
   const duration = durationFor(draft.startDate, draft.endDate, draft.ratePeriod);
   const totalAmount = Math.round(duration * amount(draft.rentalRate) * 100) / 100;
   const remainingAmount = Math.max(0, totalAmount - amount(draft.paidAmount));
@@ -495,10 +496,12 @@ export default function RentalsSection() {
                 </View>
               </View>
             ) : null}
-            <Pressable onPress={() => void chooseDocuments()} disabled={saving} style={styles.outlineButton}>
-              <FilePlus2 size={16} color={colors.blue} />
-              <Text style={styles.outlineButtonText}>إرفاق العقد أو وثائق الكراء</Text>
-            </Pressable>
+            {canAddAttachments ? (
+              <Pressable onPress={() => void chooseDocuments()} disabled={saving} style={styles.outlineButton}>
+                <FilePlus2 size={16} color={colors.blue} />
+                <Text style={styles.outlineButtonText}>إرفاق العقد أو وثائق الكراء</Text>
+              </Pressable>
+            ) : null}
             {pickedDocs.length ? (
               <View style={styles.pickedList}>
                 {pickedDocs.map((doc, index) => (
@@ -589,7 +592,7 @@ export default function RentalsSection() {
                     {canEdit && rental.status === "active" ? (
                       <ActionButton label="إنهاء الكراء" onPress={() => void changeStatus(rental, "completed")} icon={<Check size={14} color={colors.green} />} />
                     ) : null}
-                    {canManage && rental.attachments.length < 5 ? (
+                    {canAddAttachments && rental.attachments.length < 5 ? (
                       <ActionButton label="إضافة مستند" onPress={() => void addAttachments(rental)} icon={<FilePlus2 size={14} color={colors.blue} />} />
                     ) : null}
                     {hasPermission(member, "rentals", "delete") ? <ActionButton label="حذف العقد" onPress={() => deleteRental(rental)} icon={<Trash2 size={14} color={colors.red} />} danger /> : null}

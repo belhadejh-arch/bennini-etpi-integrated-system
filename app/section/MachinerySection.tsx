@@ -14,7 +14,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
-import { hasPermission } from "../../shared/access";
+import { canUploadFiles, hasPermission } from "../../shared/access";
 
 type Machinery = {
   id: number;
@@ -83,6 +83,7 @@ export default function MachinerySection() {
   const canCreate = hasPermission(member, "machinery", "create");
   const canEdit = hasPermission(member, "machinery", "edit");
   const canManage = canCreate || canEdit;
+  const canAddAttachments = canManage && canUploadFiles(member);
   const filteredParts = useMemo(
     () => selectedMachineId === null ? parts : parts.filter((part) => part.machinery_id === selectedMachineId),
     [parts, selectedMachineId],
@@ -406,14 +407,18 @@ export default function MachinerySection() {
             <Field label="الكمية الموجودة في المخزون *" value={partDraft.stockQuantity} onChange={(value) => changePartField("stockQuantity", value)} placeholder="أدخل الكمية المتبقية" numeric />
             <Field label="مصاريف الإصلاح (دج)" value={partDraft.repairExpense} onChange={(value) => changePartField("repairExpense", value)} placeholder="0" numeric />
             <Field label="ملاحظات" value={partDraft.notes} onChange={(value) => changePartField("notes", value)} placeholder="تفاصيل عن التركيب أو العطل" multiline />
-            <Text style={styles.helper}>يُحفظ السجل ضمن تاريخ الآلية المختارة. أرفق صورة أو فاتورة أو وثيقة عند الحاجة (حتى 5 ملفات).</Text>
-            <Pressable onPress={() => void chooseDocuments()} style={styles.attachButton}>
-              <FilePlus2 size={16} color={colors.blue} />
-              <Text style={styles.attachText}>{pickedDocuments.length ? `إضافة مرفقات (${pickedDocuments.length})` : "اختيار صور أو مستندات"}</Text>
-            </Pressable>
-            {pickedDocuments.map((asset) => (
-              <Text key={`${asset.name}-${asset.size}`} style={styles.fileName}>{asset.name}</Text>
-            ))}
+            {canAddAttachments ? (
+              <>
+                <Text style={styles.helper}>يُحفظ السجل ضمن تاريخ الآلية المختارة. أرفق صورة أو فاتورة أو وثيقة عند الحاجة (حتى 5 ملفات).</Text>
+                <Pressable onPress={() => void chooseDocuments()} style={styles.attachButton}>
+                  <FilePlus2 size={16} color={colors.blue} />
+                  <Text style={styles.attachText}>{pickedDocuments.length ? `إضافة مرفقات (${pickedDocuments.length})` : "اختيار صور أو مستندات"}</Text>
+                </Pressable>
+                {pickedDocuments.map((asset) => (
+                  <Text key={`${asset.name}-${asset.size}`} style={styles.fileName}>{asset.name}</Text>
+                ))}
+              </>
+            ) : null}
             <SaveButton label="حفظ سجل قطعة الغيار" saving={saving} onPress={() => void saveSparePart()} />
           </View>
         ) : null}

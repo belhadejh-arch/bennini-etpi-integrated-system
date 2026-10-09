@@ -7,4 +7,4 @@ Keep the React and React DOM versions aligned with each other when using Expo SD
 
 **Why:** Installing additional Clerk proxy dependencies caused npm to move React to 19.3.0, while Expo's SDK checker expected the 19.1 line. Attempts to force 19.1.0 conflicted with Clerk's peer range.
 
-**How to apply:** Before changing these versions or preparing native builds, check both Clerk peer ranges and Expo's SDK compatibility. Prefer an Expo/Clerk version pair with a shared supported range rather than forcing npm peer resolution.
+**How to apply:** Before changing these versions or preparing native builds, check both Clerk peer ranges and Expo's SDK compatibility. Prefer an Expo/Clerk version pair with a shared supported range rather than forcing npm peer resolution. When installing from semver ranges, inspect the resulting manifest and lockfile because npm may upgrade React and React Native beyond the project's known-compatible versions; restore or pin them before proceeding.

@@ -1,6 +1,6 @@
 import Constants from "expo-constants";
 import { Platform } from "react-native";
-import type { MemberPermissions } from "../shared/access";
+import type { MemberCapabilities, MemberPermissions } from "../shared/access";
 
 const configuredApiUrl = Constants.expoConfig?.extra?.apiUrl as string | undefined;
 
@@ -45,6 +45,7 @@ export type Member = {
   active: boolean;
   allowed_sections: string[];
   permissions?: MemberPermissions;
+  capabilities?: MemberCapabilities;
   notes?: string;
 };
 
@@ -74,7 +75,7 @@ export type DashboardData = {
   fieldExpenses: Array<{
     id: number;
     category: string;
-    amount: number | string;
+    amount: number | string | null;
     site_name: string;
     details: string;
     notes: string;

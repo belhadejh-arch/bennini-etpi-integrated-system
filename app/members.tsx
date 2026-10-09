@@ -8,7 +8,7 @@ import RecordNotes from "./components/RecordNotes";
 import { apiRequest, type Member } from "../lib/api";
 import { colors } from "../lib/theme";
 import { sections, type SectionId } from "../shared/sections";
-import { permissionActions, type MemberPermissions, type PermissionAction } from "../shared/access";
+import { hasPermission, permissionActions, type MemberCapabilities, type MemberPermissions, type PermissionAction } from "../shared/access";
 
 type TeamMember = Member & { created_at?: string };
 
@@ -48,6 +48,7 @@ export default function MembersScreen() {
   const patchMember = async (target: TeamMember, patch: {
     active?: boolean;
     permissions?: MemberPermissions;
+    capabilities?: MemberCapabilities;
     role_name?: string;
   }) => {
     setSavingId(target.clerk_user_id);
@@ -59,6 +60,11 @@ export default function MembersScreen() {
         body: JSON.stringify({
           active: patch.active ?? target.active,
           permissions: patch.permissions ?? target.permissions ?? {},
+          capabilities: patch.capabilities ?? target.capabilities ?? {
+            uploadFiles: true,
+            viewFinancialData: true,
+            manageOperations: true,
+          },
           roleName: (patch.role_name ?? roleNameDrafts[target.clerk_user_id] ?? target.role_name ?? roleLabel(target.role)).trim()
             || roleLabel(target.role),
         }),
@@ -72,6 +78,7 @@ export default function MembersScreen() {
   };
 
   const admin = member?.role === "admin";
+  const canViewUsers = hasPermission(member, "users", "view");
   const selfId = user?.id;
 
   return (
@@ -86,9 +93,9 @@ export default function MembersScreen() {
         rightAction={<View style={styles.icon}><ShieldCheck size={19} color={colors.yellow} /></View>}
       />
 
-      {!admin && !loading ? (
+      {!canViewUsers && !loading ? (
         <View style={styles.center}>
-          <Text style={styles.notice}>إدارة المستخدمين متاحة للمدير فقط.</Text>
+          <Text style={styles.notice}>ليس لديك صلاحية عرض المستخدمين.</Text>
           <Pressable style={styles.action} onPress={() => router.replace("/")}>
             <Text style={styles.actionText}>العودة للرئيسية</Text>
           </Pressable>
@@ -112,12 +119,12 @@ export default function MembersScreen() {
                     <Text style={styles.name}>{item.name || "عضو جديد"}</Text>
                     <Text style={styles.email}>{item.email}</Text>
                     <Text style={styles.role}>{item.role_name || roleLabel(item.role)}{item.role === "pending" ? " · بانتظار التفعيل" : ""}</Text>
-                    <RecordNotes entity="member" recordId={item.clerk_user_id} initialNotes={item.notes} editable={admin} />
+                    {admin ? <RecordNotes entity="member" recordId={item.clerk_user_id} initialNotes={item.notes} editable /> : null}
                   </View>
                   <View style={{ alignItems: "center", gap: 3 }}>
                     <Switch
                       value={item.active}
-                      disabled={isSelf || savingId === item.clerk_user_id}
+                      disabled={!admin || isSelf || savingId === item.clerk_user_id}
                       onValueChange={(active) => void patchMember(item, { active })}
                       trackColor={{ false: "#DCE3EB", true: "#A4D8BD" }}
                       thumbColor={item.active ? colors.green : "#FFFFFF"}
@@ -125,63 +132,98 @@ export default function MembersScreen() {
                     <Text style={styles.switchLabel}>{item.active ? "مفعّل" : "موقوف"}</Text>
                   </View>
                 </View>
-                <View style={styles.divider} />
-                <Text style={styles.sectionLabel}>المسمى الوظيفي (غير مقيّد بقائمة ثابتة)</Text>
-                <TextInput
-                  value={roleNameDrafts[item.clerk_user_id] ?? item.role_name ?? roleLabel(item.role)}
-                  onChangeText={(value) => setRoleNameDrafts((current) => ({ ...current, [item.clerk_user_id]: value }))}
-                  onBlur={() => {
-                    const roleName = roleNameDrafts[item.clerk_user_id]?.trim();
-                    if (roleName && roleName !== (item.role_name || roleLabel(item.role))) {
-                      void patchMember(item, { role_name: roleName });
-                    }
-                  }}
-                  editable={!isSelf && savingId !== item.clerk_user_id}
-                  placeholder="مثال: مسؤول المشتريات"
-                  placeholderTextColor={colors.muted}
-                  style={styles.roleInput}
-                  textAlign="right"
-                  maxLength={80}
-                />
-                <View style={styles.divider} />
-                <Text style={styles.sectionLabel}>صلاحيات كل قسم</Text>
-                <Text style={styles.permissionLegend}>فعّل العرض أو الإضافة أو التعديل أو الحذف لكل قسم بشكل مستقل.</Text>
-                {sections.filter((section) => !["dashboard", "users", "audit"].includes(section.id)).map((section) => (
-                  <View key={section.id} style={styles.permissionRow}>
-                    <Text style={styles.permissionSection}>{section.shortLabel}</Text>
-                    <View style={styles.permissionActions}>
-                      {permissionActions.map((action) => {
-                        const checked = item.permissions?.[section.id]?.[action] === true;
-                        return (
-                          <Pressable
-                            key={action}
-                            disabled={isSelf || savingId === item.clerk_user_id}
-                            onPress={() => {
-                              const updated: MemberPermissions = {
-                                ...item.permissions,
-                                [section.id]: {
-                                  ...item.permissions?.[section.id],
-                                  [action]: !checked,
-                                },
-                              };
-                              if (action !== "view" && !checked) {
-                                updated[section.id] = { ...updated[section.id], view: true };
-                              }
-                              if (action === "view" && checked) {
-                                updated[section.id] = { view: false, create: false, edit: false, delete: false };
-                              }
-                              void patchMember(item, { permissions: updated });
-                            }}
-                            style={[styles.permissionChip, checked && styles.chipActive, isSelf && { opacity: 0.65 }]}
-                          >
-                            {checked ? <Check size={12} color={colors.blue} /> : null}
-                            <Text style={[styles.chipText, checked && styles.chipTextActive]}>{actionLabel(action)}</Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-                ))}
+                {admin ? (
+                  <>
+                    <View style={styles.divider} />
+                    <Text style={styles.sectionLabel}>المسمى الوظيفي (غير مقيّد بقائمة ثابتة)</Text>
+                    <TextInput
+                      value={roleNameDrafts[item.clerk_user_id] ?? item.role_name ?? roleLabel(item.role)}
+                      onChangeText={(value) => setRoleNameDrafts((current) => ({ ...current, [item.clerk_user_id]: value }))}
+                      onBlur={() => {
+                        const roleName = roleNameDrafts[item.clerk_user_id]?.trim();
+                        if (roleName && roleName !== (item.role_name || roleLabel(item.role))) {
+                          void patchMember(item, { role_name: roleName });
+                        }
+                      }}
+                      editable={!isSelf && savingId !== item.clerk_user_id}
+                      placeholder="مثال: مسؤول المشتريات"
+                      placeholderTextColor={colors.muted}
+                      style={styles.roleInput}
+                      textAlign="right"
+                      maxLength={80}
+                    />
+                  </>
+                ) : null}
+                {admin ? (
+                  <>
+                    <View style={styles.divider} />
+                    <Text style={styles.sectionLabel}>صلاحيات كل قسم</Text>
+                    <Text style={styles.permissionLegend}>
+                      حدّد صلاحيات العرض أو الإضافة أو التعديل أو الحذف لكل قسم. عرض المالية وإدارة العمليات لهما إذن إضافي مستقل أدناه.
+                    </Text>
+                    {sections.filter((section) => section.id !== "dashboard").map((section) => (
+                      <View key={section.id} style={styles.permissionRow}>
+                        <Text style={styles.permissionSection}>{section.shortLabel}</Text>
+                        <View style={styles.permissionActions}>
+                          {actionsForSection(section.id).map((action) => {
+                            const checked = item.permissions?.[section.id]?.[action] === true;
+                            return (
+                              <Pressable
+                                key={action}
+                                disabled={isSelf || savingId === item.clerk_user_id}
+                                onPress={() => {
+                                  const updated: MemberPermissions = {
+                                    ...item.permissions,
+                                    [section.id]: {
+                                      ...item.permissions?.[section.id],
+                                      [action]: !checked,
+                                    },
+                                  };
+                                  if (action !== "view" && !checked) {
+                                    updated[section.id] = { ...updated[section.id], view: true };
+                                  }
+                                  if (action === "view" && checked) {
+                                    updated[section.id] = { view: false, create: false, edit: false, delete: false };
+                                  }
+                                  void patchMember(item, { permissions: updated });
+                                }}
+                                style={[styles.permissionChip, checked && styles.chipActive, isSelf && { opacity: 0.65 }]}
+                              >
+                                {checked ? <Check size={12} color={colors.blue} /> : null}
+                                <Text style={[styles.chipText, checked && styles.chipTextActive]}>{actionLabel(action)}</Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    ))}
+                    <View style={styles.divider} />
+                    <Text style={styles.sectionLabel}>صلاحيات إضافية</Text>
+                    <Text style={styles.permissionLegend}>رفع الملفات يتطلب أيضاً صلاحية الإضافة أو التعديل في القسم المعني.</Text>
+                    {capabilityRows(item.capabilities).map((capability) => (
+                      <View key={capability.key} style={styles.capabilityRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.permissionSection}>{capability.label}</Text>
+                          <Text style={styles.permissionLegend}>{capability.description}</Text>
+                        </View>
+                        <Switch
+                          value={capability.value}
+                          disabled={isSelf || savingId === item.clerk_user_id}
+                          onValueChange={(value) => void patchMember(item, {
+                            capabilities: { ...capabilityValues(item.capabilities), [capability.key]: value },
+                          })}
+                          trackColor={{ false: "#DCE3EB", true: "#A4D8BD" }}
+                          thumbColor={capability.value ? colors.green : "#FFFFFF"}
+                        />
+                      </View>
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <View style={styles.divider} />
+                    <Text style={styles.selfNote}>معلومات المستخدمين ظاهرة للقراءة فقط؛ تفاصيل الصلاحيات وإدارة الحسابات متاحة للمدير.</Text>
+                  </>
+                )}
                 {isSelf ? <Text style={styles.selfNote}>لا يمكن تعديل صلاحيات حساب المدير الحالي من هذه الشاشة.</Text> : null}
                 {savingId === item.clerk_user_id ? <Text style={styles.saving}>جارٍ حفظ التغييرات...</Text> : null}
               </View>
@@ -203,6 +245,29 @@ function actionLabel(action: PermissionAction) {
   return ({ view: "عرض", create: "إضافة", edit: "تعديل", delete: "حذف" } as Record<PermissionAction, string>)[action];
 }
 
+function actionsForSection(section: SectionId): PermissionAction[] {
+  if (section === "users") return ["view"];
+  if (section === "audit") return ["view", "edit"];
+  return [...permissionActions];
+}
+
+function capabilityValues(capabilities?: MemberCapabilities): Required<MemberCapabilities> {
+  return {
+    uploadFiles: capabilities?.uploadFiles !== false,
+    viewFinancialData: capabilities?.viewFinancialData !== false,
+    manageOperations: capabilities?.manageOperations !== false,
+  };
+}
+
+function capabilityRows(capabilities?: MemberCapabilities) {
+  const values = capabilityValues(capabilities);
+  return [
+    { key: "uploadFiles" as const, label: "رفع الملفات والصور", description: "إذن عام لرفع المرفقات، مع بقاء صلاحية القسم مطلوبة.", value: values.uploadFiles },
+    { key: "viewFinancialData" as const, label: "رؤية البيانات المالية", description: "يسمح بفتح قسم المالية وإظهار المؤشرات المالية في لوحة القيادة.", value: values.viewFinancialData },
+    { key: "manageOperations" as const, label: "إدارة العمليات المالية", description: "يسمح بالإضافة والتعديل والحذف في سجل العمليات المالية، وفق صلاحيات القسم.", value: values.manageOperations },
+  ];
+}
+
 const styles = {
   icon: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#FFFFFF1A", alignItems: "center" as const, justifyContent: "center" as const },
   page: { width: "100%" as const, maxWidth: 860, alignSelf: "center" as const, padding: 17, paddingBottom: 40, gap: 13 },
@@ -222,6 +287,7 @@ const styles = {
   chips: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7, justifyContent: "flex-start" as const },
   permissionLegend: { color: colors.muted, textAlign: "right" as const, fontSize: 10, marginBottom: 8 },
   permissionRow: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  capabilityRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.border },
   permissionSection: { color: colors.ink, fontWeight: "700" as const, textAlign: "right" as const, fontSize: 11, flex: 1 },
   permissionActions: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 5, justifyContent: "flex-end" as const },
   permissionChip: { minHeight: 30, borderRadius: 16, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 8, flexDirection: "row" as const, alignItems: "center" as const, gap: 3 },

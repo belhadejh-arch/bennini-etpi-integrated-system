@@ -91,6 +91,7 @@ export default function HomeScreen() {
   }, [authLoaded, isSignedIn, refresh]);
 
   const isAdmin = member?.role === "admin";
+  const canSeeFinancialData = hasPermission(member, "finance", "view");
   const permitted = useMemo(
     () => new Set(sections.filter((section) => hasPermission(member, section.id, "view")).map((section) => section.id)),
     [member],
@@ -204,19 +205,19 @@ export default function HomeScreen() {
                   <StatCard compact={compact} title="الأموال الخارجة" value={formatDzd(dashboard.stats.outgoing)} icon={ArrowUpRight} tone="red" onPress={() => goToSection("finance")} />
                 </>
               ) : null}
-              {permitted.has("inventory") ? (
+              {permitted.has("inventory") && canSeeFinancialData ? (
                 <>
                   <StatCard compact={compact} title="إجمالي المشتريات" value={formatDzd(dashboard.stats.purchases)} icon={ShoppingCart} tone="amber" onPress={() => goToSection("inventory")} />
                   <StatCard compact={compact} title="قيمة المخزون" value={formatDzd(dashboard.stats.inventoryValue)} icon={Boxes} tone="blue" onPress={() => goToSection("inventory")} />
                 </>
               ) : null}
-              {permitted.has("cheques") ? (
+              {permitted.has("cheques") && canSeeFinancialData ? (
                 <>
                   <StatCard compact={compact} title="الشيكات قيد الانتظار" value={formatDzd(dashboard.stats.pendingCheques)} detail={`${dashboard.stats.pendingChequeCount} شيك`} icon={ReceiptText} tone="violet" onPress={() => goToSection("cheques")} />
                   <StatCard compact={compact} title="الشيكات المستحقة" value={formatDzd(dashboard.stats.dueCheques)} detail={`${dashboard.stats.dueChequeCount} شيك مستحق`} icon={Clock3} tone="amber" onPress={() => goToSection("cheques")} />
                 </>
               ) : null}
-              {permitted.has("rentals") ? (
+              {permitted.has("rentals") && canSeeFinancialData ? (
                   <StatCard compact={compact} title="المبالغ المتبقية في الكراء" value={formatDzd(dashboard.stats.rentalRemaining)} icon={Building2} tone="blue" onPress={() => goToSection("rentals")} />
               ) : null}
             </View>
@@ -264,7 +265,7 @@ export default function HomeScreen() {
                         </Text>
                       </View>
                       <View style={{ alignItems: "flex-start" }}>
-                        <Text style={styles.activityAmount}>{formatDzd(Number(item.amount))}</Text>
+                         {item.amount == null ? null : <Text style={styles.activityAmount}>{formatDzd(Number(item.amount))}</Text>}
                         <Text style={styles.activityDate}>{formatDate(item.created_at)}</Text>
                       </View>
                     </View>

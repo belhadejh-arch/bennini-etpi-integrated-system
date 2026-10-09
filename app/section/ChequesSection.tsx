@@ -14,7 +14,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
-import { hasPermission } from "../../shared/access";
+import { canUploadFiles, hasPermission } from "../../shared/access";
 
 type Status = "pending" | "paid" | "cancelled";
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
@@ -120,6 +120,7 @@ export default function ChequesSection() {
   const canCreate = hasPermission(member, "cheques", "create");
   const canEdit = hasPermission(member, "cheques", "edit");
   const canManage = canCreate || canEdit;
+  const canAddAttachments = canManage && canUploadFiles(member);
   const queryString = useMemo(() => {
     const params = new URLSearchParams({ page: String(page) });
     if (search) params.set("q", search);
@@ -513,10 +514,12 @@ export default function ChequesSection() {
                 </View>
               </View>
             ) : null}
-            <Pressable onPress={() => void chooseDocuments()} disabled={saving} style={styles.outlineButton}>
-              <FilePlus2 size={16} color={colors.blue} />
-              <Text style={styles.outlineButtonText}>إرفاق صورة الشيك أو الفاتورة / الوثيقة</Text>
-            </Pressable>
+            {canAddAttachments ? (
+              <Pressable onPress={() => void chooseDocuments()} disabled={saving} style={styles.outlineButton}>
+                <FilePlus2 size={16} color={colors.blue} />
+                <Text style={styles.outlineButtonText}>إرفاق صورة الشيك أو الفاتورة / الوثيقة</Text>
+              </Pressable>
+            ) : null}
             {pickedDocs.length ? (
               <View style={styles.pickedList}>
                 {pickedDocs.map((doc, index) => (
@@ -622,7 +625,7 @@ export default function ChequesSection() {
                         <ActionButton label="إلغاء الشيك" onPress={() => void updateStatus(item, "cancelled")} icon={<X size={14} color={colors.red} />} />
                       </>
                     ) : null}
-                    {canManage && item.attachments.length < 5 ? (
+                    {canAddAttachments && item.attachments.length < 5 ? (
                       <ActionButton label="إضافة مرفق" onPress={() => void addAttachments(item)} icon={<FilePlus2 size={14} color={colors.blue} />} />
                     ) : null}
                     {hasPermission(member, "cheques", "delete") ? <ActionButton label="حذف" onPress={() => deleteCheque(item)} icon={<Trash2 size={14} color={colors.red} />} danger /> : null}

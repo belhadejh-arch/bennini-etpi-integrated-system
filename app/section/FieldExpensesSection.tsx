@@ -13,7 +13,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
-import { hasPermission } from "../../shared/access";
+import { canUploadFiles, hasPermission } from "../../shared/access";
 
 type ReviewStatus = "pending" | "reviewed";
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
@@ -88,6 +88,7 @@ export default function FieldExpensesSection() {
   const canAccess = hasPermission(member, "field", "view");
   const canRecord = hasPermission(member, "field", "create");
   const canEdit = hasPermission(member, "field", "edit");
+  const canAddAttachments = canUploadFiles(member) && (canRecord || canEdit);
   const visibleItems = useMemo(
     () => statusFilter === "all" ? items : items.filter((item) => item.review_status === statusFilter),
     [items, statusFilter],
@@ -374,11 +375,13 @@ export default function FieldExpensesSection() {
             <TextInput style={[styles.input, styles.textArea]} value={draft.notes} onChangeText={(value) => setField("notes", value)}
               placeholder="أضف أي معلومة للإدارة" placeholderTextColor="#98A5B4" multiline />
 
-            <Pressable onPress={() => void chooseDocuments()} disabled={saving} style={styles.attachmentButton}>
-              <ImagePlus size={17} color={colors.blue} />
-              <Text style={styles.attachmentButtonText}>إضافة صور الفاتورة أو الوصل</Text>
-              <Text style={styles.attachmentCount}>{pickedDocs.length}/5</Text>
-            </Pressable>
+            {canUploadFiles(member) ? (
+              <Pressable onPress={() => void chooseDocuments()} disabled={saving} style={styles.attachmentButton}>
+                <ImagePlus size={17} color={colors.blue} />
+                <Text style={styles.attachmentButtonText}>إضافة صور الفاتورة أو الوصل</Text>
+                <Text style={styles.attachmentCount}>{pickedDocs.length}/5</Text>
+              </Pressable>
+            ) : null}
             {pickedDocs.length ? (
               <View style={styles.pickedList}>
                 {pickedDocs.map((doc, index) => (
@@ -417,7 +420,8 @@ export default function FieldExpensesSection() {
             <ExpenseCard key={expense.id} expense={expense} isAdmin={isAdmin} canRecord={canRecord}
               canReview={canEdit} canEditNotes={canEdit && (isAdmin || expense.created_by_id === member?.clerk_user_id)}
               saving={saving} onReview={() => void changeReview(expense, expense.review_status === "pending" ? "reviewed" : "pending")}
-              onAddAttachment={() => void addAttachments(expense)} onOpenAttachment={(attachment) => void openAttachment(attachment)} />
+              canAddAttachment={canAddAttachments} onAddAttachment={() => void addAttachments(expense)}
+              onOpenAttachment={(attachment) => void openAttachment(attachment)} />
           ))
         ) : (
           <View style={styles.emptyCard}>
@@ -461,12 +465,13 @@ function FilterChip({ label, selected, onPress }: { label: string; selected: boo
   );
 }
 
-function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, saving, onReview, onAddAttachment, onOpenAttachment }: {
+function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, canAddAttachment, saving, onReview, onAddAttachment, onOpenAttachment }: {
   expense: FieldExpense;
   isAdmin: boolean;
   canRecord: boolean;
   canReview: boolean;
   canEditNotes: boolean;
+  canAddAttachment: boolean;
   saving: boolean;
   onReview: () => void;
   onAddAttachment: () => void;
@@ -527,7 +532,7 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, sav
               </Text>
             </Pressable>
           ) : null}
-          {canRecord && expense.review_status === "pending" && expense.attachments.length < 5 ? (
+          {canAddAttachment && expense.review_status === "pending" && expense.attachments.length < 5 ? (
             <Pressable onPress={onAddAttachment} disabled={saving} style={styles.addAttachmentAction}>
               <ImagePlus size={14} color={colors.blue} />
               <Text style={styles.addAttachmentText}>إضافة صورة أو وصل</Text>
