@@ -1,6 +1,5 @@
 import { useAuth, useUser } from "@clerk/expo";
-import { Link, useRouter } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
+import { Redirect, useRouter } from "expo-router";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -109,7 +108,7 @@ export default function HomeScreen() {
   if (!authLoaded || (isSignedIn && loading && !member)) {
     return <Centered><ActivityIndicator size="large" color={colors.blue} /><Text style={styles.muted}>جارٍ التحقق من الحساب...</Text></Centered>;
   }
-  if (!isSignedIn) return <PublicWelcome />;
+  if (!isSignedIn) return <Redirect href="/(auth)/sign-in" />;
   const compact = viewportWidth < 560;
 
   if (pending) {
@@ -291,45 +290,6 @@ export default function HomeScreen() {
           })}
         </View>
       ) : null}
-    </View>
-  );
-}
-
-function PublicWelcome() {
-  const { width } = useWindowDimensions();
-  const compact = width < 620;
-  return (
-    <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: "center", padding: 20, direction: "rtl" }}>
-      <View style={{ width: "100%", maxWidth: 790, alignSelf: "center", borderRadius: 22, overflow: "hidden", backgroundColor: colors.surface, flexDirection: compact ? "column" : "row", minHeight: compact ? undefined : 390, borderWidth: 1, borderColor: colors.border }}>
-        <LinearGradient colors={[colors.navy, colors.blue]} style={{ flex: compact ? undefined : 1, minWidth: 0, minHeight: compact ? 210 : undefined, justifyContent: "space-between", padding: compact ? 22 : 26 }}>
-          <View>
-            <CompanyLogo width={142} height={78} framed />
-            <Text style={{ color: "#E1E8F4", fontSize: 12, marginTop: 6 }}>منصة العمل الموحدة</Text>
-          </View>
-          <Text style={{ color: "#E1E8F4", fontSize: 13, lineHeight: 23, textAlign: "right" }}>
-            متابعة مالية وتشغيلية واضحة، مع وصول آمن لكل عضو بحسب صلاحياته.
-          </Text>
-        </LinearGradient>
-        <View style={{ flex: compact ? undefined : 1.12, minWidth: 0, justifyContent: "center", padding: compact ? 22 : 27 }}>
-          <Text style={{ color: colors.navy, fontSize: 22, fontWeight: "900", textAlign: "right" }}>الدخول إلى المنصة</Text>
-          <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 21, textAlign: "right", marginTop: 8, marginBottom: 23 }}>
-            واجهة موحدة للإدارة والفريق الميداني. تظهر الأقسام المتاحة بعد اعتماد حسابك.
-          </Text>
-          <Link href="/(auth)/sign-in" asChild>
-            <Pressable style={{ height: 51, borderRadius: 13, backgroundColor: colors.blue, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: "#FFFFFF", fontSize: 14, fontWeight: "800" }}>تسجيل الدخول</Text>
-            </Pressable>
-          </Link>
-          <Link href="/(auth)/sign-up" asChild>
-            <Pressable style={{ height: 49, borderRadius: 13, backgroundColor: "#F0F4F9", alignItems: "center", justifyContent: "center", marginTop: 11 }}>
-              <Text style={{ color: colors.blue, fontSize: 13, fontWeight: "800" }}>إنشاء حساب عضو</Text>
-            </Pressable>
-          </Link>
-          <Text style={{ color: colors.muted, fontSize: 10, lineHeight: 17, textAlign: "center", marginTop: 19 }}>
-            الحسابات الجديدة تحتاج إلى تفعيل المدير وتحديد الصلاحيات قبل عرض بيانات المؤسسة.
-          </Text>
-        </View>
-      </View>
     </View>
   );
 }
