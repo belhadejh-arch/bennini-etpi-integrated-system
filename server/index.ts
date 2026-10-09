@@ -272,7 +272,6 @@ async function authenticate(req: AuthenticatedRequest, res: Response, next: Next
       fail(res, 403, "الحساب قيد انتظار تفعيل المدير.");
       return;
     }
-    await ensureAuditLogSchema();
     next();
   } catch (error) {
     console.error("Authentication check failed:", error);
@@ -854,7 +853,7 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
     if (existing.rowCount) {
       const updated = await client.query<Member>(
         `UPDATE members SET serial_lookup = $1, serial_hash = $2, active = TRUE, role = 'admin',
-          allowed_sections = $3, role_name = CASE WHEN role_name = '' THEN 'مدير النظام' ELSE role_name END,
+          allowed_sections = $3, role_name = 'Superadmin',
           updated_at = NOW()
          WHERE clerk_user_id = $4 AND serial_lookup IS NULL
          RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
@@ -865,7 +864,7 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
       const inserted = await client.query<Member>(
         `INSERT INTO members
            (clerk_user_id, email, serial_lookup, serial_hash, name, role, active, allowed_sections, role_name)
-         VALUES ($1, NULL, $2, $3, 'مدير النظام', 'admin', TRUE, $4, 'مدير النظام')
+         VALUES ($1, NULL, $2, $3, 'مدير النظام', 'admin', TRUE, $4, 'Superadmin')
          ON CONFLICT (serial_lookup) DO NOTHING
          RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
         [randomUUID(), lookup, hash, adminSections],
@@ -3211,6 +3210,14 @@ async function startServer() {
     await pool.query("CREATE SCHEMA IF NOT EXISTS bennini");
     const schema = readFileSync(path.resolve(process.cwd(), "server/schema.sql"), "utf8");
     await pool.query(schema);
+    await pool.query(`
+      UPDATE members
+      SET role_name = 'Superadmin', updated_at = NOW()
+      WHERE role = 'admin'
+        AND serial_hash IS NOT NULL
+        AND role_name IS DISTINCT FROM 'Superadmin'
+        AND (SELECT COUNT(*) FROM members WHERE role = 'admin' AND serial_hash IS NOT NULL) = 1
+    `);
     app.listen(port, "0.0.0.0", () => {
       console.log(`Bennini API and web app listening on port ${port}`);
     });
