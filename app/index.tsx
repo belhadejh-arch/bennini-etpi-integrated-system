@@ -12,11 +12,9 @@ import {
   HardHat,
   LayoutDashboard,
   LogOut,
-  Menu,
   ReceiptText,
   ShoppingCart,
   Wallet,
-  X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -34,6 +32,7 @@ import { apiRequest, type DashboardData, type Member } from "../lib/api";
 import { colors, formatDzd } from "../lib/theme";
 import { sections, type SectionId } from "../shared/sections";
 import { hasPermission } from "../shared/access";
+import { useSidebarAction } from "./components/AppSidebar";
 
 type ApiError = Error & { status?: number; body?: { pending?: boolean; error?: string } };
 
@@ -54,12 +53,12 @@ export default function HomeScreen() {
   const { width: viewportWidth } = useWindowDimensions();
   const { isLoaded: authLoaded, isSignedIn, getToken, signOut } = useAuth();
   const { user } = useUser();
+  const sidebarAction = useSidebarAction();
   const [member, setMember] = useState<Member | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
@@ -90,7 +89,6 @@ export default function HomeScreen() {
     if (authLoaded && isSignedIn) void refresh();
   }, [authLoaded, isSignedIn, refresh]);
 
-  const isAdmin = member?.role === "admin";
   const canSeeFinancialData = hasPermission(member, "finance", "view");
   const permitted = useMemo(
     () => new Set(sections.filter((section) => hasPermission(member, section.id, "view")).map((section) => section.id)),
@@ -100,7 +98,6 @@ export default function HomeScreen() {
     if (section === "dashboard") router.push("/");
     else if (section === "users") router.push("/members");
     else router.push({ pathname: "/section/[section]", params: { section } });
-    setMenuOpen(false);
   };
 
   if (!authLoaded || (isSignedIn && loading && !member)) {
@@ -139,46 +136,12 @@ export default function HomeScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>
       <AppHeader
         title="لوحة القيادة"
-        leftAction={
-          <HeaderAction
-            label={menuOpen ? "إغلاق قائمة الأقسام" : "فتح قائمة الأقسام"}
-            onPress={() => setMenuOpen((open) => !open)}
-          >
-            <Menu size={21} color="#FFFFFF" />
-          </HeaderAction>
-        }
         rightAction={
           <HeaderAction label="تسجيل الخروج" onPress={() => void signOut()}>
             <LogOut size={18} color="#D8E2EF" />
           </HeaderAction>
         }
       />
-      {menuOpen ? (
-        <View style={styles.menuPanel}>
-          <View style={styles.menuTop}>
-            <Text style={styles.menuTitle}>أقسام المنصة</Text>
-            <Pressable onPress={() => setMenuOpen(false)} hitSlop={8}><X size={20} color={colors.muted} /></Pressable>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
-            {sections.filter((section) => section.id === "dashboard" || permitted.has(section.id)).map((section) => {
-              const Icon = icons[section.id];
-              return (
-                <Pressable key={section.id} onPress={() => goToSection(section.id)} style={styles.menuItem}>
-                  <Icon size={16} color={colors.blue} />
-                  <Text style={styles.menuItemText}>{section.shortLabel}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          {isAdmin ? (
-            <Pressable onPress={() => { setMenuOpen(false); router.push("/members"); }} style={[styles.menuItem, { marginTop: 6, alignSelf: "flex-start" }]}>
-              <LayoutDashboard size={16} color={colors.blue} />
-              <Text style={[styles.menuItemText, { color: colors.blue }]}>إدارة الأعضاء والصلاحيات</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
-
       <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}>
         <View style={styles.welcome}>
           <View style={styles.welcomeCopy}>
@@ -281,14 +244,16 @@ export default function HomeScreen() {
         ) : null}
       </ScrollView>
 
-      <View style={styles.bottomBar}>
-        <BottomAction label="الرئيسية" icon={LayoutDashboard} selected onPress={() => router.replace("/")} />
-        {(["finance", "inventory", "field"] as SectionId[]).filter((id) => permitted.has(id)).slice(0, 3).map((id) => {
-          const section = sections.find((entry) => entry.id === id)!;
-          const Icon = icons[id];
-          return <BottomAction key={id} label={section.shortLabel} icon={Icon} onPress={() => goToSection(id)} />;
-        })}
-      </View>
+      {sidebarAction?.visible ? (
+        <View style={styles.bottomBar}>
+          <BottomAction label="الرئيسية" icon={LayoutDashboard} selected onPress={() => router.replace("/")} />
+          {(["finance", "inventory", "field"] as SectionId[]).filter((id) => permitted.has(id)).slice(0, 3).map((id) => {
+            const section = sections.find((entry) => entry.id === id)!;
+            const Icon = icons[id];
+            return <BottomAction key={id} label={section.shortLabel} icon={Icon} onPress={() => goToSection(id)} />;
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }

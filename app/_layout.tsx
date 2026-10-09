@@ -5,6 +5,7 @@ import Constants from "expo-constants";
 import { StatusBar } from "expo-status-bar";
 import { View, Text } from "react-native";
 import { colors } from "../lib/theme";
+import { WorkspaceShell } from "./components/WorkspaceShell";
 
 const publishableKey = Constants.expoConfig?.extra?.clerkPublishableKey as string | undefined;
 const clerkProxyUrl = Constants.expoConfig?.extra?.clerkProxyUrl as string | undefined;
@@ -27,13 +28,16 @@ export default function RootLayout() {
       proxyUrl={clerkProxyUrl}
     >
       <StatusBar style="light" backgroundColor={colors.navy} />
-      <Stack screenOptions={{ headerShown: false, animation: "fade" }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(auth)/sign-in" />
-        <Stack.Screen name="(auth)/sign-up" />
-        <Stack.Screen name="section/[section]" />
-        <Stack.Screen name="members" />
-      </Stack>
+      <WorkspaceShell>
+        <Stack screenOptions={{ headerShown: false, animation: "fade" }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="(auth)/sign-in" />
+          <Stack.Screen name="(auth)/sign-up" />
+          <Stack.Screen name="section/[section]" />
+          <Stack.Screen name="members" />
+          <Stack.Screen name="settings" />
+        </Stack>
+      </WorkspaceShell>
     </ClerkProvider>
   );
 }

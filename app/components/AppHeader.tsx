@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { Pressable, Text, View, useWindowDimensions } from "react-native";
+import { Menu } from "lucide-react-native";
 import { colors } from "../../lib/theme";
 import { CompanyLogo } from "./CompanyLogo";
+import { useSidebarAction } from "./AppSidebar";
 
 type AppHeaderProps = {
   title: string;
@@ -37,12 +39,19 @@ export function HeaderAction({
 export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
   const { width } = useWindowDimensions();
   const compact = width < 420;
+  const sidebar = useSidebarAction();
   const logoWidth = compact ? 58 : 68;
   const logoHeight = compact ? 31 : 37;
 
   return (
     <View style={styles.header}>
-      <View style={styles.actionSlot}>{leftAction}</View>
+      <View style={styles.actionSlot}>
+        {sidebar?.visible ? (
+          <HeaderAction label="فتح قائمة الأقسام" onPress={sidebar.toggle}>
+            <Menu size={20} color="#FFFFFF" />
+          </HeaderAction>
+        ) : leftAction}
+      </View>
       <View style={styles.brand}>
         <CompanyLogo width={logoWidth} height={logoHeight} framed />
         <Text numberOfLines={1} style={styles.title}>{title}</Text>
