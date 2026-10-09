@@ -11,6 +11,7 @@ export default function InitialAdminSetupScreen() {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const [bootstrapToken, setBootstrapToken] = useState("");
+  const [adminSerial, setAdminSerial] = useState("");
   const [serial, setSerial] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -21,7 +22,7 @@ export default function InitialAdminSetupScreen() {
     try {
       const result = await apiRequest<{ serial: string }>("/auth/bootstrap", async () => null, {
         method: "POST",
-        body: JSON.stringify({ bootstrapToken }),
+          body: JSON.stringify({ bootstrapToken, serial: adminSerial }),
       });
       setSerial(result.serial);
       setBootstrapToken("");
@@ -42,7 +43,7 @@ export default function InitialAdminSetupScreen() {
           </View>
           <Text style={{ color: colors.navy, fontSize: 22, fontWeight: "800", textAlign: "right" }}>إعداد دخول المدير الأول</Text>
           <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 21, textAlign: "right", marginTop: 8, marginBottom: 18 }}>
-            هذه الخطوة لمرة واحدة لإنشاء رقم المدير في قاعدة البيانات. أدخل رمز التهيئة الذي أُضيف إلى أسرار المشروع.
+             هذه الخطوة لمرة واحدة لإنشاء حساب المدير في قاعدة البيانات. أدخل رمز التهيئة ورقم الدخول المكوّن من ستة أرقام.
           </Text>
           {serial ? (
             <View style={{ backgroundColor: "#F1F6FB", borderRadius: 14, padding: 18, alignItems: "center" }}>
@@ -67,7 +68,18 @@ export default function InitialAdminSetupScreen() {
                 placeholderTextColor="#94A3B8"
                 style={{ height: 52, borderWidth: 1, borderColor: colors.border, borderRadius: 13, paddingHorizontal: 14, color: colors.ink, marginTop: 8, textAlign: "left" }}
               />
-              <Pressable onPress={() => void setup()} disabled={busy || !bootstrapToken} style={{ marginTop: 18, height: 52, borderRadius: 13, backgroundColor: colors.blue, alignItems: "center", justifyContent: "center", opacity: busy || !bootstrapToken ? 0.6 : 1 }}>
+              <Text style={{ color: colors.ink, fontWeight: "700", textAlign: "right", marginTop: 16 }}>الرقم التسلسلي للمدير</Text>
+              <TextInput
+                value={adminSerial}
+                onChangeText={(value) => setAdminSerial(value.replace(/\D/g, "").slice(0, 6))}
+                keyboardType="number-pad"
+                autoComplete="off"
+                placeholder="أدخل الرقم المكوّن من ستة أرقام"
+                placeholderTextColor="#94A3B8"
+                maxLength={6}
+                style={{ height: 52, borderWidth: 1, borderColor: colors.border, borderRadius: 13, paddingHorizontal: 14, color: colors.ink, marginTop: 8, textAlign: "center", letterSpacing: 8, fontSize: 21 }}
+              />
+              <Pressable onPress={() => void setup()} disabled={busy || !bootstrapToken || adminSerial.length !== 6} style={{ marginTop: 18, height: 52, borderRadius: 13, backgroundColor: colors.blue, alignItems: "center", justifyContent: "center", opacity: busy || !bootstrapToken || adminSerial.length !== 6 ? 0.6 : 1 }}>
                 {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={{ color: "#FFFFFF", fontWeight: "800" }}>إنشاء رقم المدير</Text>}
               </Pressable>
               {message ? <Text style={{ color: colors.red, fontSize: 13, textAlign: "right", marginTop: 14 }}>{message}</Text> : null}

@@ -17,8 +17,8 @@ import {
 } from "../shared/access";
 
 const { Pool } = pg;
-const databaseUrl = process.env.NEON_DATABASE_URL;
-if (!databaseUrl) throw new Error("NEON_DATABASE_URL is required.");
+const databaseUrl = process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL;
+if (!databaseUrl) throw new Error("NEON_DATABASE_URL or DATABASE_URL is required.");
 const pool = new Pool({
   connectionString: databaseUrl,
   onConnect: async (client) => {
@@ -844,6 +844,8 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
   if (!bootstrapToken || bootstrapToken.length < 32) return fail(res, 503, "إعداد المدير الأول غير متاح.");
   const suppliedToken = typeof req.body?.bootstrapToken === "string" ? req.body.bootstrapToken : "";
   if (!constantTimeTextMatch(suppliedToken, bootstrapToken)) return fail(res, 401, "بيانات التهيئة غير صحيحة.");
+  const requestedSerial = typeof req.body?.serial === "string" ? req.body.serial.trim() : "";
+  if (!/^\d{6}$/.test(requestedSerial)) return fail(res, 400, "أدخل رقم المدير المكوّن من ستة أرقام.");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -861,10 +863,16 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
       return fail(res, 409, "تم إعداد حساب المدير مسبقاً.");
     }
 
-    let serial = "";
+    const requestedLookup = serialLookup(requestedSerial);
+    const serialInUse = await client.query("SELECT 1 FROM members WHERE serial_lookup = $1 LIMIT 1", [requestedLookup]);
+    if (serialInUse.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 409, "رقم الدخول مستخدم بالفعل. اختر رقماً آخر.");
+    }
+
+    const serial = requestedSerial;
     let saved: Member | undefined;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      serial = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    for (let attempt = 0; attempt < 1; attempt += 1) {
       const lookup = serialLookup(serial);
       const hash = await hashSerial(serial);
       if (existing.rowCount) {

@@ -83,7 +83,7 @@ Continue developing this project in the [Lovable editor](https://lovable.dev/pro
 
 Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
 
-Configure the `NEON_DATABASE_URL` and `SESSION_SECRET` environment secrets before starting the server. Set a high-entropy `ADMIN_BOOTSTRAP_TOKEN` secret for one-time administrator setup. The first administrator uses that token at the setup screen; the app creates a six-digit serial and displays it once. Administrators create all later member accounts and serials from the members dashboard.
+Configure the `NEON_DATABASE_URL` and `SESSION_SECRET` environment secrets before starting the server. Set a high-entropy `ADMIN_BOOTSTRAP_TOKEN` secret for one-time administrator setup. At `/setup`, enter that token and the six-digit serial to assign to the first administrator; the app stores only a protected hash and displays the serial once. Administrators create all later member accounts and serials from the members dashboard.
 
 ```sh
 git clone <this-repository-url>
