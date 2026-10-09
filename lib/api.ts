@@ -14,16 +14,18 @@ export async function apiRequest<T>(
     throw new Error("يلزم إعداد عنوان الخادم قبل تشغيل تطبيق الهاتف.");
   }
 
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const response = await fetch(`${baseUrl ?? ""}/api${path}`, {
     ...options,
     headers: {
       Accept: "application/json",
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.body && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
   });
-  const body = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const isJson = response.headers.get("content-type")?.includes("application/json");
+  const body = (isJson ? await response.json().catch(() => ({})) : {}) as T & { error?: string };
   if (!response.ok) {
     const error = new Error(body.error || "تعذر الاتصال بالخادم.") as Error & { status?: number; body?: unknown };
     error.status = response.status;

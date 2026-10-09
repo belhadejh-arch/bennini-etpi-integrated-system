@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import path from "node:path";
 import { existsSync } from "node:fs";
+import multer from "multer";
 import { clerkClient, clerkMiddleware, getAuth } from "@clerk/express";
 import cors from "cors";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
@@ -46,6 +47,30 @@ type AuthenticatedRequest = Request & {
 };
 
 const adminSections = [...allSectionIds];
+const paymentMethods = ["نقداً", "شيك", "تحويل بنكي"] as const;
+const transactionUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 5 },
+  fileFilter: (_req, file, callback) => {
+    const allowedTypes = new Set([
+      "application/pdf",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ]);
+    const extension = path.extname(file.originalname).toLowerCase();
+    const allowedExtensions = new Set([".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx", ".xls", ".xlsx"]);
+    if (!allowedTypes.has(file.mimetype) || !allowedExtensions.has(extension)) {
+      callback(new Error("نوع الملف غير مدعوم. استخدم PDF أو صورة أو مستند Office."));
+      return;
+    }
+    callback(null, true);
+  },
+}).array("files", 5);
 
 function fail(res: Response, status: number, message: string) {
   return res.status(status).json({ error: message });
@@ -157,6 +182,45 @@ async function writeAudit(member: Member, action: string, details: string) {
   );
 }
 
+async function writeAuditWithClient(client: pg.PoolClient, member: Member, action: string, details: string) {
+  await client.query(
+    "INSERT INTO audit_logs (action, details, performed_by_id, performed_by_name) VALUES ($1, $2, $3, $4)",
+    [action, details, member.clerk_user_id, member.name],
+  );
+}
+
+function validIsoDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function uploadFiles(req: Request, res: Response, next: NextFunction) {
+  transactionUpload(req, res, (error) => {
+    if (!error) return next();
+    const message = error instanceof Error ? error.message : "تعذر رفع المستند.";
+    return fail(res, error instanceof multer.MulterError ? 400 : 415, message);
+  });
+}
+
+async function recalculateCashBalances(client: pg.PoolClient) {
+  await client.query(
+    `WITH balances AS (
+       SELECT id,
+         SUM(CASE WHEN payment_method = 'نقداً'
+           THEN CASE WHEN type = 'income' THEN amount ELSE -amount END
+           ELSE 0 END)
+         OVER (ORDER BY transaction_date ASC, created_at ASC, id ASC
+           ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS balance
+       FROM transactions
+     )
+     UPDATE transactions AS target
+     SET cash_balance_after = balances.balance
+     FROM balances
+     WHERE target.id = balances.id`,
+  );
+}
+
 app.get("/api/health", async (_req, res) => {
   try {
     await pool.query("SELECT 1");
@@ -239,6 +303,70 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), async (_req
   }
 });
 
+app.get("/api/transactions", authenticate, requireSection("finance"), async (req, res) => {
+  const query = req.query;
+  const where: string[] = [];
+  const values: unknown[] = [];
+  const value = (item: unknown) => {
+    values.push(item);
+    return `$${values.length}`;
+  };
+  const type = typeof query.type === "string" ? query.type : "";
+  const method = typeof query.paymentMethod === "string" ? query.paymentMethod : "";
+  const from = typeof query.from === "string" ? query.from : "";
+  const to = typeof query.to === "string" ? query.to : "";
+  const minAmount = typeof query.minAmount === "string" ? query.minAmount : "";
+  const maxAmount = typeof query.maxAmount === "string" ? query.maxAmount : "";
+  const party = typeof query.party === "string" ? query.party.trim() : "";
+  const recorder = typeof query.recorder === "string" ? query.recorder.trim() : "";
+
+  if (type && !["income", "expense"].includes(type)) return fail(res, 400, "نوع العملية غير صالح.");
+  if (method && !paymentMethods.includes(method as (typeof paymentMethods)[number])) return fail(res, 400, "طريقة الدفع غير صالحة.");
+  if (from && !validIsoDate(from)) return fail(res, 400, "تاريخ البداية غير صالح.");
+  if (to && !validIsoDate(to)) return fail(res, 400, "تاريخ النهاية غير صالح.");
+  if (minAmount && (!Number.isFinite(Number(minAmount)) || Number(minAmount) < 0)) return fail(res, 400, "الحد الأدنى للمبلغ غير صالح.");
+  if (maxAmount && (!Number.isFinite(Number(maxAmount)) || Number(maxAmount) < 0)) return fail(res, 400, "الحد الأعلى للمبلغ غير صالح.");
+  if (from && to && from > to) return fail(res, 400, "تاريخ البداية يجب أن يسبق تاريخ النهاية.");
+  if (minAmount && maxAmount && Number(minAmount) > Number(maxAmount)) return fail(res, 400, "الحد الأدنى للمبلغ أكبر من الحد الأعلى.");
+
+  if (type) where.push(`t.type = ${value(type)}`);
+  if (method) where.push(`t.payment_method = ${value(method)}`);
+  if (from) where.push(`t.transaction_date >= ${value(from)}::date`);
+  if (to) where.push(`t.transaction_date <= ${value(to)}::date`);
+  if (minAmount) where.push(`t.amount >= ${value(minAmount)}`);
+  if (maxAmount) where.push(`t.amount <= ${value(maxAmount)}`);
+  if (party) where.push(`t.party ILIKE ${value(`%${party}%`)}`);
+  if (recorder) where.push(`t.recorded_by_name ILIKE ${value(`%${recorder}%`)}`);
+  const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const page = Math.max(1, Math.min(100000, Number.parseInt(String(query.page ?? "1"), 10) || 1));
+  const pageSize = 25;
+  const pageValues = [...values, pageSize, (page - 1) * pageSize];
+  try {
+    const [result, count, balance] = await Promise.all([
+      pool.query(
+        `SELECT t.id, t.type, t.amount, t.party, t.reason, t.payment_method, t.transaction_date AS date,
+          t.cash_balance_after, t.notes, t.recorded_by_id, t.recorded_by_name, t.created_at, t.updated_at,
+          COALESCE((SELECT json_agg(json_build_object(
+            'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
+          ) ORDER BY a.created_at) FROM transaction_attachments a WHERE a.transaction_id = t.id), '[]'::json) AS attachments
+         FROM transactions t ${clause}
+         ORDER BY t.transaction_date DESC, t.created_at DESC, t.id DESC
+         LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        pageValues,
+      ),
+      pool.query(`SELECT COUNT(*)::int AS total FROM transactions t ${clause}`, values),
+      pool.query(
+        `SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0) AS amount
+         FROM transactions WHERE payment_method = 'نقداً'`,
+      ),
+    ]);
+    res.json({ items: result.rows, total: count.rows[0].total, page, pageSize, cashBalance: Number(balance.rows[0].amount) });
+  } catch (error) {
+    console.error("Transaction search failed:", error);
+    fail(res, 500, "تعذر تحميل العمليات المالية.");
+  }
+});
+
 app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest, res) => {
   const section = req.params.section as SectionId;
   if (!allSectionIds.includes(section)) return fail(res, 404, "القسم غير موجود.");
@@ -274,24 +402,163 @@ app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest
 });
 
 app.post("/api/transactions", authenticate, requireSection("finance"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
-  const { type, amount, party, reason, paymentMethod } = req.body ?? {};
+  const { type, amount, party, reason, paymentMethod, transactionDate, notes } = req.body ?? {};
   if (!["income", "expense"].includes(type) || !Number.isFinite(Number(amount)) || Number(amount) <= 0 ||
-      typeof party !== "string" || !party.trim()) {
-    return fail(res, 400, "أدخل نوع العملية والمبلغ والجهة بشكل صحيح.");
+      typeof party !== "string" || !party.trim() || !paymentMethods.includes(paymentMethod) ||
+      (transactionDate !== undefined && !validIsoDate(transactionDate))) {
+    return fail(res, 400, "أدخل نوع العملية والمبلغ والجهة وطريقة الدفع والتاريخ بشكل صحيح.");
   }
+  const client = await pool.connect();
   try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(574382910)");
     const member = req.member!;
-    const result = await pool.query(
-      `INSERT INTO transactions (type, amount, party, reason, payment_method, recorded_by_id, recorded_by_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, type, amount, party, reason, payment_method, transaction_date AS date, recorded_by_name`,
-      [type, amount, party.trim(), String(reason ?? "").trim(), String(paymentMethod ?? "نقداً"), member.clerk_user_id, member.name],
+    const result = await client.query(
+      `INSERT INTO transactions (type, amount, party, reason, payment_method, transaction_date, notes, recorded_by_id, recorded_by_name)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE), $7, $8, $9)
+       RETURNING id`,
+      [type, amount, party.trim(), String(reason ?? "").trim(), paymentMethod, transactionDate ?? null, String(notes ?? "").trim(), member.clerk_user_id, member.name],
     );
-    await writeAudit(member, "تسجيل عملية مالية", `${type === "income" ? "دخل" : "مصروف"} بقيمة ${amount} دج.`);
-    res.status(201).json({ item: result.rows[0] });
+    await recalculateCashBalances(client);
+    const item = await client.query(
+      `SELECT id, type, amount, party, reason, payment_method, transaction_date AS date, cash_balance_after,
+        notes, recorded_by_id, recorded_by_name, created_at, updated_at
+       FROM transactions WHERE id = $1`,
+      [result.rows[0].id],
+    );
+    await writeAuditWithClient(client, member, "تسجيل عملية مالية", `${type === "income" ? "دخل" : "مصروف"} بقيمة ${amount} دج.`);
+    await client.query("COMMIT");
+    res.status(201).json({ item: item.rows[0] });
   } catch (error) {
+    await client.query("ROLLBACK");
     console.error("Transaction creation failed:", error);
     fail(res, 500, "تعذر حفظ العملية المالية.");
+  } finally {
+    client.release();
+  }
+});
+
+app.patch("/api/transactions/:id", authenticate, requireSection("finance"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+  const { type, amount, party, reason, paymentMethod, transactionDate, notes } = req.body ?? {};
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0 || !["income", "expense"].includes(type) ||
+      !Number.isFinite(Number(amount)) || Number(amount) <= 0 || typeof party !== "string" || !party.trim() ||
+      !paymentMethods.includes(paymentMethod) || !validIsoDate(transactionDate)) {
+    return fail(res, 400, "بيانات العملية المالية غير صالحة.");
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(574382910)");
+    const result = await client.query(
+      `UPDATE transactions SET type = $1, amount = $2, party = $3, reason = $4, payment_method = $5,
+        transaction_date = $6, notes = $7, updated_at = NOW()
+       WHERE id = $8 RETURNING id`,
+      [type, amount, party.trim(), String(reason ?? "").trim(), paymentMethod, transactionDate, String(notes ?? "").trim(), id],
+    );
+    if (!result.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "العملية المالية غير موجودة.");
+    }
+    await recalculateCashBalances(client);
+    const item = await client.query(
+      `SELECT id, type, amount, party, reason, payment_method, transaction_date AS date, cash_balance_after,
+        notes, recorded_by_id, recorded_by_name, created_at, updated_at
+       FROM transactions WHERE id = $1`,
+      [id],
+    );
+    await writeAuditWithClient(client, req.member!, "تعديل عملية مالية", `تحديث العملية رقم ${id}.`);
+    await client.query("COMMIT");
+    res.json({ item: item.rows[0] });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Transaction update failed:", error);
+    fail(res, 500, "تعذر تعديل العملية المالية.");
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/transactions/:id", authenticate, requireSection("finance"), requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم العملية غير صالح.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(574382910)");
+    const result = await client.query("DELETE FROM transactions WHERE id = $1 RETURNING id", [id]);
+    if (!result.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "العملية المالية غير موجودة.");
+    }
+    await recalculateCashBalances(client);
+    await writeAuditWithClient(client, req.member!, "حذف عملية مالية", `حذف العملية رقم ${id}.`);
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Transaction deletion failed:", error);
+    fail(res, 500, "تعذر حذف العملية المالية.");
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/transactions/:id/attachments", authenticate, requireSection("finance"), requireRole("finance"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  const files = (req.files ?? []) as Express.Multer.File[];
+  if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
+  const member = req.member!;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query("SELECT id FROM transactions WHERE id = $1 FOR UPDATE", [id]);
+    if (!existing.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "العملية المالية غير موجودة.");
+    }
+    const saved = [];
+    for (const file of files) {
+      const result = await client.query(
+        `INSERT INTO transaction_attachments
+          (transaction_id, file_name, mime_type, file_size, file_data, uploaded_by_id, uploaded_by_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, file_name, mime_type, file_size`,
+        [id, path.basename(file.originalname), file.mimetype, file.size, file.buffer, member.clerk_user_id, member.name],
+      );
+      saved.push(result.rows[0]);
+    }
+    await writeAuditWithClient(client, member, "إرفاق مستند بعملية مالية", `إرفاق ${files.length} مستند للعملية رقم ${id}.`);
+    await client.query("COMMIT");
+    res.status(201).json({ attachments: saved });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Transaction attachment upload failed:", error);
+    fail(res, 500, "تعذر حفظ المستندات.");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/transaction-attachments/:id", authenticate, requireSection("finance"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم المستند غير صالح.");
+  try {
+    const result = await pool.query(
+      `SELECT file_name, mime_type, file_data FROM transaction_attachments WHERE id = $1`,
+      [id],
+    );
+    if (!result.rowCount) return fail(res, 404, "المستند غير موجود.");
+    const attachment = result.rows[0];
+    const inline = attachment.mime_type === "application/pdf" || attachment.mime_type.startsWith("image/");
+    const safeName = encodeURIComponent(String(attachment.file_name).replace(/[\r\n"]/g, ""));
+    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${safeName}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(Buffer.from(attachment.file_data));
+  } catch (error) {
+    console.error("Transaction attachment read failed:", error);
+    fail(res, 500, "تعذر فتح المستند.");
   }
 });
 

@@ -17,8 +17,23 @@ CREATE TABLE IF NOT EXISTS transactions (
   reason TEXT NOT NULL DEFAULT '',
   payment_method TEXT NOT NULL DEFAULT 'نقداً',
   transaction_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  cash_balance_after NUMERIC(16, 2) NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
   recorded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
   recorded_by_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS transaction_attachments (
+  id BIGSERIAL PRIMARY KEY,
+  transaction_id BIGINT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL CHECK (file_size > 0),
+  file_data BYTEA NOT NULL,
+  uploaded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+  uploaded_by_name TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -93,5 +108,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 CREATE INDEX IF NOT EXISTS transactions_date_idx ON transactions (transaction_date DESC);
+CREATE INDEX IF NOT EXISTS transactions_party_idx ON transactions (party);
+CREATE INDEX IF NOT EXISTS transaction_attachments_transaction_idx ON transaction_attachments (transaction_id, created_at);
 CREATE INDEX IF NOT EXISTS field_expenses_created_idx ON field_expenses (created_at DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs (created_at DESC);
