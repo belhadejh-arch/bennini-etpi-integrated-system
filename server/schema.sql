@@ -225,8 +225,18 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   details TEXT NOT NULL DEFAULT '',
   performed_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
   performed_by_name TEXT NOT NULL,
+  section TEXT NOT NULL DEFAULT 'system',
+  event_type TEXT NOT NULL DEFAULT 'other',
+  entity_id TEXT,
+  data JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE audit_logs
+  ADD COLUMN IF NOT EXISTS section TEXT NOT NULL DEFAULT 'system',
+  ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'other',
+  ADD COLUMN IF NOT EXISTS entity_id TEXT,
+  ADD COLUMN IF NOT EXISTS data JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS audit_log_notes (
   audit_log_id BIGINT PRIMARY KEY REFERENCES audit_logs(id) ON DELETE CASCADE,
@@ -259,3 +269,5 @@ CREATE INDEX IF NOT EXISTS field_expenses_created_idx ON field_expenses (created
 CREATE INDEX IF NOT EXISTS field_expenses_review_created_idx ON field_expenses (review_status, created_at DESC);
 CREATE INDEX IF NOT EXISTS field_expense_attachments_expense_idx ON field_expense_attachments (field_expense_id, created_at);
 CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_logs_section_created_idx ON audit_logs (section, created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_logs_type_created_idx ON audit_logs (event_type, created_at DESC);

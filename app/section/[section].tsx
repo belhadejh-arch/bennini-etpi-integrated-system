@@ -18,6 +18,7 @@ import ChequesSection from "./ChequesSection";
 import RentalsSection from "./RentalsSection";
 import FieldExpensesSection from "./FieldExpensesSection";
 import MachinerySection from "./MachinerySection";
+import AuditLogSection from "./AuditLogSection";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 import { sections, type SectionId } from "../../shared/sections";
@@ -66,7 +67,7 @@ export default function SectionScreen() {
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
     else if (section === "dashboard") router.replace("/");
-    else if (section !== "inventory" && section !== "cheques" && section !== "rentals" && section !== "field") void refresh();
+    else if (section !== "inventory" && section !== "cheques" && section !== "rentals" && section !== "field" && section !== "audit") void refresh();
   }, [isLoaded, isSignedIn, refresh, router, section]);
 
   const canSee = hasPermission(member, section, "view");
@@ -74,6 +75,8 @@ export default function SectionScreen() {
     () => canSee && section === "finance" && hasPermission(member, "finance", "create"),
     [canSee, member, section],
   );
+
+  if (section === "audit") return <AuditLogSection />;
 
   const save = async () => {
     setSaving(true);

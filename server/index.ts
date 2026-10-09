@@ -60,6 +60,48 @@ type AuthenticatedRequest = Request & {
 
 const adminSections = [...allSectionIds];
 let memberSchemaPromise: Promise<void> | null = null;
+let auditLogSchemaPromise: Promise<void> | null = null;
+
+function ensureAuditLogSchema() {
+  if (!auditLogSchemaPromise) {
+    auditLogSchemaPromise = pool.query(`
+      ALTER TABLE audit_logs
+        ADD COLUMN IF NOT EXISTS section TEXT NOT NULL DEFAULT 'system',
+        ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'other',
+        ADD COLUMN IF NOT EXISTS entity_id TEXT,
+        ADD COLUMN IF NOT EXISTS data JSONB NOT NULL DEFAULT '{}'::jsonb;
+      UPDATE audit_logs SET section = CASE
+        WHEN action ILIKE '%ميداني%' OR action ILIKE '%الميدان%' THEN 'field'
+        WHEN action ILIKE '%مالي%' THEN 'finance'
+        WHEN action ILIKE '%شراء%' OR action ILIKE '%مخزون%' THEN 'inventory'
+        WHEN action ILIKE '%شيك%' THEN 'cheques'
+        WHEN action ILIKE '%كراء%' THEN 'rentals'
+        WHEN action ILIKE '%مركبة%' OR action ILIKE '%آلية%' OR action ILIKE '%صيانة%' THEN 'machinery'
+        WHEN action ILIKE '%صلاحيات%' OR action ILIKE '%مدير الأول%' THEN 'users'
+        ELSE section
+      END WHERE section = 'system';
+      UPDATE audit_logs SET event_type = CASE
+        WHEN action ILIKE '%إرفاق%' THEN 'attachment'
+        WHEN action ILIKE '%حذف%' THEN 'delete'
+        WHEN action ILIKE '%صلاحيات%' THEN 'permissions'
+        WHEN action ILIKE '%مراجعة%' OR action ILIKE '%إعادة%' THEN 'review'
+        WHEN action ILIKE '%تعديل%' THEN 'update'
+        WHEN action ILIKE '%تسجيل%' OR action ILIKE '%تهيئة%' THEN 'create'
+        ELSE event_type
+      END WHERE event_type = 'other';
+      CREATE TABLE IF NOT EXISTS audit_log_notes (
+        audit_log_id BIGINT PRIMARY KEY REFERENCES audit_logs(id) ON DELETE CASCADE,
+        notes TEXT NOT NULL DEFAULT '',
+        updated_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+        updated_by_name TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS audit_logs_section_created_idx ON audit_logs (section, created_at DESC);
+      CREATE INDEX IF NOT EXISTS audit_logs_type_created_idx ON audit_logs (event_type, created_at DESC);
+    `).then(() => undefined);
+  }
+  return auditLogSchemaPromise;
+}
 
 function ensureMemberSchema() {
   if (!memberSchemaPromise) {
@@ -147,9 +189,11 @@ async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Mem
     result = inserted;
 
     if (isFirstAdmin) {
-      await pool.query(
-        "INSERT INTO audit_logs (action, details, performed_by_id, performed_by_name) VALUES ($1, $2, $3, $4)",
-        ["تهيئة المدير الأول", "تم إنشاء حساب المدير الأول بعد التحقق من بريده.", auth.userId, email],
+      await writeAudit(
+        inserted.rows[0],
+        "تهيئة المدير الأول",
+        "تم إنشاء حساب المدير الأول بعد التحقق من بريده.",
+        { section: "system", eventType: "setup", entityId: auth.userId },
       );
     }
   }
@@ -167,6 +211,7 @@ async function authenticate(req: AuthenticatedRequest, res: Response, next: Next
       fail(res, 403, "الحساب قيد انتظار تفعيل المدير.");
       return;
     }
+    await ensureAuditLogSchema();
     next();
   } catch (error) {
     console.error("Authentication check failed:", error);
@@ -221,17 +266,43 @@ function requireFileUpload(req: AuthenticatedRequest, res: Response, next: NextF
   next();
 }
 
-async function writeAudit(member: Member, action: string, details: string) {
+type AuditEventType = "create" | "update" | "delete" | "review" | "attachment" | "permissions" | "note" | "setup" | "other";
+type AuditEventOptions = {
+  section: SectionId | "system";
+  eventType: AuditEventType;
+  entityId?: string | number | null;
+  data?: Record<string, unknown>;
+};
+
+async function writeAudit(
+  member: Member,
+  action: string,
+  details: string,
+  event: AuditEventOptions,
+) {
+  await ensureAuditLogSchema();
   await pool.query(
-    "INSERT INTO audit_logs (action, details, performed_by_id, performed_by_name) VALUES ($1, $2, $3, $4)",
-    [action, details, member.clerk_user_id, member.name],
+    `INSERT INTO audit_logs
+      (action, details, performed_by_id, performed_by_name, section, event_type, entity_id, data)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+    [action, details, member.clerk_user_id, member.name, event.section, event.eventType,
+      event.entityId == null ? null : String(event.entityId), JSON.stringify(event.data ?? {})],
   );
 }
 
-async function writeAuditWithClient(client: pg.PoolClient, member: Member, action: string, details: string) {
+async function writeAuditWithClient(
+  client: pg.PoolClient,
+  member: Member,
+  action: string,
+  details: string,
+  event: AuditEventOptions,
+) {
   await client.query(
-    "INSERT INTO audit_logs (action, details, performed_by_id, performed_by_name) VALUES ($1, $2, $3, $4)",
-    [action, details, member.clerk_user_id, member.name],
+    `INSERT INTO audit_logs
+      (action, details, performed_by_id, performed_by_name, section, event_type, entity_id, data)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
+    [action, details, member.clerk_user_id, member.name, event.section, event.eventType,
+      event.entityId == null ? null : String(event.entityId), JSON.stringify(event.data ?? {})],
   );
 }
 
@@ -855,7 +926,8 @@ app.post("/api/inventory", authenticate, requireSection("inventory"), requirePer
         purchase.invoiceNumber, purchase.purchaseDate ?? null, purchase.notes],
     );
     const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [result.rows[0].id]);
-    await writeAuditWithClient(client, member, "تسجيل عملية شراء", `${purchase.name} — ${purchase.quantity} قطعة من ${purchase.supplier} بقيمة ${purchase.quantity * purchase.buyPrice} دج.`);
+    await writeAuditWithClient(client, member, "تسجيل عملية شراء", `${purchase.name} — ${purchase.quantity} قطعة من ${purchase.supplier} بقيمة ${purchase.quantity * purchase.buyPrice} دج.`,
+      { section: "inventory", eventType: "create", entityId: result.rows[0].id, data: { name: purchase.name, quantity: purchase.quantity, supplier: purchase.supplier, totalCost: purchase.quantity * purchase.buyPrice } });
     await client.query("COMMIT");
     res.status(201).json({ item: item.rows[0] });
   } catch (error) {
@@ -877,7 +949,7 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
   try {
     await client.query("BEGIN");
     const existing = await client.query(
-      "SELECT id FROM inventory_items WHERE id = $1 FOR UPDATE",
+      "SELECT id, name, supplier FROM inventory_items WHERE id = $1 FOR UPDATE",
       [id],
     );
     if (!existing.rowCount) {
@@ -901,7 +973,8 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
         purchase.supplier, purchase.invoiceNumber, purchase.purchaseDate, purchase.notes, id],
     );
     const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [id]);
-    await writeAuditWithClient(client, req.member!, "تعديل بيانات شراء", `تحديث بيانات السلعة ${purchase.name}، رقم ${id}.`);
+    await writeAuditWithClient(client, req.member!, "تعديل بيانات شراء", `تحديث بيانات السلعة ${purchase.name}، رقم ${id}.`,
+      { section: "inventory", eventType: "update", entityId: id, data: { name: purchase.name, previousSupplier: existing.rows[0].supplier, supplier: purchase.supplier, quantity: purchase.quantity } });
     await client.query("COMMIT");
     res.json({ item: item.rows[0] });
   } catch (error) {
@@ -958,7 +1031,8 @@ app.post("/api/inventory/:id/movements", authenticate, requireSection("inventory
       [parsedQuantity, id],
     );
     const action = type === "sale" ? "تسجيل بيع من المخزون" : "تسجيل استعمال من المخزون";
-    await writeAuditWithClient(client, member, action, `${item.rows[0].name} — ${parsedQuantity} قطعة.`);
+    await writeAuditWithClient(client, member, action, `${item.rows[0].name} — ${parsedQuantity} قطعة.`,
+      { section: "inventory", eventType: "create", entityId: movement.rows[0].id, data: { inventoryItemId: id, itemName: item.rows[0].name, movementType: type, quantity: parsedQuantity, unitPrice: parsedUnitPrice, counterparty } });
     await client.query("COMMIT");
     res.status(201).json({ movement: movement.rows[0] });
   } catch (error) {
@@ -1083,7 +1157,8 @@ app.post("/api/cheques", authenticate, requireSection("cheques"), requirePermiss
       [cheque.chequeNumber, cheque.invoiceNumber, cheque.amount, cheque.beneficiary, cheque.bank,
         cheque.issueDate, cheque.dueDate, cheque.status, cheque.notes],
     );
-    await writeAuditWithClient(client, req.member!, "تسجيل شيك", `تسجيل الشيك رقم ${cheque.chequeNumber} بقيمة ${cheque.amount} دج.`);
+    await writeAuditWithClient(client, req.member!, "تسجيل شيك", `تسجيل الشيك رقم ${cheque.chequeNumber} بقيمة ${cheque.amount} دج.`,
+      { section: "cheques", eventType: "create", entityId: result.rows[0].id, data: { chequeNumber: cheque.chequeNumber, invoiceNumber: cheque.invoiceNumber, amount: cheque.amount, beneficiary: cheque.beneficiary } });
     await client.query("COMMIT");
     res.status(201).json({ item: { ...result.rows[0], attachments: [] } });
   } catch (error) {
@@ -1124,7 +1199,8 @@ app.patch("/api/cheques/:id", authenticate, requireSection("cheques"), requirePe
       [cheque.chequeNumber, cheque.invoiceNumber, cheque.amount, cheque.beneficiary, cheque.bank,
         cheque.issueDate, cheque.dueDate, cheque.status, cheque.notes, id],
     );
-    await writeAuditWithClient(client, req.member!, "تعديل بيانات شيك", `تحديث بيانات الشيك رقم ${cheque.chequeNumber}.`);
+    await writeAuditWithClient(client, req.member!, "تعديل بيانات شيك", `تحديث بيانات الشيك رقم ${cheque.chequeNumber}.`,
+      { section: "cheques", eventType: "update", entityId: id, data: { chequeNumber: cheque.chequeNumber, amount: cheque.amount, beneficiary: cheque.beneficiary, status: cheque.status } });
     await client.query("COMMIT");
     res.json({ item: result.rows[0] });
   } catch (error) {
@@ -1150,7 +1226,8 @@ app.delete("/api/cheques/:id", authenticate, requireSection("cheques"), requireP
       await client.query("ROLLBACK");
       return fail(res, 404, "الشيك غير موجود.");
     }
-    await writeAuditWithClient(client, req.member!, "حذف شيك", `حذف الشيك رقم ${result.rows[0].cheque_number}.`);
+    await writeAuditWithClient(client, req.member!, "حذف شيك", `حذف الشيك رقم ${result.rows[0].cheque_number}.`,
+      { section: "cheques", eventType: "delete", entityId: id, data: { chequeNumber: result.rows[0].cheque_number } });
     await client.query("COMMIT");
     res.json({ ok: true });
   } catch (error) {
@@ -1194,7 +1271,8 @@ app.post("/api/cheques/:id/attachments", authenticate, requireSection("cheques")
       );
       saved.push(result.rows[0]);
     }
-    await writeAuditWithClient(client, member, "إرفاق مستند بشيك", `إرفاق ${files.length} مستند بالشيك ${cheque.rows[0].cheque_number}.`);
+    await writeAuditWithClient(client, member, "إرفاق مستند بشيك", `إرفاق ${files.length} مستند بالشيك ${cheque.rows[0].cheque_number}.`,
+      { section: "cheques", eventType: "attachment", entityId: id, data: { chequeNumber: cheque.rows[0].cheque_number, fileCount: files.length } });
     await client.query("COMMIT");
     res.status(201).json({ attachments: saved });
   } catch (error) {
@@ -1279,7 +1357,8 @@ app.post("/api/rentals", requireRentalSchema, authenticate, requireSection("rent
         rental.paidAmount, rental.status, rental.ratePeriod, rental.rentalRate, rental.duration, rental.notes],
     );
     await writeAuditWithClient(client, req.member!, "تسجيل عقد كراء",
-      `${rental.equipment} لصالح ${rental.clientOrOwner} بقيمة ${rental.totalAmount} دج.`);
+      `${rental.equipment} لصالح ${rental.clientOrOwner} بقيمة ${rental.totalAmount} دج.`,
+      { section: "rentals", eventType: "create", entityId: result.rows[0].id, data: { equipment: rental.equipment, clientOrOwner: rental.clientOrOwner, totalAmount: rental.totalAmount } });
     await client.query("COMMIT");
     res.status(201).json({ id: result.rows[0].id });
   } catch (error) {
@@ -1319,7 +1398,8 @@ app.patch("/api/rentals/:id", requireRentalSchema, authenticate, requireSection(
       [rental.equipment, rental.clientOrOwner, rental.startDate, rental.endDate, rental.totalAmount,
         rental.paidAmount, rental.status, rental.ratePeriod, rental.rentalRate, rental.duration, rental.notes, id],
     );
-    await writeAuditWithClient(client, req.member!, "تعديل عقد كراء", `تحديث عقد الكراء رقم ${id}.`);
+    await writeAuditWithClient(client, req.member!, "تعديل عقد كراء", `تحديث عقد الكراء رقم ${id}.`,
+      { section: "rentals", eventType: "update", entityId: id, data: { equipment: rental.equipment, clientOrOwner: rental.clientOrOwner, totalAmount: rental.totalAmount, paidAmount: rental.paidAmount } });
     await client.query("COMMIT");
     res.json({ ok: true });
   } catch (error) {
@@ -1337,12 +1417,16 @@ app.delete("/api/rentals/:id", requireRentalSchema, authenticate, requireSection
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const result = await client.query("DELETE FROM rentals WHERE id = $1 RETURNING equipment", [id]);
+    const result = await client.query(
+      "DELETE FROM rentals WHERE id = $1 RETURNING equipment, client_or_owner, total_amount",
+      [id],
+    );
     if (!result.rowCount) {
       await client.query("ROLLBACK");
       return fail(res, 404, "عقد الكراء غير موجود.");
     }
-    await writeAuditWithClient(client, req.member!, "حذف عقد كراء", `حذف عقد كراء ${result.rows[0].equipment}.`);
+    await writeAuditWithClient(client, req.member!, "حذف عقد كراء", `حذف عقد كراء ${result.rows[0].equipment}.`,
+      { section: "rentals", eventType: "delete", entityId: id, data: { equipment: result.rows[0].equipment, clientOrOwner: result.rows[0].client_or_owner, totalAmount: result.rows[0].total_amount } });
     await client.query("COMMIT");
     res.json({ ok: true });
   } catch (error) {
@@ -1384,7 +1468,8 @@ app.post("/api/rentals/:id/attachments", requireRentalSchema, authenticate, requ
       attachments.push(saved.rows[0]);
     }
     await writeAuditWithClient(client, member, "إرفاق مستند بعقد كراء",
-      `إرفاق ${files.length} مستند بعقد ${rental.rows[0].equipment}.`);
+      `إرفاق ${files.length} مستند بعقد ${rental.rows[0].equipment}.`,
+      { section: "rentals", eventType: "attachment", entityId: id, data: { equipment: rental.rows[0].equipment, fileCount: files.length } });
     await client.query("COMMIT");
     res.status(201).json({ attachments });
   } catch (error) {
@@ -1504,7 +1589,8 @@ app.patch("/api/record-notes/:entity/:id", requireRecordNotesSchema, authenticat
       }
       return fail(res, 404, "السجل غير موجود.");
     }
-    await writeAuditWithClient(client, member, "تعديل ملاحظات سجل", `${target.label} رقم ${rawId}.`);
+    await writeAuditWithClient(client, member, "تعديل ملاحظات سجل", `${target.label} رقم ${rawId}.`,
+      { section: entity === "auditNote" ? "audit" : target.section, eventType: "note", entityId: rawId, data: { entity } });
     await client.query("COMMIT");
     res.json({ notes: result.rows[0].notes });
   } catch (error) {
@@ -1540,18 +1626,25 @@ app.post("/api/machinery", requireMachinerySchema, authenticate, requireSection(
   if (!code || code.length > 80 || !name || name.length > 200 || category.length > 120 || notes.length > 5000) {
     return fail(res, 400, "أدخل رقماً تعريفياً واسماً صالحين للمركبة أو الآلية.");
   }
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `INSERT INTO machinery (code, name, category, notes) VALUES ($1, $2, $3, $4)
        RETURNING id, code, name, category, status, hours_worked, notes`,
       [code, name, category, notes],
     );
-    await writeAudit(req.member!, "تسجيل مركبة أو آلية", `${name} — ${code}.`);
+    await writeAuditWithClient(client, req.member!, "تسجيل مركبة أو آلية", `${name} — ${code}.`,
+      { section: "machinery", eventType: "create", entityId: result.rows[0].id, data: { code, name, category } });
+    await client.query("COMMIT");
     res.status(201).json({ item: result.rows[0] });
   } catch (error) {
+    await client.query("ROLLBACK");
     if ((error as { code?: string }).code === "23505") return fail(res, 409, "الرقم التعريفي مستخدم من قبل.");
     console.error("Machinery creation failed:", error);
     fail(res, 500, "تعذر تسجيل المركبة أو الآلية.");
+  } finally {
+    client.release();
   }
 });
 
@@ -1611,7 +1704,8 @@ app.post("/api/machinery/spare-parts", requireMachinerySchema, authenticate, req
       [machineryId, name, quantity, buyPrice, supplier, invoiceNumber, installationDate,
         stockQuantity, repairExpense, notes, member.clerk_user_id, member.name],
     );
-    await writeAuditWithClient(client, member, "تسجيل قطعة غيار أو إصلاح", `${name} لآلية ${machine.rows[0].name}.`);
+    await writeAuditWithClient(client, member, "تسجيل قطعة غيار أو إصلاح", `${name} لآلية ${machine.rows[0].name}.`,
+      { section: "machinery", eventType: "create", entityId: result.rows[0].id, data: { machineryId, machineName: machine.rows[0].name, name, quantity, supplier, totalCost: quantity * buyPrice + repairExpense } });
     await client.query("COMMIT");
     res.status(201).json({ id: result.rows[0].id });
   } catch (error) {
@@ -1655,7 +1749,8 @@ app.post("/api/machinery/spare-parts/:id/attachments", requireMachinerySchema, a
       );
       saved.push(result.rows[0]);
     }
-    await writeAuditWithClient(client, member, "إرفاق مستند بسجل صيانة", `إرفاق ${files.length} مستند بقطعة ${part.rows[0].name}.`);
+    await writeAuditWithClient(client, member, "إرفاق مستند بسجل صيانة", `إرفاق ${files.length} مستند بقطعة ${part.rows[0].name}.`,
+      { section: "machinery", eventType: "attachment", entityId: id, data: { sparePart: part.rows[0].name, fileCount: files.length } });
     await client.query("COMMIT");
     res.status(201).json({ attachments: saved });
   } catch (error) {
@@ -1756,7 +1851,8 @@ app.post("/api/transactions", authenticate, requireSection("finance"), requirePe
        FROM transactions WHERE id = $1`,
       [result.rows[0].id],
     );
-    await writeAuditWithClient(client, member, "تسجيل عملية مالية", `${type === "income" ? "دخل" : "مصروف"} بقيمة ${amount} دج.`);
+    await writeAuditWithClient(client, member, "تسجيل عملية مالية", `${type === "income" ? "دخل" : "مصروف"} بقيمة ${amount} دج.`,
+      { section: "finance", eventType: "create", entityId: result.rows[0].id, data: { type, amount, party: party.trim(), reason: String(reason ?? "").trim(), paymentMethod } });
     await client.query("COMMIT");
     res.status(201).json({ item: item.rows[0] });
   } catch (error) {
@@ -1797,7 +1893,8 @@ app.patch("/api/transactions/:id", authenticate, requireSection("finance"), requ
        FROM transactions WHERE id = $1`,
       [id],
     );
-    await writeAuditWithClient(client, req.member!, "تعديل عملية مالية", `تحديث العملية رقم ${id}.`);
+    await writeAuditWithClient(client, req.member!, "تعديل عملية مالية", `تحديث العملية رقم ${id}.`,
+      { section: "finance", eventType: "update", entityId: id, data: { type, amount, party: party.trim(), reason: String(reason ?? "").trim(), paymentMethod } });
     await client.query("COMMIT");
     res.json({ item: item.rows[0] });
   } catch (error) {
@@ -1816,13 +1913,14 @@ app.delete("/api/transactions/:id", authenticate, requireSection("finance"), req
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(574382910)");
-    const result = await client.query("DELETE FROM transactions WHERE id = $1 RETURNING id", [id]);
+    const result = await client.query("DELETE FROM transactions WHERE id = $1 RETURNING id, type, amount, party, reason");
     if (!result.rowCount) {
       await client.query("ROLLBACK");
       return fail(res, 404, "العملية المالية غير موجودة.");
     }
     await recalculateCashBalances(client);
-    await writeAuditWithClient(client, req.member!, "حذف عملية مالية", `حذف العملية رقم ${id}.`);
+    await writeAuditWithClient(client, req.member!, "حذف عملية مالية", `حذف العملية رقم ${id}.`,
+      { section: "finance", eventType: "delete", entityId: id, data: result.rows[0] });
     await client.query("COMMIT");
     res.json({ ok: true });
   } catch (error) {
@@ -1858,7 +1956,8 @@ app.post("/api/transactions/:id/attachments", authenticate, requireSection("fina
       );
       saved.push(result.rows[0]);
     }
-    await writeAuditWithClient(client, member, "إرفاق مستند بعملية مالية", `إرفاق ${files.length} مستند للعملية رقم ${id}.`);
+    await writeAuditWithClient(client, member, "إرفاق مستند بعملية مالية", `إرفاق ${files.length} مستند للعملية رقم ${id}.`,
+      { section: "finance", eventType: "attachment", entityId: id, data: { fileCount: files.length } });
     await client.query("COMMIT");
     res.status(201).json({ attachments: saved });
   } catch (error) {
@@ -1924,7 +2023,8 @@ app.post("/api/inventory/:id/attachments", authenticate, requireSection("invento
       );
       saved.push(result.rows[0]);
     }
-    await writeAuditWithClient(client, member, "إرفاق مستند بعملية شراء", `إرفاق ${files.length} مستند للسلعة ${item.rows[0].name}.`);
+    await writeAuditWithClient(client, member, "إرفاق مستند بعملية شراء", `إرفاق ${files.length} مستند للسلعة ${item.rows[0].name}.`,
+      { section: "inventory", eventType: "attachment", entityId: id, data: { itemName: item.rows[0].name, fileCount: files.length } });
     await client.query("COMMIT");
     res.status(201).json({ attachments: saved });
   } catch (error) {
@@ -2016,7 +2116,8 @@ app.post("/api/field-expenses", requireFieldExpenseSchema, authenticate, require
         String(notes ?? "").trim(), member.clerk_user_id, member.name],
     );
     await writeAuditWithClient(client, member, "تسجيل مصروف ميداني",
-      `${categoryText} بقيمة ${numericAmount} دج في ${siteText}.`);
+      `${categoryText} بقيمة ${numericAmount} دج في ${siteText}.`,
+      { section: "field", eventType: "create", entityId: result.rows[0].id, data: { category: categoryText, amount: numericAmount, siteName: siteText, fuelLiters: liters, details: String(details ?? "").trim() } });
     await client.query("COMMIT");
     res.status(201).json({ item: { ...result.rows[0], attachments: [] } });
   } catch (error) {
@@ -2036,8 +2137,10 @@ app.patch("/api/field-expenses/:id/review", requireFieldExpenseSchema, authentic
     return fail(res, 400, "بيانات مراجعة المصروف غير صالحة.");
   }
   const member = req.member!;
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `UPDATE field_expenses SET review_status = $1,
         reviewed_by_id = CASE WHEN $1 = 'reviewed' THEN $2 ELSE NULL END,
         reviewed_by_name = CASE WHEN $1 = 'reviewed' THEN $3 ELSE NULL END,
@@ -2046,13 +2149,21 @@ app.patch("/api/field-expenses/:id/review", requireFieldExpenseSchema, authentic
        WHERE id = $5 RETURNING id`,
       [status, member.clerk_user_id, member.name, reviewNotes, id],
     );
-    if (!result.rowCount) return fail(res, 404, "المصروف الميداني غير موجود.");
-    await writeAudit(member, status === "reviewed" ? "مراجعة مصروف ميداني" : "إعادة مصروف للمراجعة",
-      `مراجعة العملية رقم ${id}${reviewNotes ? `: ${reviewNotes}` : ""}.`);
+    if (!result.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "المصروف الميداني غير موجود.");
+    }
+    await writeAuditWithClient(client, member, status === "reviewed" ? "مراجعة مصروف ميداني" : "إعادة مصروف للمراجعة",
+      `مراجعة العملية رقم ${id}${reviewNotes ? `: ${reviewNotes}` : ""}.`,
+      { section: "field", eventType: "review", entityId: id, data: { status, reviewNotes } });
+    await client.query("COMMIT");
     res.json({ ok: true });
   } catch (error) {
+    await client.query("ROLLBACK");
     console.error("Field expense review update failed:", error);
     fail(res, 500, "تعذر تحديث حالة مراجعة المصروف.");
+  } finally {
+    client.release();
   }
 });
 
@@ -2101,7 +2212,8 @@ app.post("/api/field-expenses/:id/attachments", requireFieldExpenseSchema, authe
        WHERE id = $1`,
       [id],
     );
-    await writeAuditWithClient(client, member, "إرفاق وثيقة بمصروف ميداني", `إرفاق ${files.length} ملفات بالعملية رقم ${id}.`);
+    await writeAuditWithClient(client, member, "إرفاق وثيقة بمصروف ميداني", `إرفاق ${files.length} ملفات بالعملية رقم ${id}.`,
+      { section: "field", eventType: "attachment", entityId: id, data: { fileCount: files.length } });
     await client.query("COMMIT");
     res.status(201).json({ attachments });
   } catch (error) {
@@ -2221,28 +2333,88 @@ app.patch("/api/members/:id", authenticate, requireAdmin, async (req: Authentica
   const sections = allSectionIds.filter((section) => cleanPermissions[section]?.view === true);
   if (!sections.includes("dashboard")) sections.push("dashboard");
   const safeRoleName = roleName.trim();
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       `UPDATE members SET active = $1, allowed_sections = $2, role_name = $3,
         permissions = $4::jsonb, capabilities = $5::jsonb, updated_at = NOW()
        WHERE clerk_user_id = $6
        RETURNING clerk_user_id, email, name, role, role_name, active, allowed_sections, permissions, capabilities, created_at`,
       [active, sections, safeRoleName, JSON.stringify(cleanPermissions), JSON.stringify(cleanCapabilities), targetId],
     );
-    if (!result.rowCount) return fail(res, 404, "العضو غير موجود.");
-    await writeAudit(req.member!, "تعديل صلاحيات عضو", `تحديث الوصول للحساب ${result.rows[0].email}.`);
+    if (!result.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "العضو غير موجود.");
+    }
+    await writeAuditWithClient(client, req.member!, "تعديل صلاحيات عضو", `تحديث الوصول للحساب ${result.rows[0].email}.`,
+      { section: "users", eventType: "permissions", entityId: targetId, data: { email: result.rows[0].email, active, roleName: safeRoleName, permissions: cleanPermissions, capabilities: cleanCapabilities } });
+    await client.query("COMMIT");
     res.json({ member: result.rows[0] });
   } catch (error) {
+    await client.query("ROLLBACK");
     console.error("Member permission update failed:", error);
     fail(res, 500, "تعذر تحديث صلاحيات العضو.");
+  } finally {
+    client.release();
   }
 });
 
-app.get("/api/audit", authenticate, requireSection("audit"), async (_req, res) => {
-  const result = await pool.query(
-    "SELECT id, action, details, performed_by_name, created_at FROM audit_logs ORDER BY created_at DESC LIMIT 100",
-  );
-  res.json({ items: result.rows });
+app.get("/api/audit", authenticate, requireSection("audit"), async (req: AuthenticatedRequest, res) => {
+  try {
+    await ensureAuditLogSchema();
+    const search = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 120) : "";
+    const section = typeof req.query.section === "string" ? req.query.section : "";
+    const eventType = typeof req.query.type === "string" ? req.query.type : "";
+    const from = typeof req.query.from === "string" ? req.query.from : "";
+    const to = typeof req.query.to === "string" ? req.query.to : "";
+    const page = Math.max(1, Math.min(100000, Number.parseInt(String(req.query.page ?? "1"), 10) || 1));
+    const pageSize = 50;
+    const validSections = new Set<string>([...allSectionIds, "system"]);
+    const validEventTypes = new Set<AuditEventType>([
+      "create", "update", "delete", "review", "attachment", "permissions", "note", "setup", "other",
+    ]);
+    if ((section && !validSections.has(section)) ||
+        (eventType && !validEventTypes.has(eventType as AuditEventType)) ||
+        (from && !validIsoDate(from)) || (to && !validIsoDate(to)) ||
+        (from && to && from > to)) {
+      return fail(res, 400, "قيم البحث أو التصفية غير صالحة.");
+    }
+
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    const addCondition = (condition: (parameter: string) => string, value: unknown) => {
+      values.push(value);
+      conditions.push(condition(`$${values.length}`));
+    };
+    if (search) {
+      addCondition((parameter) =>
+        `(a.action ILIKE ${parameter} OR a.details ILIKE ${parameter} OR a.performed_by_name ILIKE ${parameter} OR a.data::text ILIKE ${parameter} OR a.entity_id ILIKE ${parameter})`,
+      `%${search}%`);
+    }
+    if (section) addCondition((parameter) => `a.section = ${parameter}`, section);
+    if (eventType) addCondition((parameter) => `a.event_type = ${parameter}`, eventType);
+    if (from) addCondition((parameter) => `a.created_at >= ${parameter}::date`, from);
+    if (to) addCondition((parameter) => `a.created_at < (${parameter}::date + INTERVAL '1 day')`, to);
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const offset = (page - 1) * pageSize;
+    const [items, count] = await Promise.all([
+      pool.query(
+        `SELECT a.id, a.action, a.details, a.performed_by_id, a.performed_by_name,
+          a.section, a.event_type, a.entity_id, a.data, a.created_at,
+          COALESCE(n.notes, '') AS notes
+         FROM audit_logs a LEFT JOIN audit_log_notes n ON n.audit_log_id = a.id
+         ${where}
+         ORDER BY a.created_at DESC, a.id DESC LIMIT ${pageSize} OFFSET ${offset}`,
+        values,
+      ),
+      pool.query(`SELECT COUNT(*)::int AS total FROM audit_logs a ${where}`, values),
+    ]);
+    res.json({ items: items.rows, total: count.rows[0].total, page, pageSize });
+  } catch (error) {
+    console.error("Audit log search failed:", error);
+    fail(res, 500, "تعذر تحميل سجل التدقيق.");
+  }
 });
 
 const webRoot = path.resolve(process.cwd(), "dist");
