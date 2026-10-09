@@ -100,6 +100,18 @@ CREATE TABLE IF NOT EXISTS cheques (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS cheque_attachments (
+  id BIGSERIAL PRIMARY KEY,
+  cheque_id BIGINT NOT NULL REFERENCES cheques(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL CHECK (file_size > 0),
+  file_data BYTEA NOT NULL,
+  uploaded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+  uploaded_by_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS rentals (
   id BIGSERIAL PRIMARY KEY,
   equipment TEXT NOT NULL,
@@ -152,5 +164,11 @@ CREATE INDEX IF NOT EXISTS inventory_items_invoice_idx ON inventory_items (invoi
 CREATE INDEX IF NOT EXISTS inventory_items_purchase_date_idx ON inventory_items (purchase_date DESC);
 CREATE INDEX IF NOT EXISTS inventory_movements_item_date_idx ON inventory_movements (inventory_item_id, movement_date DESC, id DESC);
 CREATE INDEX IF NOT EXISTS inventory_attachments_item_idx ON inventory_attachments (inventory_item_id, created_at);
+CREATE INDEX IF NOT EXISTS cheques_number_idx ON cheques (cheque_number);
+CREATE INDEX IF NOT EXISTS cheques_invoice_idx ON cheques (invoice_number);
+CREATE INDEX IF NOT EXISTS cheques_beneficiary_idx ON cheques (beneficiary);
+CREATE INDEX IF NOT EXISTS cheques_bank_idx ON cheques (bank);
+CREATE INDEX IF NOT EXISTS cheques_status_due_idx ON cheques (status, due_date);
+CREATE INDEX IF NOT EXISTS cheque_attachments_cheque_idx ON cheque_attachments (cheque_id, created_at);
 CREATE INDEX IF NOT EXISTS field_expenses_created_idx ON field_expenses (created_at DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs (created_at DESC);

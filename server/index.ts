@@ -275,6 +275,33 @@ function validInventoryPurchase(body: Record<string, unknown>) {
   return { name, supplier, invoiceNumber, notes, quantity, buyPrice, salePrice, purchaseDate };
 }
 
+const chequeStatuses = ["pending", "paid", "cancelled"] as const;
+const maxChequeAmount = 99999999999999.99;
+
+function validCheque(body: Record<string, unknown>, current?: Record<string, unknown>) {
+  const field = (key: string) => body[key] !== undefined ? body[key] : current?.[key];
+  const chequeNumber = typeof field("chequeNumber") === "string" ? String(field("chequeNumber")).trim() : "";
+  const invoiceNumber = typeof field("invoiceNumber") === "string" ? String(field("invoiceNumber")).trim() : "";
+  const beneficiary = typeof field("beneficiary") === "string" ? String(field("beneficiary")).trim() : "";
+  const bank = typeof field("bank") === "string" ? String(field("bank")).trim() : "";
+  const notes = typeof field("notes") === "string" ? String(field("notes")).trim() : "";
+  const amount = Number(field("amount"));
+  const issueDate = field("issueDate");
+  const dueDate = field("dueDate");
+  const status = field("status") ?? "pending";
+
+  if (!chequeNumber || chequeNumber.length > 120 ||
+      invoiceNumber.length > 120 || !beneficiary || beneficiary.length > 200 ||
+      bank.length > 200 || notes.length > 5000 ||
+      !Number.isFinite(amount) || amount <= 0 || amount > maxChequeAmount ||
+      !validIsoDate(issueDate) || !validIsoDate(dueDate) || dueDate < issueDate ||
+      !chequeStatuses.includes(status as (typeof chequeStatuses)[number])) {
+    return null;
+  }
+
+  return { chequeNumber, invoiceNumber, beneficiary, bank, amount, issueDate, dueDate, status, notes };
+}
+
 async function recalculateCashBalances(client: pg.PoolClient) {
   await client.query(
     `WITH balances AS (
@@ -651,6 +678,246 @@ app.get("/api/inventory/:id/movements", authenticate, requireSection("inventory"
   } catch (error) {
     console.error("Inventory movement history failed:", error);
     fail(res, 500, "تعذر تحميل سجل حركة المخزون.");
+  }
+});
+
+app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res) => {
+  const query = req.query;
+  const search = typeof query.q === "string" ? query.q.trim() : "";
+  const status = typeof query.status === "string" ? query.status : "";
+  if (search.length > 200) return fail(res, 400, "عبارة البحث أطول من الحد المسموح.");
+  if (status && !chequeStatuses.includes(status as (typeof chequeStatuses)[number])) {
+    return fail(res, 400, "حالة الشيك غير صالحة.");
+  }
+
+  const page = Math.max(1, Math.min(100000, Number.parseInt(String(query.page ?? "1"), 10) || 1));
+  const pageSize = 25;
+  const values: unknown[] = [];
+  const where: string[] = [];
+  const value = (item: unknown) => {
+    values.push(item);
+    return `$${values.length}`;
+  };
+  if (search) {
+    const pattern = value(`%${search}%`);
+    where.push(`(
+      c.cheque_number ILIKE ${pattern} OR c.invoice_number ILIKE ${pattern} OR
+      c.beneficiary ILIKE ${pattern} OR c.bank ILIKE ${pattern} OR
+      (CASE c.status
+        WHEN 'pending' THEN 'قيد الانتظار pending'
+        WHEN 'paid' THEN 'مدفوع paid'
+        WHEN 'cancelled' THEN 'ملغى cancelled'
+      END) ILIKE ${pattern}
+    )`);
+  }
+  if (status) where.push(`c.status = ${value(status)}`);
+  const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const pagination = [...values, pageSize, (page - 1) * pageSize];
+
+  try {
+    const [items, count, alerts] = await Promise.all([
+      pool.query(
+        `SELECT c.id, c.cheque_number, c.invoice_number, c.amount, c.beneficiary, c.bank,
+          c.issue_date, c.due_date, c.status, c.notes, c.created_at,
+          COALESCE((
+            SELECT json_agg(json_build_object(
+              'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
+            ) ORDER BY a.created_at, a.id)
+            FROM cheque_attachments a WHERE a.cheque_id = c.id
+          ), '[]'::json) AS attachments
+         FROM cheques c ${clause}
+         ORDER BY CASE WHEN c.status = 'pending' THEN 0 ELSE 1 END,
+           c.due_date ASC, c.created_at DESC, c.id DESC
+         LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        pagination,
+      ),
+      pool.query(`SELECT COUNT(*)::int AS total FROM cheques c ${clause}`, values),
+      pool.query(`
+        SELECT COUNT(*)::int AS total,
+          COALESCE(json_agg(json_build_object(
+            'id', id, 'cheque_number', cheque_number, 'beneficiary', beneficiary,
+            'amount', amount, 'due_date', due_date,
+            'days_until_due', due_date - CURRENT_DATE
+          ) ORDER BY due_date ASC, id ASC) FILTER (WHERE id IS NOT NULL), '[]'::json) AS items
+        FROM (
+          SELECT id, cheque_number, beneficiary, amount, due_date
+          FROM cheques
+          WHERE status = 'pending' AND due_date <= CURRENT_DATE + 7
+          ORDER BY due_date ASC, id ASC
+          LIMIT 5
+        ) due
+      `),
+    ]);
+    res.json({
+      items: items.rows,
+      total: count.rows[0].total,
+      page,
+      pageSize,
+      dueAlertCount: Number(alerts.rows[0].total),
+      dueAlerts: alerts.rows[0].items,
+    });
+  } catch (error) {
+    console.error("Cheque search failed:", error);
+    fail(res, 500, "تعذر تحميل سجل الشيكات.");
+  }
+});
+
+app.post("/api/cheques", authenticate, requireSection("cheques"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+  const cheque = validCheque(req.body ?? {});
+  if (!cheque) return fail(res, 400, "تحقق من رقم الشيك والمبلغ والمستفيد والبنك والتواريخ والحالة.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `INSERT INTO cheques
+        (cheque_number, invoice_number, amount, beneficiary, bank, issue_date, due_date, status, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id, cheque_number, invoice_number, amount, beneficiary, bank, issue_date, due_date, status, notes, created_at`,
+      [cheque.chequeNumber, cheque.invoiceNumber, cheque.amount, cheque.beneficiary, cheque.bank,
+        cheque.issueDate, cheque.dueDate, cheque.status, cheque.notes],
+    );
+    await writeAuditWithClient(client, req.member!, "تسجيل شيك", `تسجيل الشيك رقم ${cheque.chequeNumber} بقيمة ${cheque.amount} دج.`);
+    await client.query("COMMIT");
+    res.status(201).json({ item: { ...result.rows[0], attachments: [] } });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Cheque creation failed:", error);
+    fail(res, 500, "تعذر تسجيل الشيك.");
+  } finally {
+    client.release();
+  }
+});
+
+app.patch("/api/cheques/:id", authenticate, requireSection("cheques"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم الشيك غير صالح.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query(
+      `SELECT cheque_number AS "chequeNumber", invoice_number AS "invoiceNumber", amount,
+        beneficiary, bank, issue_date::text AS "issueDate", due_date::text AS "dueDate", status, notes
+       FROM cheques WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (!existing.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "الشيك غير موجود.");
+    }
+    const cheque = validCheque(req.body ?? {}, existing.rows[0]);
+    if (!cheque) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, "بيانات الشيك غير صالحة.");
+    }
+    const result = await client.query(
+      `UPDATE cheques SET cheque_number = $1, invoice_number = $2, amount = $3,
+        beneficiary = $4, bank = $5, issue_date = $6, due_date = $7, status = $8, notes = $9
+       WHERE id = $10
+       RETURNING id, cheque_number, invoice_number, amount, beneficiary, bank, issue_date, due_date, status, notes, created_at`,
+      [cheque.chequeNumber, cheque.invoiceNumber, cheque.amount, cheque.beneficiary, cheque.bank,
+        cheque.issueDate, cheque.dueDate, cheque.status, cheque.notes, id],
+    );
+    await writeAuditWithClient(client, req.member!, "تعديل بيانات شيك", `تحديث بيانات الشيك رقم ${cheque.chequeNumber}.`);
+    await client.query("COMMIT");
+    res.json({ item: result.rows[0] });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Cheque update failed:", error);
+    fail(res, 500, "تعذر تعديل بيانات الشيك.");
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/cheques/:id", authenticate, requireSection("cheques"), requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم الشيك غير صالح.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      "DELETE FROM cheques WHERE id = $1 RETURNING cheque_number",
+      [id],
+    );
+    if (!result.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "الشيك غير موجود.");
+    }
+    await writeAuditWithClient(client, req.member!, "حذف شيك", `حذف الشيك رقم ${result.rows[0].cheque_number}.`);
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Cheque deletion failed:", error);
+    fail(res, 500, "تعذر حذف الشيك.");
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/cheques/:id/attachments", authenticate, requireSection("cheques"), requireRole("finance"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  const files = (req.files ?? []) as Express.Multer.File[];
+  if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const cheque = await client.query("SELECT cheque_number FROM cheques WHERE id = $1 FOR UPDATE", [id]);
+    if (!cheque.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "الشيك غير موجود.");
+    }
+    const count = await client.query(
+      "SELECT COUNT(*)::int AS total FROM cheque_attachments WHERE cheque_id = $1",
+      [id],
+    );
+    if (Number(count.rows[0].total) + files.length > 5) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, "الحد الأقصى هو خمسة مرفقات لكل شيك.");
+    }
+    const member = req.member!;
+    const saved = [];
+    for (const file of files) {
+      const result = await client.query(
+        `INSERT INTO cheque_attachments
+          (cheque_id, file_name, mime_type, file_size, file_data, uploaded_by_id, uploaded_by_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, file_name, mime_type, file_size`,
+        [id, path.basename(file.originalname), file.mimetype, file.size, file.buffer, member.clerk_user_id, member.name],
+      );
+      saved.push(result.rows[0]);
+    }
+    await writeAuditWithClient(client, member, "إرفاق مستند بشيك", `إرفاق ${files.length} مستند بالشيك ${cheque.rows[0].cheque_number}.`);
+    await client.query("COMMIT");
+    res.status(201).json({ attachments: saved });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Cheque attachment upload failed:", error);
+    fail(res, 500, "تعذر حفظ مرفقات الشيك.");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/cheque-attachments/:id", authenticate, requireSection("cheques"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم المستند غير صالح.");
+  try {
+    const result = await pool.query(
+      "SELECT file_name, mime_type, file_data FROM cheque_attachments WHERE id = $1",
+      [id],
+    );
+    if (!result.rowCount) return fail(res, 404, "المستند غير موجود.");
+    const attachment = result.rows[0];
+    const inline = attachment.mime_type === "application/pdf" || attachment.mime_type.startsWith("image/");
+    const safeName = encodeURIComponent(String(attachment.file_name).replace(/[\r\n"]/g, ""));
+    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${safeName}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(Buffer.from(attachment.file_data));
+  } catch (error) {
+    console.error("Cheque attachment read failed:", error);
+    fail(res, 500, "تعذر فتح مرفق الشيك.");
   }
 });
 

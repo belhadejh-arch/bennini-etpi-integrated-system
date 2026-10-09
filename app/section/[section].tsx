@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import InventorySection from "./InventorySection";
+import ChequesSection from "./ChequesSection";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 import { sections, type SectionId } from "../../shared/sections";
@@ -63,7 +64,7 @@ export default function SectionScreen() {
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
     else if (section === "dashboard") router.replace("/");
-    else if (section !== "inventory") void refresh();
+    else if (section !== "inventory" && section !== "cheques") void refresh();
   }, [isLoaded, isSignedIn, refresh, router, section]);
 
   const isAdmin = member?.role === "admin";
@@ -103,6 +104,7 @@ export default function SectionScreen() {
   const title = sectionMeta?.label ?? "القسم";
 
   if (section === "inventory") return <InventorySection />;
+  if (section === "cheques") return <ChequesSection />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>
