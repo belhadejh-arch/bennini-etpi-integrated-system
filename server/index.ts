@@ -593,7 +593,10 @@ async function requireRecordNotesSchema(_req: Request, res: Response, next: Next
 
 const inventoryItemSelect = `
   SELECT i.id, i.name, i.quantity, i.remaining_quantity, i.buy_price, i.total_cost,
-    i.sale_price, i.supplier, i.invoice_number, i.purchase_date, i.notes, i.created_at,
+    i.sale_price, COALESCE(s.name, i.supplier) AS supplier,
+    COALESCE(pi.invoice_number, i.invoice_number) AS invoice_number,
+    i.supplier_id, i.invoice_id, i.recorded_by_id, i.recorded_by_name,
+    i.purchase_date, i.notes, i.created_at,
     CASE WHEN i.sale_price IS NULL THEN NULL
       ELSE i.quantity * i.sale_price - i.total_cost END AS expected_profit,
     COALESCE(m.sold_quantity, 0)::int AS sold_quantity,
@@ -606,6 +609,8 @@ const inventoryItemSelect = `
       FROM inventory_attachments a WHERE a.inventory_item_id = i.id
     ), '[]'::json) AS attachments
   FROM inventory_items i
+  LEFT JOIN suppliers s ON s.id = i.supplier_id
+  LEFT JOIN purchase_invoices pi ON pi.id = i.invoice_id
   LEFT JOIN (
     SELECT im.inventory_item_id,
       SUM(im.quantity) FILTER (WHERE im.movement_type = 'sale') AS sold_quantity,
@@ -678,6 +683,10 @@ function validCheque(body: Record<string, unknown>, current?: Record<string, unk
   const field = (key: string) => body[key] !== undefined ? body[key] : current?.[key];
   const chequeNumber = typeof field("chequeNumber") === "string" ? String(field("chequeNumber")).trim() : "";
   const invoiceNumber = typeof field("invoiceNumber") === "string" ? String(field("invoiceNumber")).trim() : "";
+  const rawInvoiceId = field("invoiceId");
+  const invoiceId = rawInvoiceId === null || rawInvoiceId === undefined || rawInvoiceId === ""
+    ? null
+    : Number(rawInvoiceId);
   const beneficiary = typeof field("beneficiary") === "string" ? String(field("beneficiary")).trim() : "";
   const bank = typeof field("bank") === "string" ? String(field("bank")).trim() : "";
   const notes = typeof field("notes") === "string" ? String(field("notes")).trim() : "";
@@ -688,6 +697,7 @@ function validCheque(body: Record<string, unknown>, current?: Record<string, unk
 
   if (!chequeNumber || chequeNumber.length > 120 ||
       invoiceNumber.length > 120 || !beneficiary || beneficiary.length > 200 ||
+      (invoiceId !== null && (!Number.isSafeInteger(invoiceId) || invoiceId <= 0)) ||
       bank.length > 200 || notes.length > 5000 ||
       !Number.isFinite(amount) || amount <= 0 || amount > maxChequeAmount ||
       !validIsoDate(issueDate) || !validIsoDate(dueDate) || dueDate < issueDate ||
@@ -695,7 +705,57 @@ function validCheque(body: Record<string, unknown>, current?: Record<string, unk
     return null;
   }
 
-  return { chequeNumber, invoiceNumber, beneficiary, bank, amount, issueDate, dueDate, status, notes };
+  return { chequeNumber, invoiceNumber, invoiceId, beneficiary, bank, amount, issueDate, dueDate, status, notes };
+}
+
+async function ensureSupplierInvoice(
+  client: pg.PoolClient,
+  supplierName: string,
+  invoiceNumber: string,
+  invoiceDate: string | null,
+  member: Member,
+): Promise<{ supplierId: number | null; invoiceId: number | null }> {
+  const supplier = supplierName.trim();
+  const invoice = invoiceNumber.trim();
+  if (!supplier) return { supplierId: null, invoiceId: null };
+
+  const supplierResult = await client.query(
+    `INSERT INTO suppliers (name, normalized_name)
+     VALUES ($1, LOWER(BTRIM($1)))
+     ON CONFLICT (normalized_name) DO UPDATE SET name = EXCLUDED.name
+     RETURNING id`,
+    [supplier],
+  );
+  const supplierId = Number(supplierResult.rows[0].id);
+  if (!invoice) return { supplierId, invoiceId: null };
+
+  const invoiceResult = await client.query(
+    `INSERT INTO purchase_invoices
+       (supplier_id, invoice_number, normalized_invoice_number, invoice_date, recorded_by_id, recorded_by_name)
+     VALUES ($1, $2, LOWER(BTRIM($2)), $3, $4, $5)
+     ON CONFLICT (supplier_id, normalized_invoice_number)
+     DO UPDATE SET invoice_date = COALESCE(purchase_invoices.invoice_date, EXCLUDED.invoice_date)
+     RETURNING id`,
+    [supplierId, invoice, invoiceDate, member.clerk_user_id, member.name],
+  );
+  return { supplierId, invoiceId: Number(invoiceResult.rows[0].id) };
+}
+
+async function resolveChequeInvoice(
+  client: pg.PoolClient,
+  invoiceId: number | null,
+  invoiceNumber: string,
+): Promise<{ invoiceId: number | null; invoiceNumber: string } | null> {
+  if (invoiceId === null) return { invoiceId: null, invoiceNumber };
+  const result = await client.query(
+    "SELECT id, invoice_number FROM purchase_invoices WHERE id = $1",
+    [invoiceId],
+  );
+  if (!result.rowCount) return null;
+  return {
+    invoiceId: Number(result.rows[0].id),
+    invoiceNumber: result.rows[0].invoice_number,
+  };
 }
 
 async function recalculateCashBalances(client: pg.PoolClient) {
@@ -1150,13 +1210,22 @@ app.post("/api/inventory", authenticate, requireSection("inventory"), requirePer
   try {
     await client.query("BEGIN");
     const member = req.member!;
+    const links = await ensureSupplierInvoice(
+      client,
+      purchase.supplier,
+      purchase.invoiceNumber,
+      typeof purchase.purchaseDate === "string" ? purchase.purchaseDate : null,
+      member,
+    );
     const result = await client.query(
       `INSERT INTO inventory_items
-        (name, quantity, remaining_quantity, buy_price, total_cost, sale_price, supplier, invoice_number, purchase_date, notes)
-       VALUES ($1, $2, $2, $3, $2 * $3, $4, $5, $6, COALESCE($7::date, CURRENT_DATE), $8)
+        (name, quantity, remaining_quantity, buy_price, total_cost, sale_price, supplier, invoice_number,
+         supplier_id, invoice_id, purchase_date, notes, recorded_by_id, recorded_by_name)
+       VALUES ($1, $2, $2, $3, $2 * $3, $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE), $10, $11, $12)
        RETURNING id`,
       [purchase.name, purchase.quantity, purchase.buyPrice, purchase.salePrice, purchase.supplier,
-        purchase.invoiceNumber, purchase.purchaseDate ?? null, purchase.notes],
+        purchase.invoiceNumber, links.supplierId, links.invoiceId, purchase.purchaseDate ?? null,
+        purchase.notes, member.clerk_user_id, member.name],
     );
     const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [result.rows[0].id]);
     await writeAuditWithClient(client, member, "تسجيل عملية شراء", `${purchase.name} — ${purchase.quantity} قطعة من ${purchase.supplier} بقيمة ${purchase.quantity * purchase.buyPrice} دج.`,
@@ -1197,13 +1266,21 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
       await client.query("ROLLBACK");
       return fail(res, 409, "لا يمكن تخفيض الكمية إلى أقل من الكمية المباعة أو المستعملة.");
     }
+    const links = await ensureSupplierInvoice(
+      client,
+      purchase.supplier,
+      purchase.invoiceNumber,
+      typeof purchase.purchaseDate === "string" ? purchase.purchaseDate : null,
+      req.member!,
+    );
     await client.query(
       `UPDATE inventory_items SET name = $1, quantity = $2, remaining_quantity = $2 - $3,
         buy_price = $4, total_cost = $2 * $4, sale_price = $5, supplier = $6,
-        invoice_number = $7, purchase_date = $8, notes = $9
-       WHERE id = $10`,
+        invoice_number = $7, supplier_id = $8, invoice_id = $9, purchase_date = $10, notes = $11
+       WHERE id = $12`,
       [purchase.name, purchase.quantity, movements.rows[0].quantity, purchase.buyPrice, purchase.salePrice,
-        purchase.supplier, purchase.invoiceNumber, purchase.purchaseDate, purchase.notes, id],
+        purchase.supplier, purchase.invoiceNumber, links.supplierId, links.invoiceId,
+        purchase.purchaseDate, purchase.notes, id],
     );
     const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [id]);
     await writeAuditWithClient(client, req.member!, "تعديل بيانات شراء", `تحديث بيانات السلعة ${purchase.name}، رقم ${id}.`,
@@ -1295,6 +1372,33 @@ app.get("/api/inventory/:id/movements", authenticate, requireSection("inventory"
   }
 });
 
+app.get("/api/purchase-invoices", authenticate, async (req: AuthenticatedRequest, res) => {
+  const member = req.member!;
+  if (!hasPermission(member, "inventory", "view") && !hasPermission(member, "cheques", "view")) {
+    return fail(res, 403, "ليس لديك صلاحية الوصول إلى الفواتير.");
+  }
+  const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (search.length > 120) return fail(res, 400, "عبارة البحث أطول من الحد المسموح.");
+  try {
+    const result = await pool.query(
+      `SELECT pi.id, pi.invoice_number, pi.invoice_date::text AS invoice_date,
+          s.name AS supplier_name, COUNT(DISTINCT i.id)::int AS purchase_count
+       FROM purchase_invoices pi
+       JOIN suppliers s ON s.id = pi.supplier_id
+       LEFT JOIN inventory_items i ON i.invoice_id = pi.id
+       WHERE ($1 = '' OR pi.invoice_number ILIKE '%' || $1 || '%' OR s.name ILIKE '%' || $1 || '%')
+       GROUP BY pi.id, s.name
+       ORDER BY pi.invoice_date DESC NULLS LAST, pi.created_at DESC, pi.id DESC
+       LIMIT 100`,
+      [search],
+    );
+    res.json({ items: result.rows });
+  } catch (error) {
+    console.error("Purchase invoice list failed:", error);
+    fail(res, 500, "تعذر تحميل الفواتير المسجلة.");
+  }
+});
+
 app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res) => {
   const query = req.query;
   const search = typeof query.q === "string" ? query.q.trim() : "";
@@ -1341,15 +1445,21 @@ app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res
   try {
     const [items, count, alerts] = await Promise.all([
       pool.query(
-        `SELECT c.id, c.cheque_number, c.invoice_number, c.amount, c.beneficiary, c.bank,
-          c.issue_date, c.due_date, c.status, c.notes, c.created_at,
+        `SELECT c.id, c.cheque_number, c.invoice_id,
+          COALESCE(pi.invoice_number, c.invoice_number) AS invoice_number,
+          s.name AS invoice_supplier_name, c.amount, c.beneficiary, c.bank,
+          c.issue_date, c.due_date, c.status, c.notes, c.recorded_by_id,
+          c.recorded_by_name, c.created_at,
           COALESCE((
             SELECT json_agg(json_build_object(
               'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
             ) ORDER BY a.created_at, a.id)
             FROM cheque_attachments a WHERE a.cheque_id = c.id
           ), '[]'::json) AS attachments
-         FROM cheques c ${clause}
+         FROM cheques c
+         LEFT JOIN purchase_invoices pi ON pi.id = c.invoice_id
+         LEFT JOIN suppliers s ON s.id = pi.supplier_id
+         ${clause}
          ORDER BY CASE WHEN c.status = 'pending' THEN 0 ELSE 1 END,
            c.due_date ASC, c.created_at DESC, c.id DESC
          LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
@@ -1392,16 +1502,25 @@ app.post("/api/cheques", authenticate, requireSection("cheques"), requirePermiss
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const invoice = await resolveChequeInvoice(client, cheque.invoiceId, cheque.invoiceNumber);
+    if (!invoice) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, "الفاتورة المحددة غير موجودة.");
+    }
+    const member = req.member!;
     const result = await client.query(
       `INSERT INTO cheques
-        (cheque_number, invoice_number, amount, beneficiary, bank, issue_date, due_date, status, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, cheque_number, invoice_number, amount, beneficiary, bank, issue_date, due_date, status, notes, created_at`,
-      [cheque.chequeNumber, cheque.invoiceNumber, cheque.amount, cheque.beneficiary, cheque.bank,
-        cheque.issueDate, cheque.dueDate, cheque.status, cheque.notes],
+        (cheque_number, invoice_id, invoice_number, amount, beneficiary, bank, issue_date, due_date, status,
+         notes, recorded_by_id, recorded_by_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING id, cheque_number, invoice_id, invoice_number, amount, beneficiary, bank,
+         issue_date, due_date, status, notes, recorded_by_id, recorded_by_name, created_at`,
+      [cheque.chequeNumber, invoice.invoiceId, invoice.invoiceNumber, cheque.amount, cheque.beneficiary,
+        cheque.bank, cheque.issueDate, cheque.dueDate, cheque.status, cheque.notes,
+        member.clerk_user_id, member.name],
     );
-    await writeAuditWithClient(client, req.member!, "تسجيل شيك", `تسجيل الشيك رقم ${cheque.chequeNumber} بقيمة ${cheque.amount} دج.`,
-      { section: "cheques", eventType: "create", entityId: result.rows[0].id, data: { chequeNumber: cheque.chequeNumber, invoiceNumber: cheque.invoiceNumber, amount: cheque.amount, beneficiary: cheque.beneficiary } });
+    await writeAuditWithClient(client, member, "تسجيل شيك", `تسجيل الشيك رقم ${cheque.chequeNumber} بقيمة ${cheque.amount} دج.`,
+      { section: "cheques", eventType: "create", entityId: result.rows[0].id, data: { chequeNumber: cheque.chequeNumber, invoiceNumber: invoice.invoiceNumber, invoiceId: invoice.invoiceId, amount: cheque.amount, beneficiary: cheque.beneficiary } });
     await client.query("COMMIT");
     res.status(201).json({ item: { ...result.rows[0], attachments: [] } });
   } catch (error) {
@@ -1420,7 +1539,8 @@ app.patch("/api/cheques/:id", authenticate, requireSection("cheques"), requirePe
   try {
     await client.query("BEGIN");
     const existing = await client.query(
-      `SELECT cheque_number AS "chequeNumber", invoice_number AS "invoiceNumber", amount,
+      `SELECT cheque_number AS "chequeNumber", invoice_number AS "invoiceNumber",
+        invoice_id AS "invoiceId", amount,
         beneficiary, bank, issue_date::text AS "issueDate", due_date::text AS "dueDate", status, notes
        FROM cheques WHERE id = $1 FOR UPDATE`,
       [id],
@@ -1434,13 +1554,19 @@ app.patch("/api/cheques/:id", authenticate, requireSection("cheques"), requirePe
       await client.query("ROLLBACK");
       return fail(res, 400, "بيانات الشيك غير صالحة.");
     }
+    const invoice = await resolveChequeInvoice(client, cheque.invoiceId, cheque.invoiceNumber);
+    if (!invoice) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, "الفاتورة المحددة غير موجودة.");
+    }
     const result = await client.query(
-      `UPDATE cheques SET cheque_number = $1, invoice_number = $2, amount = $3,
-        beneficiary = $4, bank = $5, issue_date = $6, due_date = $7, status = $8, notes = $9
-       WHERE id = $10
-       RETURNING id, cheque_number, invoice_number, amount, beneficiary, bank, issue_date, due_date, status, notes, created_at`,
-      [cheque.chequeNumber, cheque.invoiceNumber, cheque.amount, cheque.beneficiary, cheque.bank,
-        cheque.issueDate, cheque.dueDate, cheque.status, cheque.notes, id],
+      `UPDATE cheques SET cheque_number = $1, invoice_id = $2, invoice_number = $3, amount = $4,
+        beneficiary = $5, bank = $6, issue_date = $7, due_date = $8, status = $9, notes = $10
+       WHERE id = $11
+       RETURNING id, cheque_number, invoice_id, invoice_number, amount, beneficiary, bank,
+         issue_date, due_date, status, notes, recorded_by_id, recorded_by_name, created_at`,
+      [cheque.chequeNumber, invoice.invoiceId, invoice.invoiceNumber, cheque.amount, cheque.beneficiary,
+        cheque.bank, cheque.issueDate, cheque.dueDate, cheque.status, cheque.notes, id],
     );
     await writeAuditWithClient(client, req.member!, "تعديل بيانات شيك", `تحديث بيانات الشيك رقم ${cheque.chequeNumber}.`,
       { section: "cheques", eventType: "update", entityId: id, data: { chequeNumber: cheque.chequeNumber, amount: cheque.amount, beneficiary: cheque.beneficiary, status: cheque.status } });
@@ -1747,7 +1873,9 @@ app.get("/api/rental-attachments/:id", requireRentalSchema, authenticate, requir
 
 const machinerySparePartSelect = `
   SELECT p.id, p.machinery_id, m.code AS machinery_code, m.name AS machinery_name,
-    p.name, p.quantity, p.buy_price, p.supplier, p.invoice_number,
+    p.name, p.quantity, p.buy_price, COALESCE(s.name, p.supplier) AS supplier,
+    COALESCE(pi.invoice_number, p.invoice_number) AS invoice_number,
+    p.supplier_id, p.invoice_id,
     p.installation_date::text AS installation_date, p.stock_quantity, p.repair_expense,
     p.notes, p.recorded_by_name, p.created_at,
     COALESCE((
@@ -1757,7 +1885,9 @@ const machinerySparePartSelect = `
       FROM machinery_spare_part_attachments a WHERE a.spare_part_id = p.id
     ), '[]'::json) AS attachments
   FROM machinery_spare_parts p
-  JOIN machinery m ON m.id = p.machinery_id`;
+  JOIN machinery m ON m.id = p.machinery_id
+  LEFT JOIN suppliers s ON s.id = p.supplier_id
+  LEFT JOIN purchase_invoices pi ON pi.id = p.invoice_id`;
 
 const recordNoteTargets = {
   transaction: { section: "finance", table: "transactions", label: "العملية المالية", memberId: false },
@@ -1939,7 +2069,8 @@ app.post("/api/machinery/spare-parts", requireMachinerySchema, authenticate, req
   const installationDate = body.installationDate === "" || body.installationDate == null ? null : body.installationDate;
   const maxAmount = 99999999999999;
   if (!Number.isSafeInteger(machineryId) || machineryId <= 0 ||
-      !name || name.length > 200 || supplier.length > 200 || invoiceNumber.length > 120 || notes.length > 5000 ||
+      !name || name.length > 200 || supplier.length > 200 || invoiceNumber.length > 120 ||
+      (invoiceNumber && !supplier) || notes.length > 5000 ||
       !Number.isSafeInteger(quantity) || quantity <= 0 || quantity > 1000000 ||
       !Number.isFinite(buyPrice) || buyPrice < 0 || buyPrice > maxAmount ||
       !Number.isSafeInteger(stockQuantity) || stockQuantity < 0 || stockQuantity > quantity ||
@@ -1956,14 +2087,21 @@ app.post("/api/machinery/spare-parts", requireMachinerySchema, authenticate, req
       return fail(res, 404, "المركبة أو الآلية المحددة غير موجودة.");
     }
     const member = req.member!;
+    const links = await ensureSupplierInvoice(
+      client,
+      supplier,
+      invoiceNumber,
+      null,
+      member,
+    );
     const result = await client.query(
       `INSERT INTO machinery_spare_parts
-        (machinery_id, name, quantity, buy_price, supplier, invoice_number, installation_date,
-         stock_quantity, repair_expense, notes, recorded_by_id, recorded_by_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        (machinery_id, name, quantity, buy_price, supplier, invoice_number, supplier_id, invoice_id,
+         installation_date, stock_quantity, repair_expense, notes, recorded_by_id, recorded_by_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        RETURNING id`,
-      [machineryId, name, quantity, buyPrice, supplier, invoiceNumber, installationDate,
-        stockQuantity, repairExpense, notes, member.clerk_user_id, member.name],
+      [machineryId, name, quantity, buyPrice, supplier, invoiceNumber, links.supplierId, links.invoiceId,
+        installationDate, stockQuantity, repairExpense, notes, member.clerk_user_id, member.name],
     );
     await writeAuditWithClient(client, member, "تسجيل قطعة غيار أو إصلاح", `${name} لآلية ${machine.rows[0].name}.`,
       { section: "machinery", eventType: "create", entityId: result.rows[0].id, data: { machineryId, machineName: machine.rows[0].name, name, quantity, supplier, totalCost: quantity * buyPrice + repairExpense } });

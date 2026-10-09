@@ -16,6 +16,26 @@ ALTER TABLE members ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT 
 ALTER TABLE members ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL
   DEFAULT '{"uploadFiles":true,"viewFinancialData":true,"manageOperations":true}'::jsonb;
 
+CREATE TABLE IF NOT EXISTS suppliers (
+  id BIGSERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  normalized_name TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS purchase_invoices (
+  id BIGSERIAL PRIMARY KEY,
+  supplier_id BIGINT NOT NULL REFERENCES suppliers(id) ON DELETE RESTRICT,
+  invoice_number TEXT NOT NULL,
+  normalized_invoice_number TEXT NOT NULL,
+  invoice_date DATE,
+  recorded_by_id TEXT REFERENCES members(clerk_user_id) ON DELETE SET NULL,
+  recorded_by_name TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (supplier_id, normalized_invoice_number),
+  UNIQUE (id, supplier_id)
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
   id BIGSERIAL PRIMARY KEY,
   type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
@@ -54,14 +74,42 @@ CREATE TABLE IF NOT EXISTS inventory_items (
   sale_price NUMERIC(16, 2) CHECK (sale_price IS NULL OR sale_price >= 0),
   supplier TEXT NOT NULL DEFAULT '',
   invoice_number TEXT NOT NULL DEFAULT '',
+  supplier_id BIGINT REFERENCES suppliers(id) ON DELETE RESTRICT,
+  invoice_id BIGINT,
   purchase_date DATE NOT NULL DEFAULT CURRENT_DATE,
   notes TEXT NOT NULL DEFAULT '',
+  recorded_by_id TEXT REFERENCES members(clerk_user_id) ON DELETE SET NULL,
+  recorded_by_name TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE inventory_items
   ADD COLUMN IF NOT EXISTS sale_price NUMERIC(16, 2),
-  ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+  ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS supplier_id BIGINT REFERENCES suppliers(id) ON DELETE RESTRICT,
+  ADD COLUMN IF NOT EXISTS invoice_id BIGINT,
+  ADD COLUMN IF NOT EXISTS recorded_by_id TEXT REFERENCES members(clerk_user_id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS recorded_by_name TEXT NOT NULL DEFAULT '';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'inventory_items_invoice_supplier_fkey'
+      AND conrelid = 'inventory_items'::regclass
+  ) THEN
+    ALTER TABLE inventory_items ADD CONSTRAINT inventory_items_invoice_supplier_fkey
+      FOREIGN KEY (invoice_id, supplier_id) REFERENCES purchase_invoices(id, supplier_id) ON DELETE RESTRICT;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'inventory_items_invoice_requires_supplier_check'
+      AND conrelid = 'inventory_items'::regclass
+  ) THEN
+    ALTER TABLE inventory_items ADD CONSTRAINT inventory_items_invoice_requires_supplier_check
+      CHECK (invoice_id IS NULL OR supplier_id IS NOT NULL);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS inventory_movements (
   id BIGSERIAL PRIMARY KEY,
@@ -97,6 +145,7 @@ CREATE TABLE IF NOT EXISTS cheques (
   id BIGSERIAL PRIMARY KEY,
   cheque_number TEXT NOT NULL,
   invoice_number TEXT NOT NULL DEFAULT '',
+  invoice_id BIGINT REFERENCES purchase_invoices(id) ON DELETE SET NULL,
   amount NUMERIC(16, 2) NOT NULL CHECK (amount > 0),
   beneficiary TEXT NOT NULL,
   bank TEXT NOT NULL DEFAULT '',
@@ -104,8 +153,15 @@ CREATE TABLE IF NOT EXISTS cheques (
   due_date DATE NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'cancelled')),
   notes TEXT NOT NULL DEFAULT '',
+  recorded_by_id TEXT REFERENCES members(clerk_user_id) ON DELETE SET NULL,
+  recorded_by_name TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE cheques
+  ADD COLUMN IF NOT EXISTS invoice_id BIGINT REFERENCES purchase_invoices(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS recorded_by_id TEXT REFERENCES members(clerk_user_id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS recorded_by_name TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS cheque_attachments (
   id BIGSERIAL PRIMARY KEY,
@@ -198,6 +254,8 @@ CREATE TABLE IF NOT EXISTS machinery_spare_parts (
   buy_price NUMERIC(16, 2) NOT NULL CHECK (buy_price >= 0),
   supplier TEXT NOT NULL DEFAULT '',
   invoice_number TEXT NOT NULL DEFAULT '',
+  supplier_id BIGINT REFERENCES suppliers(id) ON DELETE RESTRICT,
+  invoice_id BIGINT,
   installation_date DATE,
   stock_quantity INTEGER NOT NULL CHECK (stock_quantity >= 0 AND stock_quantity <= quantity),
   repair_expense NUMERIC(16, 2) NOT NULL DEFAULT 0 CHECK (repair_expense >= 0),
@@ -206,6 +264,30 @@ CREATE TABLE IF NOT EXISTS machinery_spare_parts (
   recorded_by_name TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE machinery_spare_parts
+  ADD COLUMN IF NOT EXISTS supplier_id BIGINT REFERENCES suppliers(id) ON DELETE RESTRICT,
+  ADD COLUMN IF NOT EXISTS invoice_id BIGINT;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'machinery_spare_parts_invoice_supplier_fkey'
+      AND conrelid = 'machinery_spare_parts'::regclass
+  ) THEN
+    ALTER TABLE machinery_spare_parts ADD CONSTRAINT machinery_spare_parts_invoice_supplier_fkey
+      FOREIGN KEY (invoice_id, supplier_id) REFERENCES purchase_invoices(id, supplier_id) ON DELETE RESTRICT;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'machinery_spare_parts_invoice_requires_supplier_check'
+      AND conrelid = 'machinery_spare_parts'::regclass
+  ) THEN
+    ALTER TABLE machinery_spare_parts ADD CONSTRAINT machinery_spare_parts_invoice_requires_supplier_check
+      CHECK (invoice_id IS NULL OR supplier_id IS NOT NULL);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS machinery_spare_part_attachments (
   id BIGSERIAL PRIMARY KEY,
@@ -252,11 +334,15 @@ CREATE INDEX IF NOT EXISTS transaction_attachments_transaction_idx ON transactio
 CREATE INDEX IF NOT EXISTS inventory_items_name_idx ON inventory_items (name);
 CREATE INDEX IF NOT EXISTS inventory_items_supplier_idx ON inventory_items (supplier);
 CREATE INDEX IF NOT EXISTS inventory_items_invoice_idx ON inventory_items (invoice_number);
+CREATE INDEX IF NOT EXISTS inventory_items_supplier_id_idx ON inventory_items (supplier_id);
+CREATE INDEX IF NOT EXISTS inventory_items_invoice_id_idx ON inventory_items (invoice_id);
+CREATE INDEX IF NOT EXISTS purchase_invoices_date_idx ON purchase_invoices (invoice_date DESC);
 CREATE INDEX IF NOT EXISTS inventory_items_purchase_date_idx ON inventory_items (purchase_date DESC);
 CREATE INDEX IF NOT EXISTS inventory_movements_item_date_idx ON inventory_movements (inventory_item_id, movement_date DESC, id DESC);
 CREATE INDEX IF NOT EXISTS inventory_attachments_item_idx ON inventory_attachments (inventory_item_id, created_at);
 CREATE INDEX IF NOT EXISTS cheques_number_idx ON cheques (cheque_number);
 CREATE INDEX IF NOT EXISTS cheques_invoice_idx ON cheques (invoice_number);
+CREATE INDEX IF NOT EXISTS cheques_invoice_id_idx ON cheques (invoice_id);
 CREATE INDEX IF NOT EXISTS cheques_beneficiary_idx ON cheques (beneficiary);
 CREATE INDEX IF NOT EXISTS cheques_bank_idx ON cheques (bank);
 CREATE INDEX IF NOT EXISTS cheques_status_due_idx ON cheques (status, due_date);
@@ -264,6 +350,8 @@ CREATE INDEX IF NOT EXISTS cheque_attachments_cheque_idx ON cheque_attachments (
 CREATE INDEX IF NOT EXISTS rentals_end_date_idx ON rentals (end_date);
 CREATE INDEX IF NOT EXISTS rental_attachments_rental_idx ON rental_attachments (rental_id, created_at);
 CREATE INDEX IF NOT EXISTS machinery_spare_parts_machine_date_idx ON machinery_spare_parts (machinery_id, installation_date DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS machinery_spare_parts_supplier_id_idx ON machinery_spare_parts (supplier_id);
+CREATE INDEX IF NOT EXISTS machinery_spare_parts_invoice_id_idx ON machinery_spare_parts (invoice_id);
 CREATE INDEX IF NOT EXISTS machinery_spare_part_attachments_part_idx ON machinery_spare_part_attachments (spare_part_id, created_at);
 CREATE INDEX IF NOT EXISTS field_expenses_created_idx ON field_expenses (created_at DESC);
 CREATE INDEX IF NOT EXISTS field_expenses_review_created_idx ON field_expenses (review_status, created_at DESC);

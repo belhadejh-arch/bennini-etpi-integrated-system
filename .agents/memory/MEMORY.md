@@ -1,3 +1,4 @@
 - [Expo and Clerk versions](expo-clerk-versions.md) — SDK 54 and current Clerk peers disagree on the React patch version; verify before changing either.
 - [Field expense workflow](field-expense-workflow.md) — field costs are submitted once by field staff and reviewed by administration in the same record.
 - [Unified access model](unified-access-model.md) — all staff share one sign-in and home; dashboard links and section access follow each member's permissions.
+- [Relational records](relational-records.md) — keep operational data in shared PostgreSQL with foreign-key links and authenticated actor identity, not local/mock storage.

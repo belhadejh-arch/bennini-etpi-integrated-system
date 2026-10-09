@@ -24,6 +24,8 @@ type Cheque = {
   id: number;
   cheque_number: string;
   invoice_number: string;
+  invoice_id: number | string | null;
+  invoice_supplier_name?: string | null;
   amount: number | string;
   beneficiary: string;
   bank: string;
@@ -31,7 +33,16 @@ type Cheque = {
   due_date: string;
   status: Status;
   notes: string;
+  recorded_by_id?: string | null;
+  recorded_by_name?: string;
   attachments: Attachment[];
+};
+type PurchaseInvoice = {
+  id: number | string;
+  invoice_number: string;
+  invoice_date: string | null;
+  supplier_name: string;
+  purchase_count: number;
 };
 type DueAlert = {
   id: number;
@@ -51,6 +62,7 @@ type ChequeResult = {
 };
 type Draft = {
   chequeNumber: string;
+  invoiceId: string;
   invoiceNumber: string;
   amount: string;
   beneficiary: string;
@@ -83,7 +95,7 @@ function localDate() {
 function emptyDraft(): Draft {
   const today = localDate();
   return {
-    chequeNumber: "", invoiceNumber: "", amount: "", beneficiary: "", bank: "",
+    chequeNumber: "", invoiceId: "", invoiceNumber: "", amount: "", beneficiary: "", bank: "",
     issueDate: today, dueDate: today, status: "pending", notes: "",
   };
 }
@@ -104,6 +116,8 @@ export default function ChequesSection() {
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [items, setItems] = useState<Cheque[]>([]);
+  const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
+  const [invoiceSearch, setInvoiceSearch] = useState("");
   const [dueAlerts, setDueAlerts] = useState<DueAlert[]>([]);
   const [dueAlertCount, setDueAlertCount] = useState(0);
   const [total, setTotal] = useState(0);
@@ -138,6 +152,13 @@ export default function ChequesSection() {
     if (focusId) params.set("focusId", focusId);
     return params.toString();
   }, [dateFrom, dateTo, focusId, page, search, statusFilter]);
+  const matchingInvoices = useMemo(() => {
+    const needle = invoiceSearch.trim().toLocaleLowerCase();
+    if (!needle) return [];
+    return invoices.filter((invoice) =>
+      `${invoice.invoice_number} ${invoice.supplier_name}`.toLocaleLowerCase().includes(needle),
+    ).slice(0, 6);
+  }, [invoiceSearch, invoices]);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
@@ -174,6 +195,21 @@ export default function ChequesSection() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
+  useEffect(() => {
+    const query = invoiceSearch.trim();
+    if (!formOpen || !isSignedIn || draft.invoiceId || !query) {
+      setInvoices([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({ q: query });
+      void apiRequest<{ items: PurchaseInvoice[] }>(`/purchase-invoices?${params}`, () => getToken())
+        .then((result) => setInvoices(result.items))
+        .catch((caught) => setError(caught instanceof Error ? caught.message : "تعذر البحث عن الفواتير."));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [draft.invoiceId, formOpen, getToken, invoiceSearch, isSignedIn]);
+
   const setField = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
   };
@@ -183,6 +219,7 @@ export default function ChequesSection() {
     setEditingCheque(null);
     setPickedDocs([]);
     setDraft(emptyDraft());
+    setInvoiceSearch("");
   };
 
   const beginCreate = () => {
@@ -190,6 +227,7 @@ export default function ChequesSection() {
     setEditingCheque(null);
     setPickedDocs([]);
     setDraft(emptyDraft());
+    setInvoiceSearch("");
     setFormOpen(true);
   };
 
@@ -199,6 +237,7 @@ export default function ChequesSection() {
     setPickedDocs([]);
     setDraft({
       chequeNumber: item.cheque_number,
+      invoiceId: item.invoice_id == null ? "" : String(item.invoice_id),
       invoiceNumber: item.invoice_number || "",
       amount: String(item.amount),
       beneficiary: item.beneficiary,
@@ -208,6 +247,9 @@ export default function ChequesSection() {
       status: item.status,
       notes: item.notes || "",
     });
+    setInvoiceSearch(item.invoice_id != null && item.invoice_supplier_name
+      ? `${item.invoice_number} — ${item.invoice_supplier_name}`
+      : item.invoice_number || "");
     setFormOpen(true);
   };
 
@@ -290,6 +332,7 @@ export default function ChequesSection() {
       const payload = JSON.stringify({
         ...draft,
         chequeNumber: draft.chequeNumber.trim(),
+        invoiceId: draft.invoiceId ? Number(draft.invoiceId) : null,
         invoiceNumber: draft.invoiceNumber.trim(),
         amount: Number(draft.amount),
         beneficiary: draft.beneficiary.trim(),
@@ -478,13 +521,62 @@ export default function ChequesSection() {
             </View>
             <View style={styles.formGrid}>
               <Field label="رقم الشيك *" value={draft.chequeNumber} onChange={(value) => setField("chequeNumber", value)} placeholder="رقم الشيك" />
-              <Field label="رقم الفاتورة المرتبطة" value={draft.invoiceNumber} onChange={(value) => setField("invoiceNumber", value)} placeholder="رقم الفاتورة (اختياري)" />
+              <Field
+                label="فاتورة المشتريات (اختياري)"
+                value={invoiceSearch}
+                onChange={(value) => {
+                  setInvoiceSearch(value);
+                  setDraft((current) => ({ ...current, invoiceId: "", invoiceNumber: value }));
+                }}
+                placeholder="ابحث برقم الفاتورة أو اسم المورد"
+              />
               <Field label="المبلغ (دج) *" value={draft.amount} onChange={(value) => setField("amount", value)} placeholder="0" numeric />
               <Field label="المستفيد *" value={draft.beneficiary} onChange={(value) => setField("beneficiary", value)} placeholder="اسم المستفيد" />
               <Field label="البنك" value={draft.bank} onChange={(value) => setField("bank", value)} placeholder="اسم البنك" />
               <Field label="تاريخ الإصدار *" value={draft.issueDate} onChange={(value) => setField("issueDate", value)} placeholder="YYYY-MM-DD" />
               <Field label="تاريخ الاستحقاق *" value={draft.dueDate} onChange={(value) => setField("dueDate", value)} placeholder="YYYY-MM-DD" />
             </View>
+            {draft.invoiceId ? (
+              <Text style={{ color: "#0F766E", fontSize: 11, fontWeight: "800", textAlign: "right" }}>
+                الشيك مرتبط فعلياً بفاتورة {invoiceSearch}
+              </Text>
+            ) : (
+              <View style={{ width: "100%", gap: 6 }}>
+                {matchingInvoices.map((invoice) => (
+                  <Pressable
+                    key={String(invoice.id)}
+                    accessibilityRole="button"
+                    onPress={() => {
+                      setDraft((current) => ({
+                        ...current,
+                        invoiceId: String(invoice.id),
+                        invoiceNumber: invoice.invoice_number,
+                      }));
+                      setInvoiceSearch(`${invoice.invoice_number} — ${invoice.supplier_name}`);
+                    }}
+                    style={{
+                      minHeight: 42, borderWidth: 1, borderColor: colors.border, borderRadius: 9,
+                      backgroundColor: "#F7F9FC", paddingHorizontal: 10, paddingVertical: 7,
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text style={{ color: colors.navy, fontSize: 11, fontWeight: "800", textAlign: "right" }}>
+                      فاتورة {invoice.invoice_number} — {invoice.supplier_name}
+                    </Text>
+                    {invoice.invoice_date ? (
+                      <Text style={{ color: colors.muted, fontSize: 9, textAlign: "right", marginTop: 3 }}>
+                        {dateLabel(invoice.invoice_date)}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                ))}
+                {invoiceSearch.trim() && matchingInvoices.length === 0 ? (
+                  <Text style={{ color: colors.muted, fontSize: 10, textAlign: "right" }}>
+                    لا توجد فاتورة مطابقة؛ سيُحفظ الرقم دون ربط حتى تُسجّل الفاتورة.
+                  </Text>
+                ) : null}
+              </View>
+            )}
             <Text style={styles.fieldLabel}>حالة الشيك</Text>
             <View style={styles.choiceRow}>
               {statusOptions.filter((option) => option.value).map((option) => (
