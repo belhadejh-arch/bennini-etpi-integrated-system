@@ -141,15 +141,33 @@ const transactionUpload = multer({
       "image/jpeg",
       "image/png",
       "image/webp",
+      "image/gif",
+      "image/heic",
+      "image/heif",
       "application/msword",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/vnd.ms-excel",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.oasis.opendocument.text",
+      "application/vnd.oasis.opendocument.spreadsheet",
+      "application/vnd.oasis.opendocument.presentation",
+      "text/plain",
+      "text/csv",
+      "application/csv",
+      "text/markdown",
+      "text/rtf",
+      "application/rtf",
     ]);
     const extension = path.extname(file.originalname).toLowerCase();
-    const allowedExtensions = new Set([".pdf", ".jpg", ".jpeg", ".png", ".webp", ".doc", ".docx", ".xls", ".xlsx"]);
-    if (!allowedTypes.has(file.mimetype) || !allowedExtensions.has(extension)) {
-      callback(new Error("نوع الملف غير مدعوم. استخدم PDF أو صورة أو مستند Office."));
+    const allowedExtensions = new Set([
+      ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif",
+      ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".odp",
+      ".txt", ".csv", ".md", ".rtf",
+    ]);
+    if (!allowedExtensions.has(extension) || (!allowedTypes.has(file.mimetype) && file.mimetype !== "application/octet-stream")) {
+      callback(new Error("نوع الملف غير مدعوم. استخدم PDF أو صورة أو مستنداً نصياً أو ملف Office."));
       return;
     }
     callback(null, true);
@@ -2024,6 +2042,78 @@ app.get("/api/machinery/spare-part-attachments/:id", requireMachinerySchema, aut
   } catch (error) {
     console.error("Machinery spare part attachment read failed:", error);
     fail(res, 500, "تعذر فتح المستند.");
+  }
+});
+
+const attachmentDeleteTargets: Partial<Record<SectionId, {
+  table: string;
+  parentColumn: string;
+  label: string;
+}>> = {
+  finance: { table: "transaction_attachments", parentColumn: "transaction_id", label: "العملية المالية" },
+  inventory: { table: "inventory_attachments", parentColumn: "inventory_item_id", label: "عملية الشراء" },
+  cheques: { table: "cheque_attachments", parentColumn: "cheque_id", label: "الشيك" },
+  rentals: { table: "rental_attachments", parentColumn: "rental_id", label: "عقد الكراء" },
+  field: { table: "field_expense_attachments", parentColumn: "field_expense_id", label: "العملية الميدانية" },
+  machinery: { table: "machinery_spare_part_attachments", parentColumn: "spare_part_id", label: "سجل قطعة الغيار أو الإصلاح" },
+};
+
+app.delete("/api/attachments/:section/:id", authenticate, async (req: AuthenticatedRequest, res) => {
+  const section = req.params.section as SectionId;
+  const target = attachmentDeleteTargets[section];
+  if (!target) return fail(res, 404, "قسم المرفقات غير موجود.");
+  const member = req.member!;
+  if (!hasPermission(member, section, "view")) return fail(res, 403, "ليس لديك صلاحية الوصول إلى هذا القسم.");
+  if (!hasPermission(member, section, "delete")) return fail(res, 403, "لا تملك صلاحية حذف المرفقات في هذا القسم.");
+
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم المرفق غير صالح.");
+
+  try {
+    if (section === "rentals") await ensureRentalSchema();
+    if (section === "field") await ensureFieldExpenseSchema();
+    if (section === "machinery") await ensureMachinerySchema();
+  } catch (error) {
+    console.error("Attachment schema initialization failed:", error);
+    return fail(res, 503, "تعذر تجهيز قاعدة بيانات المرفقات.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = section === "field" && member.role !== "admin" && member.role !== "finance"
+      ? await client.query(
+        `DELETE FROM ${target.table} a USING field_expenses e
+         WHERE a.id = $1 AND a.${target.parentColumn} = e.id AND e.created_by_id = $2
+         RETURNING a.${target.parentColumn} AS record_id, a.file_name`,
+        [id, member.clerk_user_id],
+      )
+      : await client.query(
+        `DELETE FROM ${target.table} WHERE id = $1
+         RETURNING ${target.parentColumn} AS record_id, file_name`,
+        [id],
+      );
+
+    if (!result.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "المرفق غير موجود أو لا يمكن الوصول إليه.");
+    }
+    const { record_id: recordId, file_name: fileName } = result.rows[0];
+    await writeAuditWithClient(
+      client,
+      member,
+      "حذف مرفق",
+      `حذف الملف ${fileName} من ${target.label} رقم ${recordId}.`,
+      { section, eventType: "delete", entityId: recordId, data: { fileName, attachmentId: id } },
+    );
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Attachment deletion failed:", error);
+    fail(res, 500, "تعذر حذف المرفق.");
+  } finally {
+    client.release();
   }
 });
 

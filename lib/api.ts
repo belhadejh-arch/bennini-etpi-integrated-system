@@ -5,19 +5,22 @@ import type { SectionId } from "../shared/sections";
 
 const configuredApiUrl = Constants.expoConfig?.extra?.apiUrl as string | undefined;
 
+export function apiUrl(path: string): string {
+  const baseUrl = Platform.OS === "web" ? "" : configuredApiUrl;
+  if (Platform.OS !== "web" && !baseUrl) {
+    throw new Error("يلزم إعداد عنوان الخادم قبل تشغيل تطبيق الهاتف.");
+  }
+  return `${baseUrl ?? ""}${path}`;
+}
+
 export async function apiRequest<T>(
   path: string,
   getToken: () => Promise<string | null>,
   options: RequestInit = {},
 ): Promise<T> {
   const token = await getToken();
-  const baseUrl = Platform.OS === "web" ? "" : configuredApiUrl;
-  if (Platform.OS !== "web" && !baseUrl) {
-    throw new Error("يلزم إعداد عنوان الخادم قبل تشغيل تطبيق الهاتف.");
-  }
-
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
-  const response = await fetch(`${baseUrl ?? ""}/api${path}`, {
+  const response = await fetch(apiUrl(`/api${path}`), {
     ...options,
     headers: {
       Accept: "application/json",

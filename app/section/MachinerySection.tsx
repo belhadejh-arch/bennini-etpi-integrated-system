@@ -11,8 +11,10 @@ import {
   ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View,
 } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
+import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDzd } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 
@@ -177,9 +179,7 @@ export default function MachinerySection() {
       const result = await DocumentPicker.getDocumentAsync({
         multiple: true,
         copyToCacheDirectory: true,
-        type: ["application/pdf", "image/*", "application/msword",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+        type: [...attachmentPickerTypes],
       });
       if (!result.canceled && result.assets.length) {
         setPickedDocuments((current) => [...current, ...result.assets].slice(0, remaining));
@@ -497,10 +497,10 @@ export default function MachinerySection() {
                 <Text style={styles.fieldLabel}>الصور والوثائق</Text>
                 <View style={styles.attachmentList}>
                   {part.attachments.map((attachment) => (
-                    <Pressable key={attachment.id} onPress={() => void openAttachment(attachment)} style={styles.attachmentChip}>
-                      <FilePlus2 size={14} color={colors.blue} />
-                      <Text numberOfLines={1} style={styles.attachmentName}>{attachment.file_name}</Text>
-                    </Pressable>
+                    <AttachmentActions key={attachment.id} attachment={attachment} section="machinery"
+                      url={`/api/machinery/spare-part-attachments/${attachment.id}`}
+                      canDelete={hasPermission(member, "machinery", "delete")}
+                      onDeleted={() => void refresh()} />
                   ))}
                 </View>
               </View>

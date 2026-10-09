@@ -11,8 +11,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
+import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDzd } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 
@@ -239,11 +241,7 @@ export default function ChequesSection() {
       const result = await DocumentPicker.getDocumentAsync({
         multiple: true,
         copyToCacheDirectory: true,
-        type: [
-          "application/pdf", "image/*", "application/msword",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ],
+        type: [...attachmentPickerTypes],
       });
       if (!result.canceled && result.assets.length) {
         setPickedDocs((current) => [...current, ...result.assets].slice(0, remaining));
@@ -263,11 +261,7 @@ export default function ChequesSection() {
       const result = await DocumentPicker.getDocumentAsync({
         multiple: true,
         copyToCacheDirectory: true,
-        type: [
-          "application/pdf", "image/*", "application/msword",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ],
+        type: [...attachmentPickerTypes],
       });
       if (result.canceled || !result.assets.length) return;
       setSaving(true);
@@ -516,10 +510,8 @@ export default function ChequesSection() {
                 <Text style={styles.fieldLabel}>المرفقات المحفوظة</Text>
                 <View style={styles.chipRow}>
                   {editingCheque.attachments.map((attachment) => (
-                    <Pressable key={attachment.id} onPress={() => void openAttachment(attachment)} style={styles.attachmentChip}>
-                      <FilePlus2 size={14} color={colors.blue} />
-                      <Text numberOfLines={1} style={styles.attachmentName}>{attachment.file_name}</Text>
-                    </Pressable>
+                    <AttachmentActions key={attachment.id} attachment={attachment} section="cheques"
+                      url={`/api/cheque-attachments/${attachment.id}`} canDelete={false} onDeleted={() => undefined} />
                   ))}
                 </View>
               </View>
@@ -655,10 +647,10 @@ export default function ChequesSection() {
                     <Text style={styles.fieldLabel}>صورة الشيك والفاتورة / الوثائق</Text>
                     <View style={styles.chipRow}>
                       {item.attachments.map((attachment) => (
-                        <Pressable key={attachment.id} onPress={() => void openAttachment(attachment)} style={styles.attachmentChip}>
-                          <FilePlus2 size={14} color={colors.blue} />
-                          <Text numberOfLines={1} style={styles.attachmentName}>{attachment.file_name || attachmentLabel(attachment)}</Text>
-                        </Pressable>
+                        <AttachmentActions key={attachment.id} attachment={attachment} section="cheques"
+                          url={`/api/cheque-attachments/${attachment.id}`}
+                          canDelete={hasPermission(member, "cheques", "delete")}
+                          onDeleted={() => void refresh()} />
                       ))}
                     </View>
                   </View>

@@ -10,8 +10,10 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
+import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDzd } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 
@@ -216,11 +218,7 @@ export default function InventorySection() {
       const result = await DocumentPicker.getDocumentAsync({
         multiple: true,
         copyToCacheDirectory: true,
-        type: [
-          "application/pdf", "image/*", "application/msword",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ],
+        type: [...attachmentPickerTypes],
       });
       if (!result.canceled && result.assets.length) setPickedDocs((current) => [...current, ...result.assets].slice(0, allowed));
     } catch (caught) {
@@ -570,10 +568,10 @@ export default function InventorySection() {
                 <Text style={styles.fieldLabel}>الفواتير والوثائق</Text>
                 <View style={styles.chipRow}>
                   {item.attachments.map((attachment) => (
-                    <Pressable key={attachment.id} onPress={() => void openAttachment(attachment)} style={styles.attachmentChip}>
-                      <FilePlus2 size={14} color={colors.blue} />
-                      <Text style={styles.attachmentName}>{attachment.file_name}</Text>
-                    </Pressable>
+                    <AttachmentActions key={attachment.id} attachment={attachment} section="inventory"
+                      url={`/api/inventory-attachments/${attachment.id}`}
+                      canDelete={hasPermission(member, "inventory", "delete")}
+                      onDeleted={() => void refresh()} />
                   ))}
                 </View>
               </View>

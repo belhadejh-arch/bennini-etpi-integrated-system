@@ -10,8 +10,10 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
+import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDzd } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 
@@ -168,11 +170,7 @@ export default function FieldExpensesSection() {
       const result = await DocumentPicker.getDocumentAsync({
         multiple: true,
         copyToCacheDirectory: true,
-        type: [
-          "image/*", "application/pdf", "application/msword",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ],
+        type: [...attachmentPickerTypes],
       });
       if (!result.canceled && result.assets.length) {
         setPickedDocs((current) => [...current, ...result.assets].slice(0, available));
@@ -253,7 +251,7 @@ export default function FieldExpensesSection() {
     try {
       const result = await DocumentPicker.getDocumentAsync({
         multiple: true, copyToCacheDirectory: true,
-        type: ["image/*", "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+        type: [...attachmentPickerTypes],
       });
       if (result.canceled || !result.assets.length) return;
       setSaving(true);
@@ -462,7 +460,8 @@ export default function FieldExpensesSection() {
               canReview={canEdit} canEditNotes={canEdit && (isAdmin || expense.created_by_id === member?.clerk_user_id)}
               saving={saving} onReview={() => void changeReview(expense, expense.review_status === "pending" ? "reviewed" : "pending")}
               canAddAttachment={canAddAttachments} onAddAttachment={() => void addAttachments(expense)}
-              onOpenAttachment={(attachment) => void openAttachment(attachment)} />
+              canDeleteAttachment={hasPermission(member, "field", "delete")}
+              onDeletedAttachment={() => void refresh()} />
           ))
         ) : (
           <View style={styles.emptyCard}>
@@ -506,17 +505,18 @@ function FilterChip({ label, selected, onPress }: { label: string; selected: boo
   );
 }
 
-function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, canAddAttachment, saving, onReview, onAddAttachment, onOpenAttachment }: {
+function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, canAddAttachment, canDeleteAttachment, saving, onReview, onAddAttachment, onDeletedAttachment }: {
   expense: FieldExpense;
   isAdmin: boolean;
   canRecord: boolean;
   canReview: boolean;
   canEditNotes: boolean;
   canAddAttachment: boolean;
+  canDeleteAttachment: boolean;
   saving: boolean;
   onReview: () => void;
   onAddAttachment: () => void;
-  onOpenAttachment: (attachment: Attachment) => void;
+  onDeletedAttachment: (attachmentId: number) => void;
 }) {
   const isFuel = expense.category === "مازوت" && expense.fuel_liters != null;
   return (
@@ -554,10 +554,10 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, can
           <Text style={styles.attachmentsLabel}>الفواتير والوصولات ({expense.attachments.length})</Text>
           <View style={styles.attachmentChips}>
             {expense.attachments.map((attachment) => (
-              <Pressable key={attachment.id} onPress={() => onOpenAttachment(attachment)} style={styles.attachmentChip}>
-                <FilePlus2 size={13} color={colors.blue} />
-                <Text numberOfLines={1} style={styles.attachmentName}>{attachment.file_name}</Text>
-              </Pressable>
+              <AttachmentActions key={attachment.id} attachment={attachment} section="field"
+                url={`/api/field-expense-attachments/${attachment.id}`}
+                canDelete={canDeleteAttachment}
+                onDeleted={onDeletedAttachment} />
             ))}
           </View>
         </View>

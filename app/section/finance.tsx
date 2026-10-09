@@ -7,8 +7,10 @@ import { ArrowRight, ChevronLeft, ChevronRight, Eye, FilePlus2, Pencil, Plus, Re
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
+import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDzd } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 
@@ -205,7 +207,7 @@ export default function FinanceSection() {
       const result = await DocumentPicker.getDocumentAsync({
         multiple: true,
         copyToCacheDirectory: true,
-        type: ["application/pdf", "image/*", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+        type: [...attachmentPickerTypes],
       });
       if (result.canceled || !result.assets.length) return;
       if (transactionId) {
@@ -506,10 +508,10 @@ export default function FinanceSection() {
                         <Text style={styles.detailText}>المعرف: {item.id} · سجلها: {item.recorded_by_name}</Text>
                         <View style={styles.attachmentList}>
                           {item.attachments?.length ? item.attachments.map((attachment) => (
-                            <Pressable key={attachment.id} onPress={() => void openAttachment(attachment)} style={styles.attachmentPill}>
-                              <Eye size={14} color={colors.blue} />
-                              <Text style={styles.attachmentText} numberOfLines={1}>{attachment.file_name}</Text>
-                            </Pressable>
+                            <AttachmentActions key={attachment.id} attachment={attachment} section="finance"
+                              url={`/api/transaction-attachments/${attachment.id}`}
+                              canDelete={hasPermission(member, "finance", "delete")}
+                              onDeleted={() => void refresh()} />
                           )) : <Text style={styles.helperText}>لا توجد مستندات مرفقة.</Text>}
                         </View>
                       </View>
