@@ -19,7 +19,12 @@ import {
 const { Pool } = pg;
 const databaseUrl = process.env.NEON_DATABASE_URL;
 if (!databaseUrl) throw new Error("NEON_DATABASE_URL is required.");
-const pool = new Pool({ connectionString: databaseUrl, options: "-c search_path=bennini,public" });
+const pool = new Pool({
+  connectionString: databaseUrl,
+  onConnect: async (client) => {
+    await client.query("SET search_path TO bennini, public");
+  },
+});
 const app = express();
 const port = Number(process.env.PORT ?? 5000);
 const sessionSecret = process.env.SESSION_SECRET;

@@ -2,3 +2,4 @@
 - [Field expense workflow](field-expense-workflow.md) — field costs are submitted once by field staff and reviewed by administration in the same record.
 - [Unified access model](unified-access-model.md) — all staff share one sign-in and home; dashboard links and section access follow each member's permissions.
 - [Relational records](relational-records.md) — keep operational data in shared PostgreSQL with foreign-key links and authenticated actor identity, not local/mock storage.
+- [Neon pooled connections](neon-pooler.md) — initialize schema search paths with an awaited PostgreSQL pool connection hook, not unsupported startup options.
