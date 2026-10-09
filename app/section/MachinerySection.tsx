@@ -67,6 +67,8 @@ export default function MachinerySection() {
   const [machinery, setMachinery] = useState<Machinery[]>([]);
   const [parts, setParts] = useState<SparePart[]>([]);
   const [search, setSearch] = useState("");
+  const [partDateFrom, setPartDateFrom] = useState("");
+  const [partDateTo, setPartDateTo] = useState("");
   const [selectedMachineId, setSelectedMachineId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -89,15 +91,17 @@ export default function MachinerySection() {
   const canAddAttachments = canManage && canUploadFiles(member);
   const searchTerm = search.trim().toLocaleLowerCase();
   const filteredMachinery = useMemo(
-    () => machinery.filter((machine) => !searchTerm || `${machine.name} ${machine.code} ${machine.category}`.toLocaleLowerCase().includes(searchTerm)),
+    () => machinery.filter((machine) => !searchTerm || `${machine.id} ${machine.name} ${machine.code} ${machine.category} ${machine.status} ${machine.notes}`.toLocaleLowerCase().includes(searchTerm)),
     [machinery, searchTerm],
   );
   const filteredParts = useMemo(
     () => parts.filter((part) =>
       (!focusId || String(part.id) === focusId) &&
       (selectedMachineId === null || part.machinery_id === selectedMachineId) &&
-      (!searchTerm || `${part.name} ${part.machinery_name} ${part.machinery_code} ${part.supplier} ${part.invoice_number}`.toLocaleLowerCase().includes(searchTerm))),
-    [focusId, parts, selectedMachineId, searchTerm],
+      (!partDateFrom || (part.installation_date ?? "").slice(0, 10) >= partDateFrom) &&
+      (!partDateTo || (part.installation_date ?? "").slice(0, 10) <= partDateTo) &&
+      (!searchTerm || `${part.id} ${part.name} ${part.machinery_name} ${part.machinery_code} ${part.supplier} ${part.invoice_number} ${part.recorded_by_name} ${part.notes} ${part.installation_date ?? ""}`.toLocaleLowerCase().includes(searchTerm))),
+    [focusId, partDateFrom, partDateTo, parts, selectedMachineId, searchTerm],
   );
   const totalExpenses = parts.reduce(
     (total, part) => total + numberValue(part.buy_price) * part.quantity + numberValue(part.repair_expense), 0,
@@ -326,11 +330,20 @@ export default function MachinerySection() {
             value={search}
             onChangeText={setSearch}
             style={styles.searchInput}
-            placeholder="ابحث باسم الآلية أو القطعة أو المورد"
+            placeholder="ابحث بالآلية أو القطعة أو المورد أو المستخدم"
             placeholderTextColor="#98A5B4"
             accessibilityLabel="البحث في الآليات وقطع الغيار"
           />
           {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
+        </View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          <TextInput value={partDateFrom} onChangeText={setPartDateFrom}
+            style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
+            placeholder="تاريخ التركيب من" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية القطع من تاريخ" />
+          <TextInput value={partDateTo} onChangeText={setPartDateTo}
+            style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
+            placeholder="تاريخ التركيب إلى" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية القطع إلى تاريخ" />
+          {partDateFrom || partDateTo ? <Pressable onPress={() => { setPartDateFrom(""); setPartDateTo(""); }} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 8 }}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>مسح التاريخ</Text></Pressable> : null}
         </View>
 
         <View style={styles.sectionHead}>

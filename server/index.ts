@@ -997,7 +997,9 @@ app.get("/api/transactions", authenticate, requireSection("finance"), async (req
   const maxAmount = typeof query.maxAmount === "string" ? query.maxAmount : "";
   const party = typeof query.party === "string" ? query.party.trim() : "";
   const recorder = typeof query.recorder === "string" ? query.recorder.trim() : "";
+  const search = typeof query.q === "string" ? query.q.trim() : "";
 
+  if (search.length > 200) return fail(res, 400, "عبارة البحث أطول من الحد المسموح.");
   if (type && !["income", "expense"].includes(type)) return fail(res, 400, "نوع العملية غير صالح.");
   if (method && !paymentMethods.includes(method as (typeof paymentMethods)[number])) return fail(res, 400, "طريقة الدفع غير صالحة.");
   if (from && !validIsoDate(from)) return fail(res, 400, "تاريخ البداية غير صالح.");
@@ -1015,6 +1017,15 @@ app.get("/api/transactions", authenticate, requireSection("finance"), async (req
   if (maxAmount) where.push(`t.amount <= ${value(maxAmount)}`);
   if (party) where.push(`t.party ILIKE ${value(`%${party}%`)}`);
   if (recorder) where.push(`t.recorded_by_name ILIKE ${value(`%${recorder}%`)}`);
+  if (search) {
+    const pattern = value(`%${search}%`);
+    where.push(`(
+      t.id::text ILIKE ${pattern} OR t.party ILIKE ${pattern} OR t.reason ILIKE ${pattern} OR
+      t.notes ILIKE ${pattern} OR t.recorded_by_name ILIKE ${pattern} OR t.transaction_date::text ILIKE ${pattern} OR
+      (CASE t.type WHEN 'income' THEN 'دخل income' ELSE 'مصروف expense' END) ILIKE ${pattern} OR
+      t.payment_method ILIKE ${pattern}
+    )`);
+  }
   const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const page = Math.max(1, Math.min(100000, Number.parseInt(String(query.page ?? "1"), 10) || 1));
   const pageSize = 25;
@@ -1271,8 +1282,13 @@ app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res
   const search = typeof query.q === "string" ? query.q.trim() : "";
   const status = typeof query.status === "string" ? query.status : "";
   const focusId = typeof query.focusId === "string" ? Number(query.focusId) : null;
+  const from = typeof query.from === "string" ? query.from : "";
+  const to = typeof query.to === "string" ? query.to : "";
   if (search.length > 200) return fail(res, 400, "عبارة البحث أطول من الحد المسموح.");
   if (focusId !== null && (!Number.isSafeInteger(focusId) || focusId <= 0)) return fail(res, 400, "رقم الشيك غير صالح.");
+  if ((from && !validIsoDate(from)) || (to && !validIsoDate(to)) || (from && to && from > to)) {
+    return fail(res, 400, "نطاق تاريخ الاستحقاق غير صالح.");
+  }
   if (status && !chequeStatuses.includes(status as (typeof chequeStatuses)[number])) {
     return fail(res, 400, "حالة الشيك غير صالحة.");
   }
@@ -1298,6 +1314,8 @@ app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res
     )`);
   }
   if (status) where.push(`c.status = ${value(status)}`);
+  if (from) where.push(`c.due_date >= ${value(from)}::date`);
+  if (to) where.push(`c.due_date <= ${value(to)}::date`);
   if (focusId !== null) where.push(`c.id = ${value(focusId)}`);
   const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const pagination = [...values, pageSize, (page - 1) * pageSize];

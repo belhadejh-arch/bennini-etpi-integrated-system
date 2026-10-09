@@ -99,7 +99,7 @@ export default function AuditLogSection() {
     try {
       const query = new URLSearchParams({ page: String(page) });
       Object.entries(appliedFilters).forEach(([key, value]) => {
-        if (value) query.set(key, value);
+        if (value) query.set(key === "search" ? "q" : key, value);
       });
       const [me, data] = await Promise.all([
         apiRequest<{ member: Member }>("/me", () => getToken()),

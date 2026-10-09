@@ -85,7 +85,10 @@ export default function FieldExpensesSection() {
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [pickedDocs, setPickedDocs] = useState<PickedDocument[]>([]);
   const [statusFilter, setStatusFilter] = useState<ReviewStatus | "all">("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const isAdmin = member?.role === "admin";
   const canAccess = hasPermission(member, "field", "view");
@@ -95,8 +98,11 @@ export default function FieldExpensesSection() {
   const visibleItems = useMemo(
     () => items.filter((item) =>
       (statusFilter === "all" || item.review_status === statusFilter) &&
-      (!search.trim() || `${item.category} ${item.site_name} ${item.created_by_name} ${item.details} ${item.notes}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))),
-    [items, search, statusFilter],
+      (categoryFilter === "all" || item.category === categoryFilter) &&
+      (!dateFrom || item.created_at.slice(0, 10) >= dateFrom) &&
+      (!dateTo || item.created_at.slice(0, 10) <= dateTo) &&
+      (!search.trim() || `${item.id} ${item.category} ${item.site_name} ${item.created_by_name} ${item.details} ${item.notes} ${item.review_status}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))),
+    [categoryFilter, dateFrom, dateTo, items, search, statusFilter],
   );
 
   const refresh = useCallback(async () => {
@@ -409,13 +415,22 @@ export default function FieldExpensesSection() {
         <View style={styles.listHeader}>
           <View>
             <Text style={styles.listTitle}>{isAdmin ? "سجل العمليات الواردة" : "عملياتي الميدانية"}</Text>
-            <Text style={styles.listSubtitle}>{items.length} عملية · {pendingCount} بانتظار المراجعة</Text>
+            <Text style={styles.listSubtitle}>{visibleItems.length} عملية مطابقة · {pendingCount} بانتظار المراجعة</Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
             <FilterChip label="الكل" selected={statusFilter === "all"} onPress={() => setStatusFilter("all")} />
             <FilterChip label="بانتظار المراجعة" selected={statusFilter === "pending"} onPress={() => setStatusFilter("pending")} />
             <FilterChip label="تمت المراجعة" selected={statusFilter === "reviewed"} onPress={() => setStatusFilter("reviewed")} />
           </ScrollView>
+          <View style={{ gap: 5 }}>
+            <Text style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: "right" }}>نوع العملية</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
+              <FilterChip label="كل الأنواع" selected={categoryFilter === "all"} onPress={() => setCategoryFilter("all")} />
+              {quickCategories.map((category) => (
+                <FilterChip key={category} label={category} selected={categoryFilter === category} onPress={() => setCategoryFilter(category)} />
+              ))}
+            </ScrollView>
+          </View>
         </View>
         <View style={styles.searchBox}>
           <Search size={16} color={colors.muted} />
@@ -428,6 +443,15 @@ export default function FieldExpensesSection() {
             accessibilityLabel="البحث في مصاريف الميدان"
           />
           {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
+        </View>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          <TextInput value={dateFrom} onChangeText={setDateFrom}
+            style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
+            placeholder="تاريخ التسجيل من" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية المصاريف من تاريخ" />
+          <TextInput value={dateTo} onChangeText={setDateTo}
+            style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
+            placeholder="تاريخ التسجيل إلى" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية المصاريف إلى تاريخ" />
+          {dateFrom || dateTo ? <Pressable onPress={() => { setDateFrom(""); setDateTo(""); }} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 8 }}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>مسح التاريخ</Text></Pressable> : null}
         </View>
 
         {loading ? (

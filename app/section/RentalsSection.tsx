@@ -122,6 +122,8 @@ export default function RentalsSection() {
   const [pickedDocs, setPickedDocs] = useState<PickedDocument[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Status | "">("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const isAdmin = member?.role === "admin";
   const canAccess = hasPermission(member, "rentals", "view");
@@ -135,9 +137,11 @@ export default function RentalsSection() {
   const filteredItems = useMemo(() => items.filter((item) => {
     const matchesStatus = !statusFilter || item.status === statusFilter;
     const term = search.trim().toLowerCase();
-    const matchesSearch = !term || `${item.equipment} ${item.client_or_owner} ${item.notes}`.toLowerCase().includes(term);
-    return matchesStatus && matchesSearch;
-  }), [items, search, statusFilter]);
+    const matchesSearch = !term || `${item.id} ${item.equipment} ${item.client_or_owner} ${item.notes} ${item.status} ${item.start_date} ${item.end_date}`.toLowerCase().includes(term);
+    const matchesDateRange = (!dateFrom || item.end_date.slice(0, 10) >= dateFrom) &&
+      (!dateTo || item.start_date.slice(0, 10) <= dateTo);
+    return matchesStatus && matchesSearch && matchesDateRange;
+  }), [dateFrom, dateTo, items, search, statusFilter]);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
@@ -537,6 +541,15 @@ export default function RentalsSection() {
                 onPress={() => setStatusFilter(option.value as Status | "")} />
             ))}
           </ScrollView>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            <TextInput value={dateFrom} onChangeText={setDateFrom}
+              style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
+              placeholder="تداخل مع تاريخ من" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية الكراء ابتداءً من تاريخ" />
+            <TextInput value={dateTo} onChangeText={setDateTo}
+              style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
+              placeholder="تداخل مع تاريخ إلى" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية الكراء حتى تاريخ" />
+            {dateFrom || dateTo ? <Pressable onPress={() => { setDateFrom(""); setDateTo(""); }} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 8 }}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>مسح التاريخ</Text></Pressable> : null}
+          </View>
         </View>
 
         <View style={styles.listHeading}>

@@ -49,6 +49,8 @@ export default function FinanceSection() {
   const [error, setError] = useState("");
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [cashBalance, setCashBalance] = useState(0);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -90,8 +92,9 @@ export default function FinanceSection() {
     if (appliedFilters.maxAmount) params.set("maxAmount", appliedFilters.maxAmount);
     if (appliedFilters.party) params.set("party", appliedFilters.party);
     if (appliedFilters.recorder) params.set("recorder", appliedFilters.recorder);
+    if (search) params.set("q", search);
     return params.toString();
-  }, [appliedFilters, page]);
+  }, [appliedFilters, page, search]);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
@@ -119,6 +122,14 @@ export default function FinanceSection() {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
     else void refresh();
   }, [isLoaded, isSignedIn, refresh, router]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setSearch(searchInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const clearForm = () => {
     setEditingId(null);
@@ -269,6 +280,7 @@ export default function FinanceSection() {
   };
   const resetFilters = () => {
     setFrom(""); setTo(""); setFilterType(""); setFilterMethod(""); setMinAmount(""); setMaxAmount(""); setFilterParty(""); setFilterRecorder("");
+    setSearchInput(""); setSearch("");
     setAppliedFilters({ from: "", to: "", type: "", method: "", minAmount: "", maxAmount: "", party: "", recorder: "" });
     setPage(1);
   };
@@ -400,6 +412,20 @@ export default function FinanceSection() {
             <Search size={16} color={colors.blue} />
             <Text style={styles.filterToggleText}>{filtersOpen ? "إخفاء البحث" : "بحث وتصفية"}</Text>
           </Pressable>
+        </View>
+
+        <View style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 11, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFFFFF" }}>
+          <Search size={16} color={colors.muted} />
+          <TextInput
+            value={searchInput}
+            onChangeText={setSearchInput}
+            style={{ flex: 1, color: colors.ink, textAlign: "right", writingDirection: "rtl", fontSize: 12 }}
+            placeholder="ابحث برقم العملية أو الجهة أو السبب أو المستخدم"
+            placeholderTextColor="#98A5B4"
+            returnKeyType="search"
+            accessibilityLabel="البحث في العمليات المالية"
+          />
+          {searchInput ? <Pressable onPress={() => setSearchInput("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
         </View>
 
         {filtersOpen ? (

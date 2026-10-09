@@ -22,6 +22,7 @@ export default function MembersScreen() {
   const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
   const [roleNameDrafts, setRoleNameDrafts] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
@@ -82,6 +83,7 @@ export default function MembersScreen() {
   const canViewUsers = hasPermission(member, "users", "view");
   const selfId = user?.id;
   const visibleMembers = members.filter((item) =>
+    (activeFilter === "all" || item.active === (activeFilter === "active")) &&
     `${item.name} ${item.email} ${item.role_name ?? roleLabel(item.role)}`
       .toLocaleLowerCase()
       .includes(search.trim().toLocaleLowerCase()),
@@ -127,6 +129,18 @@ export default function MembersScreen() {
               accessibilityLabel="البحث عن عضو"
             />
             {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
+          </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7 }}>
+            {[
+              { value: "all" as const, label: "كل الحسابات" },
+              { value: "active" as const, label: "مفعّلة" },
+              { value: "inactive" as const, label: "موقوفة" },
+            ].map((option) => (
+              <Pressable key={option.value} onPress={() => setActiveFilter(option.value)}
+                style={[styles.permissionChip, activeFilter === option.value && styles.chipActive]}>
+                <Text style={[styles.chipText, activeFilter === option.value && styles.chipTextActive]}>{option.label}</Text>
+              </Pressable>
+            ))}
           </View>
           {loading ? <ActivityIndicator color={colors.blue} style={{ marginTop: 35 }} /> : visibleMembers.length === 0 ? (
             <View style={styles.empty}>

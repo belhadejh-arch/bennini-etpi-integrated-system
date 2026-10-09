@@ -109,6 +109,10 @@ export default function ChequesSection() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Status | "">("");
+  const [dateFromInput, setDateFromInput] = useState("");
+  const [dateToInput, setDateToInput] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -127,9 +131,11 @@ export default function ChequesSection() {
     const params = new URLSearchParams({ page: String(page) });
     if (search) params.set("q", search);
     if (statusFilter) params.set("status", statusFilter);
+    if (dateFrom) params.set("from", dateFrom);
+    if (dateTo) params.set("to", dateTo);
     if (focusId) params.set("focusId", focusId);
     return params.toString();
-  }, [focusId, page, search, statusFilter]);
+  }, [dateFrom, dateTo, focusId, page, search, statusFilter]);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
@@ -566,6 +572,45 @@ export default function ChequesSection() {
               />
             ))}
           </ScrollView>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            <TextInput
+              value={dateFromInput}
+              onChangeText={setDateFromInput}
+              style={{ minWidth: 130, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
+              placeholder="استحقاق من YYYY-MM-DD"
+              placeholderTextColor="#98A5B4"
+              accessibilityLabel="تاريخ الاستحقاق من"
+            />
+            <TextInput
+              value={dateToInput}
+              onChangeText={setDateToInput}
+              style={{ minWidth: 130, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
+              placeholder="استحقاق إلى YYYY-MM-DD"
+              placeholderTextColor="#98A5B4"
+              accessibilityLabel="تاريخ الاستحقاق إلى"
+            />
+            <Pressable
+              onPress={() => {
+                const validDate = (value: string) => !value || (/^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value));
+                const from = dateFromInput.trim();
+                const to = dateToInput.trim();
+                if (validDate(from) && validDate(to) && (!from || !to || from <= to)) {
+                  setPage(1);
+                  setDateFrom(from);
+                  setDateTo(to);
+                  setError("");
+                } else setError("أدخل نطاقًا صحيحًا لتاريخ الاستحقاق بصيغة YYYY-MM-DD.");
+              }}
+              style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 12, borderRadius: 9, backgroundColor: colors.blue }}
+            >
+              <Text style={{ color: "#FFFFFF", fontSize: 10, fontWeight: "800" }}>تطبيق التاريخ</Text>
+            </Pressable>
+            {dateFrom || dateTo || dateFromInput || dateToInput ? (
+              <Pressable onPress={() => { setPage(1); setDateFromInput(""); setDateToInput(""); setDateFrom(""); setDateTo(""); }} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 10 }}>
+                <Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>مسح التاريخ</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.listHeading}>

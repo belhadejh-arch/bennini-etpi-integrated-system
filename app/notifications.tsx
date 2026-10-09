@@ -11,10 +11,12 @@ import {
   PackageOpen,
   ReceiptText,
   RefreshCw,
+  Search,
   Wallet,
+  X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "./components/AppHeader";
 import { useNotificationBadge } from "./components/NotificationContext";
 import { apiRequest, type AppNotification, type NotificationsResult } from "../lib/api";
@@ -46,6 +48,8 @@ export default function NotificationsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [readFilter, setReadFilter] = useState<"all" | "unread" | "read">("all");
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
@@ -68,6 +72,13 @@ export default function NotificationsScreen() {
   }, [isLoaded, isSignedIn, refresh, router]);
 
   const unreadItems = useMemo(() => items.filter((item) => !item.read), [items]);
+  const visibleItems = useMemo(() => {
+    const term = search.trim().toLocaleLowerCase();
+    return items.filter((item) =>
+      (readFilter === "all" || (readFilter === "unread" ? !item.read : item.read)) &&
+      (!term || `${item.title} ${item.message} ${item.type} ${item.section}`.toLocaleLowerCase().includes(term)),
+    );
+  }, [items, readFilter, search]);
 
   const markRead = async (notificationIds: string[]) => {
     if (!notificationIds.length) return;
@@ -145,14 +156,40 @@ export default function NotificationsScreen() {
         </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
+        <View style={{ backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 13, padding: 10, gap: 9 }}>
+          <View style={{ minHeight: 42, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 10 }}>
+            <Search size={16} color={colors.muted} />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              style={{ flex: 1, color: colors.ink, textAlign: "right", writingDirection: "rtl", fontSize: 12 }}
+              placeholder="ابحث في عنوان الإشعار أو تفاصيله"
+              placeholderTextColor={colors.muted}
+              accessibilityLabel="البحث في الإشعارات"
+            />
+            {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
+          </View>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7 }}>
+            {[
+              { value: "all" as const, label: "الكل" },
+              { value: "unread" as const, label: "غير مقروء" },
+              { value: "read" as const, label: "مقروء" },
+            ].map((option) => (
+              <Pressable key={option.value} onPress={() => setReadFilter(option.value)}
+                style={{ minHeight: 32, justifyContent: "center", paddingHorizontal: 11, borderRadius: 9, borderWidth: 1, borderColor: readFilter === option.value ? colors.blue : colors.border, backgroundColor: readFilter === option.value ? "#E7F0FB" : "#FFFFFF" }}>
+                <Text style={{ color: readFilter === option.value ? colors.blue : colors.muted, fontSize: 10, fontWeight: "800" }}>{option.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
         {loading ? (
           <View style={styles.stateCard}>
             <ActivityIndicator size="large" color={colors.blue} />
             <Text style={styles.stateText}>جارٍ تحميل الإشعارات...</Text>
           </View>
-        ) : items.length ? (
+        ) : visibleItems.length ? (
           <View style={styles.list}>
-            {items.map((item) => {
+            {visibleItems.map((item) => {
               const Icon = icons[item.type];
               const urgent = item.type === "cheque_due" || item.type === "rental_ending" || item.type === "field_review";
               return (
@@ -186,8 +223,8 @@ export default function NotificationsScreen() {
         ) : (
           <View style={styles.stateCard}>
             <View style={styles.emptyIcon}><Bell size={24} color={colors.muted} /></View>
-            <Text style={styles.emptyTitle}>لا توجد إشعارات حالياً</Text>
-            <Text style={styles.stateText}>ستظهر هنا تنبيهات الاستحقاق والمراجعة والعمليات والمخزون.</Text>
+            <Text style={styles.emptyTitle}>{items.length ? "لا توجد إشعارات مطابقة" : "لا توجد إشعارات حالياً"}</Text>
+            <Text style={styles.stateText}>{items.length ? "غيّر عبارة البحث أو حالة القراءة." : "ستظهر هنا تنبيهات الاستحقاق والمراجعة والعمليات والمخزون."}</Text>
           </View>
         )}
       </ScrollView>
