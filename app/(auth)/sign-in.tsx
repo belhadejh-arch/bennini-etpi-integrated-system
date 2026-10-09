@@ -102,6 +102,11 @@ export default function SignInScreen() {
                 <Text style={{ textAlign: "center", color: colors.muted, fontSize: 12, lineHeight: 18 }}>
                   ينشئ المدير حسابات الأعضاء من لوحة التحكم ويمنحهم صلاحيات الأقسام.
                 </Text>
+                <Pressable onPress={() => router.push("/(auth)/setup")} style={{ alignSelf: "center", paddingTop: 12, paddingHorizontal: 8 }}>
+                  <Text style={{ textAlign: "center", color: colors.blue, fontSize: 13, fontWeight: "700" }}>
+                    استعادة رمز دخول المدير
+                  </Text>
+                </Pressable>
               </View>
             </View>
           </View>

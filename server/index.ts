@@ -889,6 +889,68 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
   }
 });
 
+app.post("/api/auth/admin-code/reset", async (req: Request, res: Response) => {
+  if (!bootstrapToken || bootstrapToken.length < 32) return fail(res, 503, "استعادة رمز المدير غير متاحة.");
+  const suppliedToken = typeof req.body?.bootstrapToken === "string" ? req.body.bootstrapToken : "";
+  if (!constantTimeTextMatch(suppliedToken, bootstrapToken)) return fail(res, 401, "بيانات الاستعادة غير صحيحة.");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('bennini-initial-admin-setup'))");
+    const admins = await client.query<Member>(
+      `SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities
+       FROM members WHERE role = 'admin' AND serial_hash IS NOT NULL FOR UPDATE`,
+    );
+    if (admins.rowCount !== 1) {
+      await client.query("ROLLBACK");
+      return fail(res, 409, admins.rowCount === 0
+        ? "لم يتم إعداد حساب مدير يمكن استعادة رمزه."
+        : "توجد عدة حسابات مدير؛ لا يمكن تحديد الحساب بأمان.");
+    }
+
+    let serial = "";
+    let saved: Member | undefined;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      serial = String(randomInt(0, 1_000_000)).padStart(6, "0");
+      const hash = await hashSerial(serial);
+      await client.query("SAVEPOINT admin_code_attempt");
+      try {
+        const updated = await client.query<Member>(
+          `UPDATE members SET serial_lookup = $1, serial_hash = $2, updated_at = NOW()
+           WHERE clerk_user_id = $3
+           RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
+          [serialLookup(serial), hash, admins.rows[0].clerk_user_id],
+        );
+        await client.query("RELEASE SAVEPOINT admin_code_attempt");
+        if (updated.rowCount) {
+          saved = updated.rows[0];
+          break;
+        }
+      } catch (error) {
+        await client.query("ROLLBACK TO SAVEPOINT admin_code_attempt");
+        if ((error as { code?: string }).code !== "23505") throw error;
+      }
+    }
+    if (!saved) {
+      await client.query("ROLLBACK");
+      return fail(res, 503, "تعذر إنشاء رمز دخول فريد. أعد المحاولة.");
+    }
+
+    await writeAuditWithClient(client, saved, "إعادة تعيين رمز دخول المدير",
+      "تم إصدار رمز دخول جديد للمدير؛ لم يُسجل الرمز في سجل التدقيق.",
+      { section: "system", eventType: "setup", entityId: saved.clerk_user_id });
+    await client.query("COMMIT");
+    res.json({ serial });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Administrator code reset failed:", error);
+    fail(res, 500, "تعذر إعادة تعيين رمز دخول المدير.");
+  } finally {
+    client.release();
+  }
+});
+
 app.post("/api/auth/login", async (req: Request, res: Response) => {
   const serial = typeof req.body?.serial === "string" ? req.body.serial : "";
   try {
