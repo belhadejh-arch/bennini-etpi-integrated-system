@@ -350,6 +350,66 @@ async function requireFieldExpenseSchema(_req: Request, res: Response, next: Nex
   }
 }
 
+let machinerySchemaPromise: Promise<void> | null = null;
+
+function ensureMachinerySchema() {
+  if (!machinerySchemaPromise) {
+    machinerySchemaPromise = pool.query(`
+      CREATE TABLE IF NOT EXISTS machinery (
+        id BIGSERIAL PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'working',
+        hours_worked INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS machinery_spare_parts (
+        id BIGSERIAL PRIMARY KEY,
+        machinery_id BIGINT NOT NULL REFERENCES machinery(id) ON DELETE RESTRICT,
+        name TEXT NOT NULL,
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        buy_price NUMERIC(16, 2) NOT NULL CHECK (buy_price >= 0),
+        supplier TEXT NOT NULL DEFAULT '',
+        invoice_number TEXT NOT NULL DEFAULT '',
+        installation_date DATE,
+        stock_quantity INTEGER NOT NULL CHECK (stock_quantity >= 0 AND stock_quantity <= quantity),
+        repair_expense NUMERIC(16, 2) NOT NULL DEFAULT 0 CHECK (repair_expense >= 0),
+        notes TEXT NOT NULL DEFAULT '',
+        recorded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+        recorded_by_name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS machinery_spare_part_attachments (
+        id BIGSERIAL PRIMARY KEY,
+        spare_part_id BIGINT NOT NULL REFERENCES machinery_spare_parts(id) ON DELETE CASCADE,
+        file_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL CHECK (file_size > 0),
+        file_data BYTEA NOT NULL,
+        uploaded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+        uploaded_by_name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS machinery_spare_parts_machine_date_idx
+        ON machinery_spare_parts (machinery_id, installation_date DESC, created_at DESC);
+      CREATE INDEX IF NOT EXISTS machinery_spare_part_attachments_part_idx
+        ON machinery_spare_part_attachments (spare_part_id, created_at);
+    `).then(() => undefined);
+  }
+  return machinerySchemaPromise;
+}
+
+async function requireMachinerySchema(_req: Request, res: Response, next: NextFunction) {
+  try {
+    await ensureMachinerySchema();
+    next();
+  } catch (error) {
+    console.error("Machinery database setup failed:", error);
+    fail(res, 503, "قاعدة بيانات المركبات والآليات غير جاهزة. يرجى المحاولة لاحقاً.");
+  }
+}
+
 const inventoryItemSelect = `
   SELECT i.id, i.name, i.quantity, i.remaining_quantity, i.buy_price, i.total_cost,
     i.sale_price, i.supplier, i.invoice_number, i.purchase_date, i.notes, i.created_at,
@@ -1268,6 +1328,192 @@ app.get("/api/rental-attachments/:id", requireRentalSchema, authenticate, requir
   } catch (error) {
     console.error("Rental attachment read failed:", error);
     fail(res, 500, "تعذر فتح مرفق عقد الكراء.");
+  }
+});
+
+const machinerySparePartSelect = `
+  SELECT p.id, p.machinery_id, m.code AS machinery_code, m.name AS machinery_name,
+    p.name, p.quantity, p.buy_price, p.supplier, p.invoice_number,
+    p.installation_date::text AS installation_date, p.stock_quantity, p.repair_expense,
+    p.notes, p.recorded_by_name, p.created_at,
+    COALESCE((
+      SELECT json_agg(json_build_object(
+        'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
+      ) ORDER BY a.created_at)
+      FROM machinery_spare_part_attachments a WHERE a.spare_part_id = p.id
+    ), '[]'::json) AS attachments
+  FROM machinery_spare_parts p
+  JOIN machinery m ON m.id = p.machinery_id`;
+
+app.get("/api/machinery", requireMachinerySchema, authenticate, requireSection("machinery"), async (_req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT m.id, m.code, m.name, m.category, m.status, m.hours_worked,
+        COUNT(p.id)::int AS repair_count,
+        COALESCE(SUM(p.quantity * p.buy_price + p.repair_expense), 0) AS total_expenses
+      FROM machinery m
+      LEFT JOIN machinery_spare_parts p ON p.machinery_id = m.id
+      GROUP BY m.id ORDER BY m.code, m.id`);
+    res.json({ items: result.rows });
+  } catch (error) {
+    console.error("Machinery list failed:", error);
+    fail(res, 500, "تعذر تحميل قائمة المركبات والآليات.");
+  }
+});
+
+app.post("/api/machinery", requireMachinerySchema, authenticate, requireSection("machinery"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+  const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const category = typeof req.body?.category === "string" ? req.body.category.trim() : "";
+  if (!code || code.length > 80 || !name || name.length > 200 || category.length > 120) {
+    return fail(res, 400, "أدخل رقماً تعريفياً واسماً صالحين للمركبة أو الآلية.");
+  }
+  try {
+    const result = await pool.query(
+      `INSERT INTO machinery (code, name, category) VALUES ($1, $2, $3)
+       RETURNING id, code, name, category, status, hours_worked`,
+      [code, name, category],
+    );
+    await writeAudit(req.member!, "تسجيل مركبة أو آلية", `${name} — ${code}.`);
+    res.status(201).json({ item: result.rows[0] });
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") return fail(res, 409, "الرقم التعريفي مستخدم من قبل.");
+    console.error("Machinery creation failed:", error);
+    fail(res, 500, "تعذر تسجيل المركبة أو الآلية.");
+  }
+});
+
+app.get("/api/machinery/spare-parts", requireMachinerySchema, authenticate, requireSection("machinery"), async (req, res) => {
+  const machineryId = req.query.machineryId === undefined ? null : Number(req.query.machineryId);
+  if (machineryId !== null && (!Number.isSafeInteger(machineryId) || machineryId <= 0)) {
+    return fail(res, 400, "رقم المركبة أو الآلية غير صالح.");
+  }
+  try {
+    const result = machineryId === null
+      ? await pool.query(`${machinerySparePartSelect} ORDER BY p.installation_date DESC NULLS LAST, p.created_at DESC LIMIT 300`)
+      : await pool.query(`${machinerySparePartSelect} WHERE p.machinery_id = $1 ORDER BY p.installation_date DESC NULLS LAST, p.created_at DESC LIMIT 300`, [machineryId]);
+    res.json({ items: result.rows });
+  } catch (error) {
+    console.error("Machinery spare part list failed:", error);
+    fail(res, 500, "تعذر تحميل سجل قطع الغيار والإصلاحات.");
+  }
+});
+
+app.post("/api/machinery/spare-parts", requireMachinerySchema, authenticate, requireSection("machinery"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+  const body = req.body ?? {};
+  const machineryId = Number(body.machineryId);
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const supplier = typeof body.supplier === "string" ? body.supplier.trim() : "";
+  const invoiceNumber = typeof body.invoiceNumber === "string" ? body.invoiceNumber.trim() : "";
+  const notes = typeof body.notes === "string" ? body.notes.trim() : "";
+  const quantity = Number(body.quantity);
+  const buyPrice = Number(body.buyPrice);
+  const stockQuantity = Number(body.stockQuantity);
+  const repairExpense = Number(body.repairExpense ?? 0);
+  const installationDate = body.installationDate === "" || body.installationDate == null ? null : body.installationDate;
+  const maxAmount = 99999999999999;
+  if (!Number.isSafeInteger(machineryId) || machineryId <= 0 ||
+      !name || name.length > 200 || supplier.length > 200 || invoiceNumber.length > 120 || notes.length > 5000 ||
+      !Number.isSafeInteger(quantity) || quantity <= 0 || quantity > 1000000 ||
+      !Number.isFinite(buyPrice) || buyPrice < 0 || buyPrice > maxAmount ||
+      !Number.isSafeInteger(stockQuantity) || stockQuantity < 0 || stockQuantity > quantity ||
+      !Number.isFinite(repairExpense) || repairExpense < 0 || repairExpense > maxAmount ||
+      (installationDate !== null && !validIsoDate(installationDate))) {
+    return fail(res, 400, "تحقق من اسم القطعة والكميات والأسعار والتاريخ.");
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const machine = await client.query("SELECT id, name FROM machinery WHERE id = $1", [machineryId]);
+    if (!machine.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "المركبة أو الآلية المحددة غير موجودة.");
+    }
+    const member = req.member!;
+    const result = await client.query(
+      `INSERT INTO machinery_spare_parts
+        (machinery_id, name, quantity, buy_price, supplier, invoice_number, installation_date,
+         stock_quantity, repair_expense, notes, recorded_by_id, recorded_by_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING id`,
+      [machineryId, name, quantity, buyPrice, supplier, invoiceNumber, installationDate,
+        stockQuantity, repairExpense, notes, member.clerk_user_id, member.name],
+    );
+    await writeAuditWithClient(client, member, "تسجيل قطعة غيار أو إصلاح", `${name} لآلية ${machine.rows[0].name}.`);
+    await client.query("COMMIT");
+    res.status(201).json({ id: result.rows[0].id });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Machinery spare part creation failed:", error);
+    fail(res, 500, "تعذر تسجيل قطعة الغيار أو الإصلاح.");
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/machinery/spare-parts/:id/attachments", requireMachinerySchema, authenticate, requireSection("machinery"), requireRole("finance"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  const files = (req.files ?? []) as Express.Multer.File[];
+  if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const part = await client.query("SELECT id, name FROM machinery_spare_parts WHERE id = $1 FOR UPDATE", [id]);
+    if (!part.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "سجل قطعة الغيار غير موجود.");
+    }
+    const count = await client.query(
+      "SELECT COUNT(*)::int AS total FROM machinery_spare_part_attachments WHERE spare_part_id = $1",
+      [id],
+    );
+    if (Number(count.rows[0].total) + files.length > 5) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, "الحد الأقصى هو خمسة مرفقات لكل سجل صيانة.");
+    }
+    const member = req.member!;
+    const saved = [];
+    for (const file of files) {
+      const result = await client.query(
+        `INSERT INTO machinery_spare_part_attachments
+          (spare_part_id, file_name, mime_type, file_size, file_data, uploaded_by_id, uploaded_by_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, file_name, mime_type, file_size`,
+        [id, path.basename(file.originalname), file.mimetype, file.size, file.buffer, member.clerk_user_id, member.name],
+      );
+      saved.push(result.rows[0]);
+    }
+    await writeAuditWithClient(client, member, "إرفاق مستند بسجل صيانة", `إرفاق ${files.length} مستند بقطعة ${part.rows[0].name}.`);
+    await client.query("COMMIT");
+    res.status(201).json({ attachments: saved });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Machinery spare part attachment upload failed:", error);
+    fail(res, 500, "تعذر حفظ مستندات سجل الصيانة.");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/machinery/spare-part-attachments/:id", requireMachinerySchema, authenticate, requireSection("machinery"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم المستند غير صالح.");
+  try {
+    const result = await pool.query(
+      "SELECT file_name, mime_type, file_data FROM machinery_spare_part_attachments WHERE id = $1",
+      [id],
+    );
+    if (!result.rowCount) return fail(res, 404, "المستند غير موجود.");
+    const attachment = result.rows[0];
+    const inline = attachment.mime_type === "application/pdf" || attachment.mime_type.startsWith("image/");
+    const safeName = encodeURIComponent(String(attachment.file_name).replace(/[\r\n"]/g, ""));
+    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${safeName}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(Buffer.from(attachment.file_data));
+  } catch (error) {
+    console.error("Machinery spare part attachment read failed:", error);
+    fail(res, 500, "تعذر فتح المستند.");
   }
 });
 

@@ -180,6 +180,35 @@ CREATE TABLE IF NOT EXISTS machinery (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS machinery_spare_parts (
+  id BIGSERIAL PRIMARY KEY,
+  machinery_id BIGINT NOT NULL REFERENCES machinery(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL,
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  buy_price NUMERIC(16, 2) NOT NULL CHECK (buy_price >= 0),
+  supplier TEXT NOT NULL DEFAULT '',
+  invoice_number TEXT NOT NULL DEFAULT '',
+  installation_date DATE,
+  stock_quantity INTEGER NOT NULL CHECK (stock_quantity >= 0 AND stock_quantity <= quantity),
+  repair_expense NUMERIC(16, 2) NOT NULL DEFAULT 0 CHECK (repair_expense >= 0),
+  notes TEXT NOT NULL DEFAULT '',
+  recorded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+  recorded_by_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS machinery_spare_part_attachments (
+  id BIGSERIAL PRIMARY KEY,
+  spare_part_id BIGINT NOT NULL REFERENCES machinery_spare_parts(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL CHECK (file_size > 0),
+  file_data BYTEA NOT NULL,
+  uploaded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+  uploaded_by_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id BIGSERIAL PRIMARY KEY,
   action TEXT NOT NULL,
@@ -206,6 +235,8 @@ CREATE INDEX IF NOT EXISTS cheques_status_due_idx ON cheques (status, due_date);
 CREATE INDEX IF NOT EXISTS cheque_attachments_cheque_idx ON cheque_attachments (cheque_id, created_at);
 CREATE INDEX IF NOT EXISTS rentals_end_date_idx ON rentals (end_date);
 CREATE INDEX IF NOT EXISTS rental_attachments_rental_idx ON rental_attachments (rental_id, created_at);
+CREATE INDEX IF NOT EXISTS machinery_spare_parts_machine_date_idx ON machinery_spare_parts (machinery_id, installation_date DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS machinery_spare_part_attachments_part_idx ON machinery_spare_part_attachments (spare_part_id, created_at);
 CREATE INDEX IF NOT EXISTS field_expenses_created_idx ON field_expenses (created_at DESC);
 CREATE INDEX IF NOT EXISTS field_expenses_review_created_idx ON field_expenses (review_status, created_at DESC);
 CREATE INDEX IF NOT EXISTS field_expense_attachments_expense_idx ON field_expense_attachments (field_expense_id, created_at);

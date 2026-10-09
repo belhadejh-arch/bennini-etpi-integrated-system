@@ -16,6 +16,7 @@ import InventorySection from "./InventorySection";
 import ChequesSection from "./ChequesSection";
 import RentalsSection from "./RentalsSection";
 import FieldExpensesSection from "./FieldExpensesSection";
+import MachinerySection from "./MachinerySection";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 import { sections, type SectionId } from "../../shared/sections";
@@ -98,6 +99,7 @@ export default function SectionScreen() {
   if (section === "cheques") return <ChequesSection />;
   if (section === "rentals") return <RentalsSection />;
   if (section === "field") return <FieldExpensesSection />;
+  if (section === "machinery") return <MachinerySection />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>

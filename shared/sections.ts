@@ -4,7 +4,7 @@ export const sections = [
   { id: "inventory", label: "المشتريات والمخزون", shortLabel: "المخزون" },
   { id: "cheques", label: "إدارة الشيكات", shortLabel: "الشيكات" },
   { id: "rentals", label: "الكراء", shortLabel: "الكراء" },
-  { id: "machinery", label: "العتاد والآليات", shortLabel: "الآليات" },
+  { id: "machinery", label: "المركبات والآليات وقطع الغيار", shortLabel: "المركبات والآليات" },
   { id: "field", label: "مصاريف الميدان", shortLabel: "الميدان" },
   { id: "users", label: "المستخدمون والصلاحيات", shortLabel: "الأعضاء" },
   { id: "audit", label: "سجل التدقيق", shortLabel: "السجل" },
