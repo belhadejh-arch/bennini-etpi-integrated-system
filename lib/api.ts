@@ -4,9 +4,10 @@ import type { MemberCapabilities, MemberPermissions } from "../shared/access";
 import type { SectionId } from "../shared/sections";
 
 const configuredApiUrl = Constants.expoConfig?.extra?.apiUrl as string | undefined;
+const configuredWebApiUrl = Constants.expoConfig?.extra?.webApiUrl as string | undefined;
 
 export function apiUrl(path: string): string {
-  const baseUrl = Platform.OS === "web" ? "" : configuredApiUrl;
+  const baseUrl = Platform.OS === "web" ? configuredWebApiUrl : configuredApiUrl;
   if (Platform.OS !== "web" && !baseUrl) {
     throw new Error("يلزم إعداد عنوان الخادم قبل تشغيل تطبيق الهاتف.");
   }

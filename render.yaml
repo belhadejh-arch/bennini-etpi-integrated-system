@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: bennini-etpi-api
+    runtime: node
+    buildCommand: npm ci && npm run typecheck
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SERVE_WEB
+        value: "false"
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_BOOTSTRAP_TOKEN
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false

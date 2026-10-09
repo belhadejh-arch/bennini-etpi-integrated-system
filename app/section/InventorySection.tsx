@@ -12,7 +12,7 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, Vi
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
-import { apiRequest, type Member } from "../../lib/api";
+import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDzd } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
@@ -319,7 +319,7 @@ export default function InventorySection() {
     try {
       const token = await getToken();
       if (!token) throw new Error("انتهت جلسة الدخول.");
-      const url = `/api/inventory-attachments/${attachment.id}`;
+      const url = apiUrl(`/api/inventory-attachments/${attachment.id}`);
       if (Platform.OS === "web") {
         const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         if (!response.ok) throw new Error("تعذر تحميل المستند.");

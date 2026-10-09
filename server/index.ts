@@ -31,10 +31,24 @@ const sessionSecret = process.env.SESSION_SECRET;
 if (!sessionSecret) throw new Error("SESSION_SECRET is required.");
 const bootstrapToken = process.env.ADMIN_BOOTSTRAP_TOKEN;
 const scrypt = promisify(scryptCallback);
+const allowedOrigins = (process.env.CORS_ORIGINS ?? "")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
+  throw new Error("CORS_ORIGINS is required in production; set it to the Vercel site origin.");
+}
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
-app.use(cors({ credentials: true, origin: true }));
+app.use(cors({
+  credentials: true,
+  origin: (origin, callback) => {
+    const isLocalDevelopmentOrigin = process.env.NODE_ENV !== "production" &&
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin ?? "");
+    callback(null, !origin || allowedOrigins.includes(origin) || isLocalDevelopmentOrigin);
+  },
+}));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -898,9 +912,7 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
     const token = issueSession(candidate.clerk_user_id);
     const { serial_hash: _serialHash, ...publicMember } = candidate;
     const nativeClient = req.header("x-app-client") === "native";
-    if (nativeClient) {
-      res.json({ token, member: publicMember });
-    } else {
+    if (!nativeClient) {
       res.cookie("bennini_session", token, {
         httpOnly: true,
         secure: req.secure,
@@ -908,8 +920,8 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
         maxAge: 7 * 24 * 60 * 60 * 1000,
         path: "/",
       });
-      res.json({ member: publicMember });
     }
+    res.json({ token, member: publicMember });
   } catch (error) {
     console.error("Member sign-in failed:", error);
     fail(res, 500, "تعذر تسجيل الدخول حالياً.");
@@ -3128,7 +3140,7 @@ app.get("/api/audit", authenticate, requireSection("audit"), async (req: Authent
 });
 
 const webRoot = path.resolve(process.cwd(), "dist");
-if (existsSync(webRoot)) {
+if (process.env.SERVE_WEB !== "false" && existsSync(webRoot)) {
   app.use(express.static(webRoot, { index: false }));
   app.get("*", (_req, res) => {
     res.sendFile(path.join(webRoot, "index.html"));

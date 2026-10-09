@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { Platform } from "react-native";
 import { apiRequest, type Member } from "./api";
 
-type SignInResult = { token?: string; member: Member };
+type SignInResult = { token: string; member: Member };
 type AuthContextValue = {
   isLoaded: boolean;
   isSignedIn: boolean;
