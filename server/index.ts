@@ -872,31 +872,28 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
 
     const serial = requestedSerial;
     let saved: Member | undefined;
-    for (let attempt = 0; attempt < 1; attempt += 1) {
-      const lookup = serialLookup(serial);
-      const hash = await hashSerial(serial);
-      if (existing.rowCount) {
-        const updated = await client.query<Member>(
-          `UPDATE members SET serial_lookup = $1, serial_hash = $2, active = TRUE, role = 'admin',
-            allowed_sections = $3, role_name = CASE WHEN role_name = '' THEN 'مدير النظام' ELSE role_name END,
-            updated_at = NOW()
-           WHERE clerk_user_id = $4 AND serial_lookup IS NULL
-           RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
-          [lookup, hash, adminSections, existing.rows[0].clerk_user_id],
-        );
-        if (updated.rowCount) saved = updated.rows[0];
-      } else {
-        const inserted = await client.query<Member>(
-          `INSERT INTO members
-             (clerk_user_id, email, serial_lookup, serial_hash, name, role, active, allowed_sections, role_name)
-           VALUES ($1, NULL, $2, $3, 'مدير النظام', 'admin', TRUE, $4, 'مدير النظام')
-           ON CONFLICT (serial_lookup) DO NOTHING
-           RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
-          [randomUUID(), lookup, hash, adminSections],
-        );
-        if (inserted.rowCount) saved = inserted.rows[0];
-      }
-      if (saved) break;
+    const lookup = serialLookup(serial);
+    const hash = await hashSerial(serial);
+    if (existing.rowCount) {
+      const updated = await client.query<Member>(
+        `UPDATE members SET serial_lookup = $1, serial_hash = $2, active = TRUE, role = 'admin',
+          allowed_sections = $3, role_name = CASE WHEN role_name = '' THEN 'مدير النظام' ELSE role_name END,
+          updated_at = NOW()
+         WHERE clerk_user_id = $4 AND serial_lookup IS NULL
+         RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
+        [lookup, hash, adminSections, existing.rows[0].clerk_user_id],
+      );
+      if (updated.rowCount) saved = updated.rows[0];
+    } else {
+      const inserted = await client.query<Member>(
+        `INSERT INTO members
+           (clerk_user_id, email, serial_lookup, serial_hash, name, role, active, allowed_sections, role_name)
+         VALUES ($1, NULL, $2, $3, 'مدير النظام', 'admin', TRUE, $4, 'مدير النظام')
+         ON CONFLICT (serial_lookup) DO NOTHING
+         RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
+        [randomUUID(), lookup, hash, adminSections],
+      );
+      if (inserted.rowCount) saved = inserted.rows[0];
     }
     if (!saved) {
       await client.query("ROLLBACK");
