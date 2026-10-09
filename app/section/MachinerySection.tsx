@@ -4,7 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { useRouter } from "expo-router";
 import {
-  ArrowRight, FilePlus2, HardHat, Plus, RefreshCw, Truck, Wrench, X,
+  ArrowRight, FilePlus2, HardHat, Plus, RefreshCw, Search, Truck, Wrench, X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -64,6 +64,7 @@ export default function MachinerySection() {
   const [member, setMember] = useState<Member | null>(null);
   const [machinery, setMachinery] = useState<Machinery[]>([]);
   const [parts, setParts] = useState<SparePart[]>([]);
+  const [search, setSearch] = useState("");
   const [selectedMachineId, setSelectedMachineId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -84,9 +85,16 @@ export default function MachinerySection() {
   const canEdit = hasPermission(member, "machinery", "edit");
   const canManage = canCreate || canEdit;
   const canAddAttachments = canManage && canUploadFiles(member);
+  const searchTerm = search.trim().toLocaleLowerCase();
+  const filteredMachinery = useMemo(
+    () => machinery.filter((machine) => !searchTerm || `${machine.name} ${machine.code} ${machine.category}`.toLocaleLowerCase().includes(searchTerm)),
+    [machinery, searchTerm],
+  );
   const filteredParts = useMemo(
-    () => selectedMachineId === null ? parts : parts.filter((part) => part.machinery_id === selectedMachineId),
-    [parts, selectedMachineId],
+    () => parts.filter((part) =>
+      (selectedMachineId === null || part.machinery_id === selectedMachineId) &&
+      (!searchTerm || `${part.name} ${part.machinery_name} ${part.machinery_code} ${part.supplier} ${part.invoice_number}`.toLocaleLowerCase().includes(searchTerm))),
+    [parts, selectedMachineId, searchTerm],
   );
   const totalExpenses = parts.reduce(
     (total, part) => total + numberValue(part.buy_price) * part.quantity + numberValue(part.repair_expense), 0,
@@ -295,7 +303,7 @@ export default function MachinerySection() {
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
         <View style={styles.headingRow}>
           <View style={styles.intro}>
-            <Text style={styles.title}>المركبات والآليات وقطع الغيار 🚜</Text>
+            <Text style={styles.title}>المركبات والآليات وقطع الغيار</Text>
             <Text style={styles.subtitle}>سجّل الأصول وتابع قطع الغيار والمخزون ومصاريف الإصلاح لكل آلية.</Text>
           </View>
         </View>
@@ -307,6 +315,19 @@ export default function MachinerySection() {
           <Summary label="المركبات والآليات" value={String(machinery.length)} icon={<Truck size={17} color={colors.blue} />} />
           <Summary label="سجلات القطع والإصلاح" value={String(parts.length)} icon={<Wrench size={17} color={colors.blue} />} />
           <Summary label="إجمالي المصاريف" value={formatDzd(totalExpenses)} icon={<HardHat size={17} color={colors.blue} />} />
+        </View>
+
+        <View style={styles.searchBox}>
+          <Search size={17} color={colors.muted} />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            style={styles.searchInput}
+            placeholder="ابحث باسم الآلية أو القطعة أو المورد"
+            placeholderTextColor="#98A5B4"
+            accessibilityLabel="البحث في الآليات وقطع الغيار"
+          />
+          {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
         </View>
 
         <View style={styles.sectionHead}>
@@ -337,7 +358,7 @@ export default function MachinerySection() {
           <Pressable onPress={() => setSelectedMachineId(null)} style={[styles.machineChip, selectedMachineId === null && styles.machineChipActive]}>
             <Text style={[styles.machineChipTitle, selectedMachineId === null && styles.machineChipTitleActive]}>كل الآليات</Text>
           </Pressable>
-          {machinery.map((machine) => {
+          {filteredMachinery.map((machine) => {
             const active = selectedMachineId === machine.id;
             return (
               <View key={machine.id} style={[styles.machineCard, active && styles.machineCardActive]}>
@@ -426,8 +447,8 @@ export default function MachinerySection() {
         {loading ? <View style={styles.loading}><ActivityIndicator color={colors.blue} /></View> : null}
         {!loading && filteredParts.length === 0 ? (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>لا توجد قطع غيار أو إصلاحات مسجلة{selectedMachineId ? " لهذه الآلية" : ""}.</Text>
-            {canManage ? <Text style={styles.emptyHint}>استخدم زر التسجيل لإضافة أول سجل.</Text> : null}
+            <Text style={styles.emptyText}>{search ? "لا توجد نتائج مطابقة للبحث." : `لا توجد قطع غيار أو إصلاحات مسجلة${selectedMachineId ? " لهذه الآلية" : ""}.`}</Text>
+            {canManage && !search ? <Text style={styles.emptyHint}>استخدم زر التسجيل لإضافة أول سجل.</Text> : null}
           </View>
         ) : null}
         {filteredParts.map((part) => (
@@ -525,26 +546,28 @@ function SaveButton({ label, saving, onPress }: { label: string; saving: boolean
 
 const styles = {
   screen: { flex: 1, backgroundColor: colors.background, direction: "rtl" as const },
-  page: { width: "100%" as const, maxWidth: 920, alignSelf: "center" as const, padding: 16, paddingBottom: 42, gap: 14 },
+  page: { width: "100%" as const, maxWidth: 1020, alignSelf: "center" as const, padding: 20, paddingBottom: 44, gap: 16 },
   headingRow: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const },
   intro: { flex: 1 },
   title: { color: colors.navy, fontWeight: "900" as const, fontSize: 21, textAlign: "right" as const },
   subtitle: { color: colors.muted, fontSize: 12, marginTop: 5, textAlign: "right" as const, lineHeight: 19 },
   summaryRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 9 },
-  summaryCard: { flexGrow: 1, flexBasis: 145, minWidth: 105, backgroundColor: "#FFFFFF", borderRadius: 13, borderWidth: 1, borderColor: colors.border, padding: 12, gap: 5 },
+  summaryCard: { flexGrow: 1, flexBasis: 145, minWidth: 105, backgroundColor: colors.surface, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 15, gap: 6 },
   summaryIcon: { width: 30, height: 30, borderRadius: 9, alignItems: "center" as const, justifyContent: "center" as const, backgroundColor: "#EDF4FC", marginBottom: 2 },
-  summaryLabel: { color: colors.muted, fontSize: 10, textAlign: "right" as const },
-  summaryValue: { color: colors.navy, fontSize: 14, fontWeight: "900" as const, textAlign: "right" as const },
+  summaryLabel: { color: colors.muted, fontSize: 11, textAlign: "right" as const },
+  summaryValue: { color: colors.navy, fontSize: 15, fontWeight: "900" as const, textAlign: "right" as const },
+  searchBox: { minHeight: 46, borderRadius: 12, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, flexDirection: "row" as const, alignItems: "center" as const, gap: 9 },
+  searchInput: { flex: 1, minWidth: 0, color: colors.ink, fontSize: 13, textAlign: "right" as const, writingDirection: "rtl" as const },
   sectionHead: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8, marginTop: 3 },
   sectionTitle: { color: colors.navy, fontSize: 16, fontWeight: "900" as const, textAlign: "right" as const },
   sectionHint: { color: colors.muted, fontSize: 10, marginTop: 4, textAlign: "right" as const, lineHeight: 15 },
   smallButton: { minHeight: 38, paddingHorizontal: 11, borderRadius: 10, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 5 },
   smallButtonText: { color: colors.navy, fontSize: 10, fontWeight: "800" as const },
-  card: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 14, gap: 10 },
+  card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 17, gap: 12 },
   cardTitle: { color: colors.navy, fontSize: 14, fontWeight: "900" as const, textAlign: "right" as const },
   field: { gap: 5 },
-  fieldLabel: { color: colors.ink, fontSize: 11, fontWeight: "700" as const, textAlign: "right" as const },
-  input: { minHeight: 43, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 11, paddingVertical: 9 },
+  fieldLabel: { color: colors.ink, fontSize: 12, fontWeight: "700" as const, textAlign: "right" as const },
+  input: { minHeight: 46, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13 },
   multiline: { minHeight: 78, textAlignVertical: "top" as const },
   machineList: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 8 },
   machineChip: { paddingHorizontal: 13, minHeight: 39, borderRadius: 11, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, alignItems: "center" as const, justifyContent: "center" as const },
@@ -573,7 +596,7 @@ const styles = {
   emptyCard: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 18, alignItems: "center" as const },
   emptyText: { color: colors.muted, textAlign: "center" as const, fontSize: 12, lineHeight: 19 },
   emptyHint: { color: colors.blue, textAlign: "center" as const, fontSize: 10, marginTop: 6 },
-  partCard: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 13, gap: 10 },
+  partCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 16, gap: 12 },
   partTop: { flexDirection: "row" as const, alignItems: "flex-start" as const, gap: 8 },
   partName: { color: colors.navy, fontSize: 14, fontWeight: "900" as const, textAlign: "right" as const },
   partMachine: { color: colors.muted, fontSize: 10, textAlign: "right" as const, marginTop: 4 },

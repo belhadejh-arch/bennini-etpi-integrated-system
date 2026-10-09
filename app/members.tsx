@@ -1,6 +1,6 @@
 import { useAuth, useUser } from "@clerk/expo";
 import { useRouter } from "expo-router";
-import { ArrowRight, Check, ShieldCheck, Users } from "lucide-react-native";
+import { ArrowRight, Check, Search, ShieldCheck, Users, X } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "./components/AppHeader";
@@ -21,6 +21,7 @@ export default function MembersScreen() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
   const [roleNameDrafts, setRoleNameDrafts] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async () => {
@@ -80,6 +81,11 @@ export default function MembersScreen() {
   const admin = member?.role === "admin";
   const canViewUsers = hasPermission(member, "users", "view");
   const selfId = user?.id;
+  const visibleMembers = members.filter((item) =>
+    `${item.name} ${item.email} ${item.role_name ?? roleLabel(item.role)}`
+      .toLocaleLowerCase()
+      .includes(search.trim().toLocaleLowerCase()),
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>
@@ -110,7 +116,25 @@ export default function MembersScreen() {
             </View>
           </View>
           {error ? <View style={styles.error}><Text style={{ color: colors.red, textAlign: "right" }}>{error}</Text></View> : null}
-          {loading ? <ActivityIndicator color={colors.blue} style={{ marginTop: 35 }} /> : members.map((item) => {
+          <View style={styles.searchBox}>
+            <Search size={17} color={colors.muted} />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="ابحث بالاسم أو البريد أو المسمى الوظيفي"
+              placeholderTextColor={colors.muted}
+              style={styles.searchInput}
+              accessibilityLabel="البحث عن عضو"
+            />
+            {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
+          </View>
+          {loading ? <ActivityIndicator color={colors.blue} style={{ marginTop: 35 }} /> : visibleMembers.length === 0 ? (
+            <View style={styles.empty}>
+              <Users size={23} color={colors.muted} />
+              <Text style={styles.emptyTitle}>{members.length ? "لا يوجد عضو مطابق للبحث" : "لا توجد حسابات أعضاء بعد"}</Text>
+              <Text style={styles.emptyText}>{members.length ? "جرّب البحث باسم مختلف أو بالبريد الإلكتروني." : "ستظهر هنا الحسابات بعد إنشائها."}</Text>
+            </View>
+          ) : visibleMembers.map((item) => {
             const isSelf = item.clerk_user_id === selfId;
             return (
               <View key={item.clerk_user_id} style={styles.card}>
@@ -270,12 +294,17 @@ function capabilityRows(capabilities?: MemberCapabilities) {
 
 const styles = {
   icon: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#FFFFFF1A", alignItems: "center" as const, justifyContent: "center" as const },
-  page: { width: "100%" as const, maxWidth: 860, alignSelf: "center" as const, padding: 17, paddingBottom: 40, gap: 13 },
-  summary: { backgroundColor: "#FFFFFF", padding: 15, borderRadius: 15, borderWidth: 1, borderColor: colors.border, flexDirection: "row" as const, alignItems: "center" as const, gap: 12 },
+  page: { width: "100%" as const, maxWidth: 940, alignSelf: "center" as const, padding: 20, paddingBottom: 44, gap: 15 },
+  summary: { backgroundColor: "#FFFFFF", padding: 17, borderRadius: 16, borderWidth: 1, borderColor: colors.border, flexDirection: "row" as const, alignItems: "center" as const, gap: 13 },
   summaryIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#EAF1FB", alignItems: "center" as const, justifyContent: "center" as const },
   summaryTitle: { color: colors.navy, fontWeight: "800" as const, textAlign: "right" as const, fontSize: 14 },
   summarySub: { color: colors.muted, textAlign: "right" as const, fontSize: 11, marginTop: 4 },
-  card: { backgroundColor: "#FFFFFF", padding: 15, borderRadius: 15, borderWidth: 1, borderColor: colors.border },
+  searchBox: { minHeight: 46, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFFFFF", flexDirection: "row" as const, alignItems: "center" as const, gap: 9 },
+  searchInput: { flex: 1, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, fontSize: 12 },
+  empty: { minHeight: 150, alignItems: "center" as const, justifyContent: "center" as const, gap: 8, padding: 20, backgroundColor: "#FFFFFF", borderRadius: 15, borderWidth: 1, borderColor: colors.border },
+  emptyTitle: { color: colors.navy, fontSize: 13, fontWeight: "800" as const },
+  emptyText: { color: colors.muted, fontSize: 11, textAlign: "center" as const },
+  card: { backgroundColor: "#FFFFFF", padding: 18, borderRadius: 16, borderWidth: 1, borderColor: colors.border, gap: 2 },
   memberTop: { flexDirection: "row" as const, alignItems: "center" as const, gap: 12 },
   name: { color: colors.navy, textAlign: "right" as const, fontSize: 14, fontWeight: "800" as const },
   email: { color: colors.muted, textAlign: "right" as const, fontSize: 11, marginTop: 4 },
@@ -290,10 +319,10 @@ const styles = {
   capabilityRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.border },
   permissionSection: { color: colors.ink, fontWeight: "700" as const, textAlign: "right" as const, fontSize: 11, flex: 1 },
   permissionActions: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 5, justifyContent: "flex-end" as const },
-  permissionChip: { minHeight: 30, borderRadius: 16, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 8, flexDirection: "row" as const, alignItems: "center" as const, gap: 3 },
+  permissionChip: { minHeight: 34, borderRadius: 17, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 9, flexDirection: "row" as const, alignItems: "center" as const, gap: 4 },
   chip: { minHeight: 34, borderRadius: 18, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 10, flexDirection: "row" as const, alignItems: "center" as const, gap: 4 },
   chipActive: { backgroundColor: "#EAF1FB", borderColor: "#BCD0EB" },
-  chipText: { color: colors.muted, fontSize: 10, fontWeight: "600" as const },
+  chipText: { color: colors.muted, fontSize: 11, fontWeight: "600" as const },
   chipTextActive: { color: colors.blue, fontWeight: "800" as const },
   selfNote: { color: colors.muted, fontSize: 10, textAlign: "right" as const, marginTop: 11 },
   saving: { color: colors.blue, fontSize: 10, textAlign: "right" as const, marginTop: 8 },

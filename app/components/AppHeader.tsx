@@ -54,12 +54,14 @@ export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
 
 const styles = {
   header: {
-    minHeight: 72,
-    paddingHorizontal: 16,
+    minHeight: 76,
+    paddingHorizontal: 18,
     backgroundColor: colors.navy,
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 10,
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#FFFFFF18",
   },
   actionSlot: {
     minWidth: 38,
@@ -68,9 +70,9 @@ const styles = {
     justifyContent: "center" as const,
   },
   action: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 13,
     backgroundColor: "#FFFFFF1A",
     alignItems: "center" as const,
     justifyContent: "center" as const,
@@ -80,13 +82,14 @@ const styles = {
     minWidth: 0,
     flexDirection: "row" as const,
     alignItems: "center" as const,
-    gap: 10,
+    gap: 12,
   },
   title: {
     flex: 1,
     color: "#FFFFFF",
     fontWeight: "700" as const,
-    fontSize: 13,
+    fontSize: 14,
     textAlign: "right" as const,
+    letterSpacing: 0.1,
   },
 };

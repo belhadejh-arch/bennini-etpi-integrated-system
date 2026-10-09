@@ -393,7 +393,7 @@ export default function InventorySection() {
       <ScrollView contentContainerStyle={[styles.page, { paddingHorizontal: width < 420 ? 12 : 20 }]} keyboardShouldPersistTaps="handled">
         <View style={[styles.introRow, { flexDirection: wide ? "row" : "column" }]}>
           <View style={styles.intro}>
-            <Text style={styles.title}>المشتريات والمخزون 📦</Text>
+            <Text style={styles.title}>المشتريات والمخزون</Text>
             <Text style={styles.subtitle}>سجّل الشراء، تابع الكميات، واحسب الربح المتوقع والمحقق من المبيعات.</Text>
           </View>
           {canCreate ? (
@@ -404,7 +404,12 @@ export default function InventorySection() {
           ) : null}
         </View>
 
-        {error ? <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View> : null}
+        {error ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
+            <Pressable accessibilityRole="button" onPress={() => void refresh()}><Text style={styles.retryText}>إعادة المحاولة</Text></Pressable>
+          </View>
+        ) : null}
 
         {summary ? (
           <View style={styles.summaryGrid}>
@@ -687,7 +692,7 @@ function FilterChip({ label, selected, onPress }: { label: string; selected: boo
 
 function ActionButton({ label, onPress, icon }: { label: string; onPress: () => void; icon?: React.ReactNode }) {
   return (
-    <Pressable onPress={onPress} style={styles.actionButton}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={styles.actionButton}>
       {icon}
       <Text style={styles.actionButtonText}>{label}</Text>
     </Pressable>
@@ -696,7 +701,7 @@ function ActionButton({ label, onPress, icon }: { label: string; onPress: () => 
 
 const styles = {
   screen: { flex: 1, backgroundColor: colors.background, direction: "rtl" as const },
-  page: { width: "100%" as const, maxWidth: 1240, alignSelf: "center" as const, paddingTop: 18, paddingBottom: 38, gap: 14 },
+  page: { width: "100%" as const, maxWidth: 1320, alignSelf: "center" as const, paddingTop: 20, paddingBottom: 42, gap: 16 },
   introRow: { alignItems: "center" as const, justifyContent: "space-between" as const, gap: 12 },
   intro: { flex: 1 },
   title: { color: colors.navy, fontWeight: "900" as const, fontSize: 22, textAlign: "right" as const },
@@ -704,16 +709,16 @@ const styles = {
   primaryButton: { minHeight: 44, borderRadius: 12, backgroundColor: colors.yellow, paddingHorizontal: 15, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
   primaryButtonText: { color: colors.navy, fontWeight: "800" as const, fontSize: 12 },
   summaryGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 10 },
-  summaryCard: { flexGrow: 1, flexBasis: 175, minWidth: 145, backgroundColor: "#FFFFFF", borderColor: colors.border, borderWidth: 1, borderRadius: 14, padding: 13, overflow: "hidden" as const },
+  summaryCard: { flexGrow: 1, flexBasis: 175, minWidth: 145, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 14, padding: 15, overflow: "hidden" as const },
   summaryAccent: { width: 4, position: "absolute" as const, right: 0, top: 0, bottom: 0 },
-  summaryLabel: { color: colors.muted, fontSize: 10, textAlign: "right" as const, lineHeight: 16 },
-  summaryValue: { color: colors.navy, fontWeight: "900" as const, fontSize: 15, textAlign: "right" as const, marginTop: 7 },
-  card: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 15, gap: 12 },
+  summaryLabel: { color: colors.muted, fontSize: 11, textAlign: "right" as const, lineHeight: 17 },
+  summaryValue: { color: colors.navy, fontWeight: "900" as const, fontSize: 16, textAlign: "right" as const, marginTop: 8 },
+  card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 17, gap: 13 },
   cardHeading: { color: colors.navy, fontSize: 14, fontWeight: "900" as const, textAlign: "right" as const },
   formGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 10 },
   field: { flexGrow: 1, flexBasis: 205, minWidth: 145 },
-  fieldLabel: { color: colors.ink, fontSize: 11, fontWeight: "700" as const, textAlign: "right" as const, marginBottom: 5 },
-  input: { minHeight: 43, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, paddingHorizontal: 11, fontSize: 12 },
+  fieldLabel: { color: colors.ink, fontSize: 12, fontWeight: "700" as const, textAlign: "right" as const, marginBottom: 6 },
+  input: { minHeight: 46, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, paddingHorizontal: 12, fontSize: 13 },
   calculationBox: { flexDirection: "row" as const, flexWrap: "wrap" as const, backgroundColor: "#F4F7FB", borderRadius: 12, padding: 12, gap: 12 },
   calculation: { flexGrow: 1, minWidth: 135 },
   calculationLabel: { color: colors.muted, fontSize: 10, textAlign: "right" as const },
@@ -743,7 +748,7 @@ const styles = {
   listHeader: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, marginTop: 4 },
   emptyCard: { minHeight: 120, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 14, alignItems: "center" as const, justifyContent: "center" as const, gap: 9, padding: 20 },
   emptyText: { color: colors.ink, fontSize: 12, fontWeight: "700" as const, textAlign: "center" as const },
-  itemCard: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 15, gap: 13 },
+  itemCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 17, gap: 14 },
   itemTop: { alignItems: "center" as const, justifyContent: "space-between" as const, gap: 9 },
   itemHeading: { flex: 1, width: "100%" as const },
   itemName: { color: colors.navy, fontSize: 15, fontWeight: "900" as const, textAlign: "right" as const },
@@ -756,8 +761,8 @@ const styles = {
   stockTextEmpty: { color: colors.red },
   metricsGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 8 },
   metric: { flexGrow: 1, flexBasis: 145, minWidth: 125, backgroundColor: "#F7F9FC", borderRadius: 10, padding: 10 },
-  metricLabel: { color: colors.muted, fontSize: 9, textAlign: "right" as const },
-  metricValue: { color: colors.ink, fontSize: 12, fontWeight: "800" as const, textAlign: "right" as const, marginTop: 5 },
+  metricLabel: { color: colors.muted, fontSize: 10, textAlign: "right" as const },
+  metricValue: { color: colors.ink, fontSize: 13, fontWeight: "800" as const, textAlign: "right" as const, marginTop: 6 },
   itemNote: { color: colors.muted, fontSize: 11, textAlign: "right" as const, lineHeight: 18 },
   actionButton: { minHeight: 34, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 10, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 5 },
   actionButtonText: { color: colors.blue, fontSize: 10, fontWeight: "700" as const },
@@ -772,8 +777,9 @@ const styles = {
   pageButton: { minHeight: 38, flexDirection: "row" as const, alignItems: "center" as const, gap: 4, paddingHorizontal: 11, borderWidth: 1, borderColor: colors.border, borderRadius: 9, backgroundColor: "#FFFFFF" },
   pageButtonText: { color: colors.navy, fontSize: 10, fontWeight: "700" as const },
   pageIndicator: { color: colors.muted, fontSize: 11 },
-  errorBox: { padding: 12, borderRadius: 11, backgroundColor: colors.redSoft },
+  errorBox: { padding: 12, borderRadius: 11, backgroundColor: colors.redSoft, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10 },
   errorText: { color: colors.red, fontSize: 11, textAlign: "right" as const, lineHeight: 18 },
+  retryText: { color: colors.blue, fontSize: 10, fontWeight: "800" as const },
   center: { flex: 1, alignItems: "center" as const, justifyContent: "center" as const, backgroundColor: colors.background, padding: 24, gap: 14 },
   denied: { color: colors.muted, fontSize: 13, textAlign: "center" as const, lineHeight: 22 },
   secondaryButton: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: "#FFFFFF", borderRadius: 10 },

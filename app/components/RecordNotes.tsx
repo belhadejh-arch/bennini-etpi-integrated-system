@@ -106,13 +106,13 @@ export default function RecordNotes({
 }
 
 const styles = {
-  container: { gap: 7, backgroundColor: "#F8FAFC", borderRadius: 9, padding: 9 },
+  container: { gap: 8, backgroundColor: "#F3F6FA", borderRadius: 11, padding: 11, borderWidth: 1, borderColor: "#E8EDF3" },
   heading: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8 },
-  label: { color: colors.muted, fontSize: 10, fontWeight: "800" as const, textAlign: "right" as const },
+  label: { color: colors.muted, fontSize: 11, fontWeight: "800" as const, textAlign: "right" as const },
   editButton: { flexDirection: "row" as const, alignItems: "center" as const, gap: 4, paddingVertical: 2, paddingHorizontal: 4 },
-  editText: { color: colors.blue, fontSize: 10, fontWeight: "800" as const },
-  noteText: { color: colors.ink, fontSize: 11, textAlign: "right" as const, lineHeight: 18 },
-  input: { minHeight: 76, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFFFFF", color: colors.ink, padding: 9, fontSize: 11, textAlign: "right" as const, textAlignVertical: "top" as const, writingDirection: "rtl" as const },
+  editText: { color: colors.blue, fontSize: 11, fontWeight: "800" as const },
+  noteText: { color: colors.ink, fontSize: 12, textAlign: "right" as const, lineHeight: 20 },
+  input: { minHeight: 84, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFFFFF", color: colors.ink, padding: 11, fontSize: 12, textAlign: "right" as const, textAlignVertical: "top" as const, writingDirection: "rtl" as const },
   actions: { flexDirection: "row" as const, gap: 7, justifyContent: "flex-start" as const },
   saveButton: { minHeight: 34, paddingHorizontal: 10, borderRadius: 8, backgroundColor: colors.blue, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 5 },
   saveText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" as const },

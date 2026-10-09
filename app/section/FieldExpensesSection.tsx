@@ -5,7 +5,7 @@ import * as Sharing from "expo-sharing";
 import { useRouter } from "expo-router";
 import {
   AlertTriangle, ArrowRight, Check, ClipboardCheck, FilePlus2, Fuel,
-  HardHat, ImagePlus, RefreshCw, Send, X,
+  HardHat, ImagePlus, RefreshCw, Search, Send, X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -83,6 +83,7 @@ export default function FieldExpensesSection() {
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [pickedDocs, setPickedDocs] = useState<PickedDocument[]>([]);
   const [statusFilter, setStatusFilter] = useState<ReviewStatus | "all">("all");
+  const [search, setSearch] = useState("");
 
   const isAdmin = member?.role === "admin";
   const canAccess = hasPermission(member, "field", "view");
@@ -90,8 +91,10 @@ export default function FieldExpensesSection() {
   const canEdit = hasPermission(member, "field", "edit");
   const canAddAttachments = canUploadFiles(member) && (canRecord || canEdit);
   const visibleItems = useMemo(
-    () => statusFilter === "all" ? items : items.filter((item) => item.review_status === statusFilter),
-    [items, statusFilter],
+    () => items.filter((item) =>
+      (statusFilter === "all" || item.review_status === statusFilter) &&
+      (!search.trim() || `${item.category} ${item.site_name} ${item.created_by_name} ${item.details} ${item.notes}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))),
+    [items, search, statusFilter],
   );
 
   const refresh = useCallback(async () => {
@@ -412,6 +415,18 @@ export default function FieldExpensesSection() {
             <FilterChip label="تمت المراجعة" selected={statusFilter === "reviewed"} onPress={() => setStatusFilter("reviewed")} />
           </ScrollView>
         </View>
+        <View style={styles.searchBox}>
+          <Search size={16} color={colors.muted} />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            style={styles.searchInput}
+            placeholder="ابحث بالموقع أو النوع أو المسجل"
+            placeholderTextColor="#98A5B4"
+            accessibilityLabel="البحث في مصاريف الميدان"
+          />
+          {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
+        </View>
 
         {loading ? (
           <View style={styles.loading}><ActivityIndicator size="large" color={colors.blue} /><Text style={styles.loadingText}>جارٍ تحديث العمليات...</Text></View>
@@ -428,7 +443,7 @@ export default function FieldExpensesSection() {
             <View style={styles.emptyIcon}><HardHat size={22} color={colors.blue} /></View>
             <Text style={styles.emptyTitle}>{items.length ? "لا توجد عمليات بهذه الحالة" : "لا توجد عمليات مسجلة بعد"}</Text>
             <Text style={styles.emptyText}>
-              {items.length ? "اختر حالة أخرى لمشاهدة العمليات." : isAdmin ? "ستظهر هنا المصاريف التي يرسلها رئيس الأشغال." : "سجّل أول عملية لتصل مباشرة إلى الإدارة."}
+              {items.length ? "غيّر البحث أو خيارات الحالة لمشاهدة عمليات أخرى." : isAdmin ? "ستظهر هنا المصاريف التي يرسلها رئيس الأشغال." : "سجّل أول عملية لتصل مباشرة إلى الإدارة."}
             </Text>
           </View>
         )}
@@ -546,12 +561,12 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, can
 
 const styles = {
   screen: { flex: 1, backgroundColor: colors.background, direction: "rtl" as const },
-  page: { width: "100%" as const, maxWidth: 940, alignSelf: "center" as const, padding: 15, paddingBottom: 28, gap: 12 },
-  intro: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 13 },
+  page: { width: "100%" as const, maxWidth: 1020, alignSelf: "center" as const, padding: 18, paddingBottom: 36, gap: 15 },
+  intro: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 16 },
   headingRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 10 },
   headingIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: "#EAF1FA", alignItems: "center" as const, justifyContent: "center" as const },
-  title: { color: colors.navy, fontSize: 17, fontWeight: "900" as const, textAlign: "right" as const },
-  subtitle: { color: colors.muted, fontSize: 10, textAlign: "right" as const, lineHeight: 16, marginTop: 4 },
+  title: { color: colors.navy, fontSize: 19, fontWeight: "900" as const, textAlign: "right" as const },
+  subtitle: { color: colors.muted, fontSize: 11, textAlign: "right" as const, lineHeight: 18, marginTop: 5 },
   error: { backgroundColor: colors.redSoft, borderRadius: 11, padding: 11, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8 },
   errorText: { flex: 1, color: colors.red, fontSize: 10, lineHeight: 16, textAlign: "right" as const },
   success: { backgroundColor: colors.greenSoft, borderRadius: 11, padding: 10, flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
@@ -562,7 +577,7 @@ const styles = {
   reviewHint: { color: colors.muted, fontSize: 9, lineHeight: 14, textAlign: "right" as const, marginTop: 3 },
   addButton: { minHeight: 48, borderRadius: 14, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
   addButtonText: { color: colors.navy, fontSize: 12, fontWeight: "900" as const },
-  formCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 14, gap: 10 },
+  formCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 17, gap: 12 },
   formTitle: { color: colors.navy, fontSize: 14, fontWeight: "900" as const, textAlign: "right" as const },
   categoryGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7 },
   categoryChip: { minHeight: 38, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: "#F8FAFC", paddingHorizontal: 11, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 6 },
@@ -571,8 +586,8 @@ const styles = {
   categoryTextSelected: { color: colors.navy },
   formGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 10 },
   field: { flexGrow: 1, flexBasis: 190 },
-  fieldLabel: { color: colors.ink, fontSize: 10, fontWeight: "800" as const, textAlign: "right" as const, marginBottom: 4 },
-  input: { minHeight: 44, borderRadius: 11, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 11, fontSize: 12 },
+  fieldLabel: { color: colors.ink, fontSize: 12, fontWeight: "800" as const, textAlign: "right" as const, marginBottom: 5 },
+  input: { minHeight: 46, borderRadius: 11, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 12, fontSize: 13 },
   textArea: { minHeight: 64, textAlignVertical: "top" as const, paddingTop: 10 },
   attachmentButton: { minHeight: 44, borderRadius: 11, borderWidth: 1, borderColor: "#C9D9EA", backgroundColor: "#F5F9FE", paddingHorizontal: 11, flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
   attachmentButtonText: { flex: 1, color: colors.blue, fontSize: 10, fontWeight: "800" as const, textAlign: "right" as const },
@@ -587,6 +602,8 @@ const styles = {
   listHeader: { gap: 8, marginTop: 3 },
   listTitle: { color: colors.navy, fontSize: 15, fontWeight: "900" as const, textAlign: "right" as const },
   listSubtitle: { color: colors.muted, fontSize: 9, textAlign: "right" as const, marginTop: 2 },
+  searchBox: { minHeight: 44, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 11, flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
+  searchInput: { flex: 1, minWidth: 0, color: colors.ink, fontSize: 12, textAlign: "right" as const, writingDirection: "rtl" as const },
   filters: { flexDirection: "row" as const, gap: 6 },
   filterChip: { minHeight: 31, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 10, alignItems: "center" as const, justifyContent: "center" as const },
   filterSelected: { backgroundColor: "#E7F0FB", borderColor: "#A9C5E6" },
@@ -594,7 +611,7 @@ const styles = {
   filterTextSelected: { color: colors.blue },
   loading: { minHeight: 120, alignItems: "center" as const, justifyContent: "center" as const, gap: 9, backgroundColor: colors.surface, borderRadius: 14 },
   loadingText: { color: colors.muted, fontSize: 10 },
-  expenseCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 12, gap: 9 },
+  expenseCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 16, gap: 11 },
   pendingCard: { borderColor: "#EDCF8E" },
   expenseTop: { flexDirection: "row" as const, alignItems: "flex-start" as const, gap: 10 },
   expenseHeading: { flexDirection: "row" as const, alignItems: "center" as const, flexWrap: "wrap" as const, gap: 7 },
@@ -603,7 +620,7 @@ const styles = {
   litersText: { color: colors.amber, fontSize: 9, fontWeight: "800" as const },
   expenseSite: { color: colors.muted, fontSize: 10, textAlign: "right" as const, marginTop: 4 },
   amountColumn: { alignItems: "flex-start" as const, gap: 5 },
-  expenseAmount: { color: colors.blue, fontSize: 12, fontWeight: "900" as const },
+  expenseAmount: { color: colors.blue, fontSize: 13, fontWeight: "900" as const },
   reviewBadge: { borderRadius: 7, paddingHorizontal: 7, paddingVertical: 4 },
   pendingBadge: { backgroundColor: "#FFF2D3" },
   reviewedBadge: { backgroundColor: colors.greenSoft },
@@ -612,7 +629,7 @@ const styles = {
   reviewedText: { color: colors.green },
   recordedLine: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 7, flexDirection: "row" as const, flexWrap: "wrap" as const, justifyContent: "space-between" as const, gap: 5 },
   recordedText: { color: colors.muted, fontSize: 9, textAlign: "right" as const },
-  detailsText: { color: colors.ink, fontSize: 10, textAlign: "right" as const, lineHeight: 16 },
+  detailsText: { color: colors.ink, fontSize: 12, textAlign: "right" as const, lineHeight: 19 },
   notesText: { color: colors.muted, backgroundColor: "#F8FAFC", borderRadius: 8, padding: 8, fontSize: 9, textAlign: "right" as const, lineHeight: 14 },
   reviewedBy: { color: colors.green, fontSize: 9, textAlign: "right" as const },
   attachmentList: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8, gap: 6 },

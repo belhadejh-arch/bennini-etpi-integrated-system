@@ -320,7 +320,12 @@ export default function FinanceSection() {
           ) : null}
         </View>
 
-        {error ? <View style={styles.error}><Text style={styles.errorText}>{error}</Text></View> : null}
+        {error ? (
+          <View style={styles.error}>
+            <Text style={styles.errorText}>{error}</Text>
+            <Pressable accessibilityRole="button" onPress={() => void refresh()}><Text style={styles.retryText}>إعادة المحاولة</Text></Pressable>
+          </View>
+        ) : null}
 
         <View style={styles.summary}>
           <Text style={styles.summaryLabel}>الرصيد النقدي الحالي في الصندوق</Text>
@@ -550,23 +555,23 @@ function ActionButton({ label, onPress, icon, danger }: { label: string; onPress
 
 const styles = {
   screen: { flex: 1, backgroundColor: colors.background, direction: "rtl" as const },
-  page: { width: "100%" as const, maxWidth: 1240, alignSelf: "center" as const, padding: 18, paddingBottom: 36, gap: 14 },
+  page: { width: "100%" as const, maxWidth: 1320, alignSelf: "center" as const, padding: 20, paddingBottom: 40, gap: 16 },
   intro: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 12 },
   title: { color: colors.navy, fontWeight: "900" as const, fontSize: 23, textAlign: "right" as const },
   subtitle: { color: colors.muted, fontSize: 12, marginTop: 5, textAlign: "right" as const },
-  addButton: { minHeight: 43, borderRadius: 12, paddingHorizontal: 14, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 7 },
-  addButtonText: { color: colors.navy, fontWeight: "800" as const, fontSize: 12 },
-  summary: { padding: 18, borderRadius: 16, backgroundColor: colors.navy, gap: 7 },
-  summaryLabel: { color: "#FFFFFFB8", fontSize: 12, textAlign: "right" as const },
-  summaryAmount: { color: colors.yellow, fontSize: 26, fontWeight: "900" as const, textAlign: "right" as const },
-  summaryHint: { color: "#FFFFFFA8", fontSize: 10, textAlign: "right" as const },
-  formCard: { backgroundColor: "#FFFFFF", borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.border, gap: 8 },
+  addButton: { minHeight: 46, borderRadius: 12, paddingHorizontal: 16, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
+  addButtonText: { color: colors.navy, fontWeight: "800" as const, fontSize: 13 },
+  summary: { padding: 21, borderRadius: 17, backgroundColor: colors.navy, gap: 8, borderWidth: 1, borderColor: "#17365D" },
+  summaryLabel: { color: "#FFFFFFB8", fontSize: 13, textAlign: "right" as const },
+  summaryAmount: { color: colors.yellow, fontSize: 29, fontWeight: "900" as const, textAlign: "right" as const },
+  summaryHint: { color: "#FFFFFFA8", fontSize: 11, textAlign: "right" as const, lineHeight: 17 },
+  formCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 18, borderWidth: 1, borderColor: colors.border, gap: 9 },
   formHeading: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, marginBottom: 2 },
   formTitle: { color: colors.navy, fontSize: 16, fontWeight: "900" as const, textAlign: "right" as const },
   formGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 10 },
   field: { flexGrow: 1, flexBasis: 240, minWidth: 200 },
-  label: { color: colors.ink, fontSize: 11, fontWeight: "700" as const, textAlign: "right" as const, marginTop: 8, marginBottom: 4 },
-  input: { minHeight: 42, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 11 },
+  label: { color: colors.ink, fontSize: 12, fontWeight: "700" as const, textAlign: "right" as const, marginTop: 8, marginBottom: 5 },
+  input: { minHeight: 46, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 12, fontSize: 13 },
   multiline: { minHeight: 70, textAlignVertical: "top" as const, paddingTop: 10 },
   segment: { flexDirection: "row" as const, borderRadius: 11, backgroundColor: colors.background, padding: 4, marginTop: 3 },
   segmentButton: { flex: 1, alignItems: "center" as const, paddingVertical: 10, borderRadius: 8 },
@@ -590,7 +595,7 @@ const styles = {
   saveButton: { height: 45, borderRadius: 11, backgroundColor: colors.blue, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 8 },
   saveText: { color: "#FFFFFF", fontWeight: "800" as const, fontSize: 12 },
   toolbar: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10 },
-  sectionTitle: { color: colors.navy, fontWeight: "900" as const, fontSize: 17, textAlign: "right" as const },
+  sectionTitle: { color: colors.navy, fontWeight: "900" as const, fontSize: 18, textAlign: "right" as const },
   filterToggle: { flexDirection: "row" as const, alignItems: "center" as const, gap: 6, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border },
   filterToggleText: { color: colors.blue, fontWeight: "800" as const, fontSize: 11 },
   filterCard: { backgroundColor: "#FFFFFF", borderRadius: 15, padding: 15, borderWidth: 1, borderColor: colors.border, gap: 5 },
@@ -599,20 +604,20 @@ const styles = {
   saveButtonSmall: { flex: 1, height: 40, borderRadius: 10, backgroundColor: colors.blue, alignItems: "center" as const, justifyContent: "center" as const },
   resetButton: { minWidth: 100, height: 40, borderRadius: 10, backgroundColor: colors.background, alignItems: "center" as const, justifyContent: "center" as const, paddingHorizontal: 12 },
   resetText: { color: colors.muted, fontSize: 11, fontWeight: "700" as const },
-  table: { minWidth: 1325, backgroundColor: "#FFFFFF", borderRadius: 14, overflow: "hidden" as const, borderWidth: 1, borderColor: colors.border },
-  tableRow: { flexDirection: "row" as const, minHeight: 53, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: "stretch" as const },
-  tableHead: { backgroundColor: "#F4F7FB", minHeight: 43 },
-  tableCell: { paddingHorizontal: 8, paddingVertical: 9, justifyContent: "center" as const, borderLeftWidth: 1, borderLeftColor: "#EDF0F4" },
-  cellText: { color: colors.ink, fontSize: 10, textAlign: "right" as const, lineHeight: 16 },
-  headText: { color: colors.muted, fontSize: 10, fontWeight: "900" as const },
+  table: { minWidth: 1325, backgroundColor: colors.surface, borderRadius: 14, overflow: "hidden" as const, borderWidth: 1, borderColor: colors.border },
+  tableRow: { flexDirection: "row" as const, minHeight: 58, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: "stretch" as const },
+  tableHead: { backgroundColor: "#EDF2F8", minHeight: 46 },
+  tableCell: { paddingHorizontal: 10, paddingVertical: 10, justifyContent: "center" as const, borderLeftWidth: 1, borderLeftColor: "#EDF0F4" },
+  cellText: { color: colors.ink, fontSize: 11, textAlign: "right" as const, lineHeight: 17 },
+  headText: { color: colors.muted, fontSize: 11, fontWeight: "900" as const },
   strongText: { color: colors.navy, fontWeight: "800" as const },
   typeBadge: { fontSize: 10, fontWeight: "800" as const, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, alignSelf: "flex-start" as const },
   incomeBadge: { color: "#178653", backgroundColor: "#E4F6EC" },
   expenseBadge: { color: "#BA4C44", backgroundColor: "#FCEBE9" },
   actionsCell: { flexDirection: "row" as const, flexWrap: "wrap" as const, alignItems: "center" as const, gap: 4 },
-  actionButton: { minHeight: 29, flexDirection: "row" as const, alignItems: "center" as const, gap: 3, paddingHorizontal: 6, borderRadius: 7, backgroundColor: "#F1F5FC" },
+  actionButton: { minHeight: 34, flexDirection: "row" as const, alignItems: "center" as const, gap: 4, paddingHorizontal: 8, borderRadius: 8, backgroundColor: "#F1F5FC" },
   actionDanger: { backgroundColor: "#FEF0EF" },
-  actionText: { color: colors.blue, fontSize: 9, fontWeight: "800" as const },
+  actionText: { color: colors.blue, fontSize: 10, fontWeight: "800" as const },
   detailPanel: { padding: 14, gap: 7, backgroundColor: "#F8FAFD", borderBottomWidth: 1, borderBottomColor: colors.border },
   detailTitle: { color: colors.navy, fontWeight: "900" as const, fontSize: 12, textAlign: "right" as const },
   detailText: { color: colors.muted, fontSize: 11, textAlign: "right" as const },
@@ -628,8 +633,9 @@ const styles = {
   emptyCard: { padding: 24, alignItems: "center" as const, gap: 6, backgroundColor: "#FFFFFF", borderRadius: 14, borderWidth: 1, borderColor: colors.border },
   emptyTitle: { color: colors.navy, fontWeight: "800" as const, fontSize: 14 },
   emptyHint: { color: colors.muted, textAlign: "center" as const, fontSize: 11 },
-  error: { backgroundColor: colors.redSoft, padding: 11, borderRadius: 10 },
+  error: { backgroundColor: colors.redSoft, padding: 12, borderRadius: 11, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10 },
   errorText: { color: colors.red, textAlign: "right" as const, fontSize: 11 },
+  retryText: { color: colors.blue, fontWeight: "800" as const, fontSize: 11 },
   center: { flex: 1, justifyContent: "center" as const, alignItems: "center" as const, padding: 25, gap: 14, backgroundColor: colors.background },
   denied: { color: colors.muted, textAlign: "center" as const, lineHeight: 22 },
   secondaryButton: { paddingHorizontal: 15, paddingVertical: 10, borderRadius: 10, backgroundColor: "#FFFFFF" },

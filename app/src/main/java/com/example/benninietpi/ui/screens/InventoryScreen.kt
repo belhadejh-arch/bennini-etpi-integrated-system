@@ -62,7 +62,7 @@ fun InventoryScreen(viewModel: MainViewModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("المشتريات والمخزون والسلع 📦", fontWeight = FontWeight.Bold) },
+                title = { Text("المشتريات والمخزون والسلع", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepBlue, titleContentColor = Color.White)
             )
         },

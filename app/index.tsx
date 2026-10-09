@@ -172,8 +172,8 @@ export default function HomeScreen() {
           </ScrollView>
           {isAdmin ? (
             <Pressable onPress={() => { setMenuOpen(false); router.push("/members"); }} style={[styles.menuItem, { marginTop: 6, alignSelf: "flex-start" }]}>
-              <LayoutDashboard size={16} color={colors.violet} />
-              <Text style={[styles.menuItemText, { color: colors.violet }]}>إدارة الأعضاء والصلاحيات</Text>
+              <LayoutDashboard size={16} color={colors.blue} />
+              <Text style={[styles.menuItemText, { color: colors.blue }]}>إدارة الأعضاء والصلاحيات</Text>
             </Pressable>
           ) : null}
         </View>
@@ -297,9 +297,9 @@ function PublicWelcome() {
   const { width } = useWindowDimensions();
   const compact = width < 620;
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: "center", padding: 20 }}>
-      <View style={{ width: "100%", maxWidth: 790, alignSelf: "center", borderRadius: 25, overflow: "hidden", backgroundColor: "#FFFFFF", flexDirection: compact ? "column" : "row", minHeight: compact ? undefined : 390, borderWidth: 1, borderColor: colors.border }}>
-        <LinearGradient colors={[colors.navy, colors.blue, "#6232A7"]} style={{ flex: compact ? undefined : 1, minWidth: 0, minHeight: compact ? 210 : undefined, justifyContent: "space-between", padding: compact ? 22 : 26 }}>
+    <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: "center", padding: 20, direction: "rtl" }}>
+      <View style={{ width: "100%", maxWidth: 790, alignSelf: "center", borderRadius: 22, overflow: "hidden", backgroundColor: colors.surface, flexDirection: compact ? "column" : "row", minHeight: compact ? undefined : 390, borderWidth: 1, borderColor: colors.border }}>
+        <LinearGradient colors={[colors.navy, colors.blue]} style={{ flex: compact ? undefined : 1, minWidth: 0, minHeight: compact ? 210 : undefined, justifyContent: "space-between", padding: compact ? 22 : 26 }}>
           <View>
             <CompanyLogo width={142} height={78} framed />
             <Text style={{ color: "#E1E8F4", fontSize: 12, marginTop: 6 }}>منصة العمل الموحدة</Text>
@@ -348,10 +348,10 @@ function StatCard({
     green: { fg: colors.green, bg: colors.greenSoft },
     red: { fg: colors.red, bg: colors.redSoft },
     amber: { fg: colors.amber, bg: colors.amberSoft },
-    violet: { fg: colors.violet, bg: "#F2EDFF" },
+    violet: { fg: colors.blue, bg: "#EAF1FB" },
   }[tone];
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.statCard, { width: compact ? "100%" : "48.2%" }, pressed && { transform: [{ scale: 0.985 }] }]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={`${title}: ${value}`} onPress={onPress} style={({ pressed }) => [styles.statCard, { width: compact ? "100%" : "48.2%" }, pressed && { transform: [{ scale: 0.985 }] }]}>
       <View style={styles.statTop}>
         <View style={[styles.statIcon, { backgroundColor: palette.bg }]}><Icon size={19} color={palette.fg} /></View>
         <ChevronLeft size={16} color="#A6B2C1" />
@@ -412,33 +412,33 @@ function formatDate(value: string) {
 }
 
 const styles = {
-  page: { width: "100%" as const, maxWidth: 1000, alignSelf: "center" as const, padding: 18, paddingBottom: 30, gap: 18 },
-  welcome: { minHeight: 142, borderRadius: 19, padding: 20, backgroundColor: colors.blue, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, overflow: "hidden" as const },
+  page: { width: "100%" as const, maxWidth: 1120, alignSelf: "center" as const, padding: 20, paddingBottom: 34, gap: 20 },
+  welcome: { minHeight: 156, borderRadius: 20, padding: 22, backgroundColor: colors.navy, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, overflow: "hidden" as const, borderWidth: 1, borderColor: "#17365D" },
   welcomeCopy: { flex: 1, alignItems: "flex-start" as const },
   eyebrow: { color: colors.yellow, fontSize: 10, fontWeight: "800" as const, letterSpacing: 0.3 },
-  welcomeTitle: { color: "#FFFFFF", fontSize: 21, fontWeight: "800" as const, marginTop: 11, textAlign: "right" as const },
-  welcomeSubtitle: { color: "#D8E4F2", fontSize: 12, marginTop: 5, textAlign: "right" as const },
+  welcomeTitle: { color: "#FFFFFF", fontSize: 23, fontWeight: "800" as const, marginTop: 11, textAlign: "right" as const },
+  welcomeSubtitle: { color: "#D8E4F2", fontSize: 13, marginTop: 6, textAlign: "right" as const },
   rolePill: { marginTop: 11, borderRadius: 20, backgroundColor: "#FFFFFF20", paddingHorizontal: 11, paddingVertical: 5 },
   rolePillText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" as const },
-  welcomeMark: { borderRadius: 12, backgroundColor: "#FFFFFF", alignItems: "center" as const, justifyContent: "center" as const, padding: 7, marginLeft: 14 },
+  welcomeMark: { borderRadius: 14, backgroundColor: "#FFFFFF", alignItems: "center" as const, justifyContent: "center" as const, padding: 9, marginLeft: 14 },
   statsGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, justifyContent: "space-between" as const, gap: 11 },
-  statCard: { minHeight: 145, borderRadius: 16, backgroundColor: "#FFFFFF", padding: 13, borderWidth: 1, borderColor: colors.border, overflow: "hidden" as const },
+  statCard: { minHeight: 150, borderRadius: 16, backgroundColor: colors.surface, padding: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" as const },
   statTop: { flexDirection: "row" as const, justifyContent: "space-between" as const, alignItems: "center" as const },
   statIcon: { width: 36, height: 36, borderRadius: 12, alignItems: "center" as const, justifyContent: "center" as const },
-  statTitle: { color: colors.muted, fontSize: 11, fontWeight: "600" as const, textAlign: "right" as const, marginTop: 12 },
-  statValue: { color: colors.navy, fontSize: 16, fontWeight: "900" as const, textAlign: "right" as const, marginTop: 4 },
+  statTitle: { color: colors.muted, fontSize: 12, fontWeight: "600" as const, textAlign: "right" as const, marginTop: 13 },
+  statValue: { color: colors.navy, fontSize: 17, fontWeight: "900" as const, textAlign: "right" as const, marginTop: 5 },
   statDetail: { color: colors.muted, fontSize: 10, textAlign: "right" as const, marginTop: 3 },
   statAccent: { position: "absolute" as const, right: 0, top: 0, bottom: 0, width: 3, opacity: 0.75 },
-  panel: { backgroundColor: "#FFFFFF", borderRadius: 17, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 15, paddingVertical: 14 },
+  panel: { backgroundColor: colors.surface, borderRadius: 17, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 17, paddingVertical: 16 },
   sectionHeading: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10, marginBottom: 9 },
-  sectionTitle: { color: colors.navy, fontSize: 15, fontWeight: "800" as const, textAlign: "right" as const },
+  sectionTitle: { color: colors.navy, fontSize: 16, fontWeight: "800" as const, textAlign: "right" as const },
   sectionDescription: { color: colors.muted, fontSize: 11, textAlign: "right" as const, marginTop: 4 },
   sectionAction: { color: colors.blue, fontSize: 12, fontWeight: "700" as const },
-  activityRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 10, paddingVertical: 11, borderTopWidth: 1, borderTopColor: "#EEF1F5" },
-  activityIcon: { width: 38, height: 38, borderRadius: 13, alignItems: "center" as const, justifyContent: "center" as const },
-  activityTitle: { color: colors.ink, fontSize: 12, fontWeight: "700" as const, textAlign: "right" as const },
-  activityDetail: { color: colors.muted, fontSize: 10, textAlign: "right" as const, marginTop: 3 },
-  activityAmount: { color: colors.navy, fontSize: 11, fontWeight: "800" as const },
+  activityRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 12, paddingVertical: 13, borderTopWidth: 1, borderTopColor: "#EEF1F5" },
+  activityIcon: { width: 42, height: 42, borderRadius: 13, alignItems: "center" as const, justifyContent: "center" as const },
+  activityTitle: { color: colors.ink, fontSize: 13, fontWeight: "700" as const, textAlign: "right" as const },
+  activityDetail: { color: colors.muted, fontSize: 11, textAlign: "right" as const, marginTop: 4 },
+  activityAmount: { color: colors.navy, fontSize: 12, fontWeight: "800" as const },
   activityDate: { color: colors.muted, fontSize: 10, marginTop: 4 },
   emptyState: { borderTopWidth: 1, borderTopColor: "#EEF1F5", paddingVertical: 18, alignItems: "center" as const },
   emptyText: { color: colors.muted, fontSize: 12, textAlign: "center" as const },

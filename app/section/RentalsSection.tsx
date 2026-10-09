@@ -404,6 +404,7 @@ export default function RentalsSection() {
         {error ? (
           <View style={styles.error}>
             <Text style={styles.errorText}>{error}</Text>
+            <Pressable onPress={() => void refresh()} accessibilityLabel="إعادة تحميل سجل الكراء"><Text style={styles.retryText}>إعادة المحاولة</Text></Pressable>
             <Pressable onPress={() => setError("")} accessibilityLabel="إغلاق التنبيه"><X size={17} color={colors.red} /></Pressable>
           </View>
         ) : null}
@@ -660,7 +661,7 @@ function Detail({ label, value, highlight }: { label: string; value: string; hig
 
 function ActionButton({ label, onPress, icon, danger }: { label: string; onPress: () => void; icon: ReactNode; danger?: boolean }) {
   return (
-    <Pressable onPress={onPress} style={[styles.actionButton, danger && styles.actionButtonDanger]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={[styles.actionButton, danger && styles.actionButtonDanger]}>
       {icon}
       <Text style={[styles.actionText, danger && { color: colors.red }]}>{label}</Text>
     </Pressable>
@@ -669,7 +670,7 @@ function ActionButton({ label, onPress, icon, danger }: { label: string; onPress
 
 const styles = {
   screen: { flex: 1, backgroundColor: colors.background, direction: "rtl" as const },
-  page: { width: "100%" as const, maxWidth: 1000, alignSelf: "center" as const, padding: 18, paddingBottom: 28, gap: 14 },
+  page: { width: "100%" as const, maxWidth: 1100, alignSelf: "center" as const, padding: 20, paddingBottom: 36, gap: 16 },
   intro: { marginBottom: 1 },
   headingRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 9 },
   headingIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#EAF1FA", alignItems: "center" as const, justifyContent: "center" as const },
@@ -683,16 +684,16 @@ const styles = {
   alertName: { color: colors.ink, fontSize: 12, fontWeight: "800" as const, textAlign: "right" as const },
   alertMeta: { color: colors.red, fontSize: 10, marginTop: 3, textAlign: "right" as const },
   alertMore: { color: "#81393B", fontSize: 10, textAlign: "right" as const, paddingTop: 3 },
-  addButton: { minHeight: 46, borderRadius: 13, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
-  addButtonText: { color: colors.navy, fontWeight: "900" as const, fontSize: 12 },
-  formCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 16 },
+  addButton: { minHeight: 48, borderRadius: 13, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
+  addButtonText: { color: colors.navy, fontWeight: "900" as const, fontSize: 13 },
+  formCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 18 },
   formHeading: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10, marginBottom: 12 },
   cardHeading: { color: colors.navy, fontSize: 15, fontWeight: "900" as const, textAlign: "right" as const },
   requiredHint: { color: colors.muted, fontSize: 10 },
   formGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 10 },
   field: { flexGrow: 1, flexBasis: 220 },
-  fieldLabel: { color: colors.ink, fontSize: 11, fontWeight: "800" as const, textAlign: "right" as const, marginBottom: 5 },
-  input: { minHeight: 43, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 11, fontSize: 12 },
+  fieldLabel: { color: colors.ink, fontSize: 12, fontWeight: "800" as const, textAlign: "right" as const, marginBottom: 6 },
+  input: { minHeight: 46, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 12, fontSize: 13 },
   multiline: { minHeight: 75, textAlignVertical: "top" as const, paddingTop: 10, marginBottom: 10 },
   choiceRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7, marginBottom: 8 },
   filterChip: { minHeight: 34, borderRadius: 10, paddingHorizontal: 12, alignItems: "center" as const, justifyContent: "center" as const, backgroundColor: "#F3F6FA", borderWidth: 1, borderColor: colors.border },
@@ -725,7 +726,7 @@ const styles = {
   listCount: { color: colors.muted, fontSize: 10 },
   loading: { minHeight: 130, alignItems: "center" as const, justifyContent: "center" as const, gap: 10, backgroundColor: colors.surface, borderRadius: 15 },
   muted: { color: colors.muted, fontSize: 11 },
-  rentalCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 14, gap: 12 },
+  rentalCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 17, gap: 13 },
   rentalCardDue: { borderColor: "#F2C1BE" },
   rentalHeader: { flexDirection: "row" as const, alignItems: "flex-start" as const, gap: 12 },
   rentalTitle: { color: colors.navy, fontSize: 15, fontWeight: "900" as const, textAlign: "right" as const },
@@ -757,6 +758,7 @@ const styles = {
   emptyAddText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" as const },
   error: { backgroundColor: colors.redSoft, borderRadius: 11, padding: 12, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 9 },
   errorText: { flex: 1, color: colors.red, fontSize: 11, lineHeight: 17, textAlign: "right" as const },
+  retryText: { color: colors.blue, fontSize: 10, fontWeight: "800" as const },
   center: { flex: 1, alignItems: "center" as const, justifyContent: "center" as const, gap: 14, backgroundColor: colors.background, padding: 24 },
   denied: { color: colors.red, textAlign: "center" as const, lineHeight: 21, fontSize: 12 },
   secondaryButton: { minHeight: 42, borderRadius: 11, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, justifyContent: "center" as const, paddingHorizontal: 14 },
