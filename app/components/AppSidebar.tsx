@@ -83,7 +83,7 @@ export function AppSidebar({
         </View>
         {drawer ? (
           <Pressable accessibilityRole="button" accessibilityLabel="إغلاق القائمة" onPress={onClose} hitSlop={8} style={styles.closeButton}>
-            <X size={19} color="#DCE6F3" />
+            <X size={19} color={colors.lightBeige} />
           </Pressable>
         ) : null}
       </View>
@@ -106,7 +106,7 @@ export function AppSidebar({
               ]}
             >
               {selected ? <View style={styles.activeMark} /> : null}
-              <Icon size={18} color={selected ? colors.yellow : "#B8C7DA"} />
+              <Icon size={18} color={selected ? colors.yellow : colors.lightBlue} />
               <Text style={[styles.navLabel, selected && styles.navLabelSelected]} numberOfLines={1}>
                 {entry.label}
               </Text>
@@ -134,7 +134,7 @@ const styles = {
   sidebar: {
     width: 256,
     height: "100%" as const,
-    backgroundColor: colors.navy,
+    backgroundColor: colors.deepBlue,
     borderLeftWidth: 1,
     borderLeftColor: "#FFFFFF12",
     paddingHorizontal: 14,
@@ -165,7 +165,7 @@ const styles = {
   },
   brandCopy: { flex: 1, minWidth: 0 },
   brandTitle: { color: "#FFFFFF", fontSize: 12, fontWeight: "900" as const, textAlign: "right" as const },
-  brandSubtitle: { color: "#A8B9D0", fontSize: 10, marginTop: 4, textAlign: "right" as const },
+  brandSubtitle: { color: colors.lightBlue, fontSize: 10, marginTop: 4, textAlign: "right" as const },
   closeButton: {
     width: 34,
     height: 34,
@@ -174,7 +174,7 @@ const styles = {
     borderRadius: 10,
     backgroundColor: "#FFFFFF14",
   },
-  navCaption: { color: "#8FA4BE", fontSize: 10, fontWeight: "700" as const, marginTop: 18, marginBottom: 9, paddingHorizontal: 10, textAlign: "right" as const },
+  navCaption: { color: colors.lightBlue, fontSize: 10, fontWeight: "700" as const, marginTop: 18, marginBottom: 9, paddingHorizontal: 10, textAlign: "right" as const },
   navScroll: { flex: 1, minHeight: 0 },
   navList: { gap: 4, paddingBottom: 14 },
   navItem: {
@@ -187,10 +187,10 @@ const styles = {
     paddingHorizontal: 12,
     backgroundColor: "transparent",
   },
-  navItemSelected: { backgroundColor: "#FFFFFF16" },
+  navItemSelected: { backgroundColor: "#0555A8" },
   navItemPressed: { opacity: 0.76 },
   activeMark: { position: "absolute" as const, right: 0, top: 10, bottom: 10, width: 3, borderRadius: 3, backgroundColor: colors.yellow },
-  navLabel: { flex: 1, color: "#D0DBE9", fontSize: 12, fontWeight: "600" as const, textAlign: "right" as const },
+  navLabel: { flex: 1, color: "#E9F0F5", fontSize: 12, fontWeight: "600" as const, textAlign: "right" as const },
   navLabelSelected: { color: "#FFFFFF", fontWeight: "800" as const },
   account: {
     minHeight: 60,
@@ -206,7 +206,7 @@ const styles = {
   avatarText: { color: colors.yellow, fontSize: 15, fontWeight: "800" as const },
   accountCopy: { flex: 1, minWidth: 0 },
   accountName: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" as const, textAlign: "right" as const },
-  accountRole: { color: "#A8B9D0", fontSize: 10, marginTop: 4, textAlign: "right" as const },
+  accountRole: { color: colors.lightBlue, fontSize: 10, marginTop: 4, textAlign: "right" as const },
   backdrop: { position: "absolute" as const, zIndex: 19, top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "#07152F80" },
 };
 

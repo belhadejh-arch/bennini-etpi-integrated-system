@@ -32,7 +32,7 @@ fun FieldPortalScreen(viewModel: MainViewModel) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("بوابة تطبيق رئيس الأشغال الميداني 📱", fontWeight = FontWeight.Bold) },
+                title = { Text("بوابة تطبيق رئيس الأشغال الميداني", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = DeepBlue, titleContentColor = Color.White)
             )
         },

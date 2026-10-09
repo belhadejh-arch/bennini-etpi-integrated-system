@@ -105,7 +105,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                             viewModel.navigateTo("dashboard")
                             scope.launch { drawerState.close() }
                         },
-                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = PrimaryBlue)
+                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = AccentBlue)
                     )
 
                     NavigationDrawerItem(
@@ -116,7 +116,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                             viewModel.navigateTo("finance")
                             scope.launch { drawerState.close() }
                         },
-                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = PrimaryBlue)
+                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = AccentBlue)
                     )
 
                     NavigationDrawerItem(
@@ -127,7 +127,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                             viewModel.navigateTo("inventory")
                             scope.launch { drawerState.close() }
                         },
-                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = PrimaryBlue)
+                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = AccentBlue)
                     )
 
                     NavigationDrawerItem(
@@ -138,7 +138,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                             viewModel.navigateTo("cheques")
                             scope.launch { drawerState.close() }
                         },
-                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = PrimaryBlue)
+                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = AccentBlue)
                     )
 
                     NavigationDrawerItem(
@@ -149,7 +149,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                             viewModel.navigateTo("rentals")
                             scope.launch { drawerState.close() }
                         },
-                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = PrimaryBlue)
+                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = AccentBlue)
                     )
 
                     NavigationDrawerItem(
@@ -160,18 +160,18 @@ fun MainAppScreen(viewModel: MainViewModel) {
                             viewModel.navigateTo("machinery")
                             scope.launch { drawerState.close() }
                         },
-                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = PrimaryBlue)
+                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = AccentBlue)
                     )
 
                     NavigationDrawerItem(
-                        icon = { Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = BrandYellow) },
-                        label = { Text("بوابة تطبيق رئيس الأشغال 📱", color = BrandYellow, fontWeight = FontWeight.Bold) },
+                        icon = { Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = Color.White) },
+                        label = { Text("بوابة تطبيق رئيس الأشغال", color = Color.White) },
                         selected = currentRoute == "field",
                         onClick = {
                             viewModel.navigateTo("field")
                             scope.launch { drawerState.close() }
                         },
-                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = PrimaryBlue)
+                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = AccentBlue)
                     )
 
                     NavigationDrawerItem(
@@ -182,7 +182,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                             viewModel.navigateTo("users")
                             scope.launch { drawerState.close() }
                         },
-                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = PrimaryBlue)
+                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = AccentBlue)
                     )
 
                     NavigationDrawerItem(
@@ -193,7 +193,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                             viewModel.navigateTo("audit")
                             scope.launch { drawerState.close() }
                         },
-                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = PrimaryBlue)
+                        colors = NavigationDrawerItemDefaults.colors(selectedContainerColor = AccentBlue)
                     )
                 }
             }
@@ -227,7 +227,7 @@ fun MainAppScreen(viewModel: MainViewModel) {
                                     "cheques" -> "دفتر الشيكات"
                                     "rentals" -> "كراء الآلات والعقارات"
                                     "machinery" -> "العتاد والآليات والوقود"
-                                    "field" -> "بوابة تطبيق رئيس الأشغال 📱"
+                                    "field" -> "بوابة تطبيق رئيس الأشغال"
                                     "users" -> "المستخدمين والصلاحيات"
                                     "audit" -> "سجل التدقيق"
                                     else -> "BENNINI ETPI - لوحة القيادة"

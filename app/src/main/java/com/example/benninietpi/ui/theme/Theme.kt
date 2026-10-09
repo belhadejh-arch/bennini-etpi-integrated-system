@@ -13,11 +13,15 @@ import androidx.core.view.WindowCompat
 private val LightColorScheme = lightColorScheme(
     primary = PrimaryBlue,
     onPrimary = SurfaceLight,
-    secondary = AccentBlue,
-    onSecondary = SurfaceLight,
+    secondary = BrandYellow,
+    onSecondary = TextPrimary,
+    tertiary = AccentBlue,
+    onTertiary = SurfaceLight,
     background = BackgroundLight,
     surface = SurfaceLight,
     onSurface = TextPrimary,
+    surfaceVariant = LightBlue.copy(alpha = 0.16f),
+    onSurfaceVariant = TextSecondary,
     error = DangerRed
 )
 

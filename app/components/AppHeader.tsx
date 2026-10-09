@@ -52,7 +52,7 @@ export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
       <View style={styles.actionSlot}>
         {sidebar?.visible ? (
           <HeaderAction label="فتح قائمة الأقسام" onPress={sidebar.toggle}>
-            <Menu size={20} color="#FFFFFF" />
+            <Menu size={20} color={colors.lightBeige} />
           </HeaderAction>
         ) : leftAction}
       </View>
@@ -64,7 +64,7 @@ export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
         {rightAction}
         <View style={styles.notificationWrap}>
           <HeaderAction label={`الإشعارات${unreadCount ? `، ${unreadCount} غير مقروء` : ""}`} onPress={() => router.push("/notifications")}>
-            <Bell size={19} color="#FFFFFF" />
+            <Bell size={19} color={colors.lightBeige} />
           </HeaderAction>
           {unreadCount > 0 ? (
             <View style={styles.badge}>
@@ -81,7 +81,7 @@ const styles = {
   header: {
     minHeight: 76,
     paddingHorizontal: 18,
-    backgroundColor: colors.navy,
+    backgroundColor: colors.blue,
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: 12,
@@ -112,14 +112,14 @@ const styles = {
     alignItems: "center" as const,
     justifyContent: "center" as const,
     borderWidth: 1,
-    borderColor: colors.navy,
+    borderColor: colors.blue,
   },
   badgeText: { color: "#FFFFFF", fontSize: 8, fontWeight: "900" as const },
   action: {
     width: 42,
     height: 42,
     borderRadius: 13,
-    backgroundColor: "#FFFFFF1A",
+    backgroundColor: "#FFFFFF1F",
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },

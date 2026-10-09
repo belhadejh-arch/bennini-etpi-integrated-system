@@ -111,7 +111,7 @@ fun DashboardScreen(viewModel: MainViewModel) {
                             onClick = { viewModel.navigateTo("field") },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                         ) {
-                            Text("بوابة رئيس الأشغال 📱")
+                            Text("بوابة رئيس الأشغال")
                         }
                     }
                 }
@@ -346,7 +346,7 @@ fun DashboardScreen(viewModel: MainViewModel) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("آخر المصاريف المسجلة من تطبيق رئيس الأشغال 📱", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = DeepBlue)
+                Text("آخر المصاريف المسجلة من تطبيق رئيس الأشغال", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = DeepBlue)
                 TextButton(onClick = { viewModel.navigateTo("field") }) {
                     Text("فتح البوابة")
                 }
