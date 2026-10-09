@@ -33,6 +33,7 @@ import { CompanyLogo } from "./components/CompanyLogo";
 import { apiRequest, type DashboardData, type Member } from "../lib/api";
 import { colors, formatDzd } from "../lib/theme";
 import { sections, type SectionId } from "../shared/sections";
+import { hasPermission } from "../shared/access";
 
 type ApiError = Error & { status?: number; body?: { pending?: boolean; error?: string } };
 
@@ -91,8 +92,8 @@ export default function HomeScreen() {
 
   const isAdmin = member?.role === "admin";
   const permitted = useMemo(
-    () => new Set(isAdmin ? sections.map((section) => section.id) : member?.allowed_sections ?? []),
-    [isAdmin, member],
+    () => new Set(sections.filter((section) => hasPermission(member, section.id, "view")).map((section) => section.id)),
+    [member],
   );
   const goToSection = (section: SectionId) => {
     if (section === "dashboard") router.push("/");
@@ -183,7 +184,7 @@ export default function HomeScreen() {
             <Text style={styles.eyebrow}>BENNINI ETPI · النظام الموحد</Text>
             <Text style={styles.welcomeTitle}>مرحباً، {member?.name || user?.firstName || "عضو الفريق"}</Text>
             <Text style={styles.welcomeSubtitle}>ملخص مالي وتشغيلي واضح لمتابعة المؤسسة.</Text>
-            <View style={styles.rolePill}><Text style={styles.rolePillText}>{roleLabel(member?.role)}</Text></View>
+            <View style={styles.rolePill}><Text style={styles.rolePillText}>{member?.role_name || roleLabel(member?.role)}</Text></View>
           </View>
           <View style={styles.welcomeMark}><CompanyLogo width={91} height={48} /></View>
         </View>
@@ -241,7 +242,7 @@ export default function HomeScreen() {
                       </View>
                     </View>
                     <RecordNotes entity="transaction" recordId={item.id} initialNotes={item.notes}
-                      editable={member?.role === "admin" || (permitted.has("finance") && member?.role === "finance")} />
+                      editable={hasPermission(member, "finance", "edit")} />
                   </View>
                 )) : <EmptyState message="لا توجد عمليات مالية مسجلة بعد." />}
               </View>
@@ -268,8 +269,8 @@ export default function HomeScreen() {
                       </View>
                     </View>
                     <RecordNotes entity="fieldExpense" recordId={item.id} initialNotes={item.notes}
-                      editable={member?.role === "admin" ||
-                        (["field", "supervisor"].includes(member?.role ?? "") && item.created_by_id === member?.clerk_user_id)} />
+                      editable={hasPermission(member, "field", "edit") &&
+                        (member?.role === "admin" || item.created_by_id === member?.clerk_user_id)} />
                   </View>
                 )) : <EmptyState message="لا توجد مصاريف ميدانية مسجلة بعد." />}
               </View>

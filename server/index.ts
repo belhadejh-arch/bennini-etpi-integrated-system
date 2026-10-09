@@ -8,6 +8,13 @@ import { publishableKeyFromHost } from "@clerk/shared/keys";
 import pg from "pg";
 import { allSectionIds, type SectionId } from "../shared/sections";
 import {
+  effectivePermissions,
+  hasPermission,
+  permissionActions,
+  type MemberPermissions,
+  type PermissionAction,
+} from "../shared/access";
+import {
   CLERK_PROXY_PATH,
   clerkProxyMiddleware,
   getClerkProxyHost,
@@ -25,6 +32,7 @@ app.use(cors({ credentials: true, origin: true }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(
+  "/api",
   clerkMiddleware((req) => ({
     publishableKey: publishableKeyFromHost(
       getClerkProxyHost(req) ?? "",
@@ -40,6 +48,8 @@ type Member = {
   role: string;
   active: boolean;
   allowed_sections: string[];
+  role_name?: string;
+  permissions?: MemberPermissions;
 };
 
 type AuthenticatedRequest = Request & {
@@ -47,6 +57,18 @@ type AuthenticatedRequest = Request & {
 };
 
 const adminSections = [...allSectionIds];
+let memberSchemaPromise: Promise<void> | null = null;
+
+function ensureMemberSchema() {
+  if (!memberSchemaPromise) {
+    memberSchemaPromise = pool.query(`
+      ALTER TABLE members ADD COLUMN IF NOT EXISTS role_name TEXT NOT NULL DEFAULT '';
+      ALTER TABLE members ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{}'::jsonb;
+    `).then(() => undefined);
+  }
+  return memberSchemaPromise;
+}
+
 const paymentMethods = ["نقداً", "شيك", "تحويل بنكي"] as const;
 const rentalStatuses = ["active", "completed", "cancelled"] as const;
 const transactionUpload = multer({
@@ -78,6 +100,7 @@ function fail(res: Response, status: number, message: string) {
 }
 
 async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Member | null> {
+  await ensureMemberSchema();
   const auth = getAuth(req);
   if (!auth.userId) {
     fail(res, 401, "يلزم تسجيل الدخول.");
@@ -85,7 +108,7 @@ async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Mem
   }
 
   let result = await pool.query<Member>(
-    "SELECT clerk_user_id, email, name, role, active, allowed_sections FROM members WHERE clerk_user_id = $1",
+    "SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions FROM members WHERE clerk_user_id = $1",
     [auth.userId],
   );
 
@@ -107,7 +130,7 @@ async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Mem
       `INSERT INTO members (clerk_user_id, email, name, role, active, allowed_sections)
        VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (clerk_user_id) DO UPDATE SET email = EXCLUDED.email
-       RETURNING clerk_user_id, email, name, role, active, allowed_sections`,
+       RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions`,
       [
         auth.userId,
         email,
@@ -150,7 +173,7 @@ async function authenticate(req: AuthenticatedRequest, res: Response, next: Next
 function requireSection(section: SectionId) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     const member = req.member;
-    if (!member || (member.role !== "admin" && !member.allowed_sections.includes(section))) {
+    if (!hasPermission(member, section, "view")) {
       fail(res, 403, "ليس لديك صلاحية الوصول إلى هذا القسم.");
       return;
     }
@@ -166,10 +189,20 @@ function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFuncti
   next();
 }
 
-function requireRole(...roles: string[]) {
+function requirePermission(section: SectionId, action: PermissionAction) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    if (req.member?.role !== "admin" && !roles.includes(req.member?.role ?? "")) {
-      fail(res, 403, "دور الحساب لا يسمح بتسجيل هذا النوع من العمليات.");
+    if (!hasPermission(req.member, section, action)) {
+      fail(res, 403, "لا تملك الصلاحية المطلوبة لتنفيذ هذه العملية.");
+      return;
+    }
+    next();
+  };
+}
+
+function requireAnyPermission(section: SectionId, ...actions: PermissionAction[]) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    if (!actions.some((action) => hasPermission(req.member, section, action))) {
+      fail(res, 403, "لا تملك الصلاحية المطلوبة لتنفيذ هذه العملية.");
       return;
     }
     next();
@@ -598,7 +631,11 @@ app.get("/api/me", async (req: AuthenticatedRequest, res) => {
 app.get("/api/dashboard", authenticate, requireSection("dashboard"), requireFieldExpenseSchema, async (req: AuthenticatedRequest, res) => {
   try {
     const member = req.member!;
-    const canSeeField = member.role === "admin" || member.allowed_sections.includes("field");
+    const canSeeFinance = hasPermission(member, "finance", "view");
+    const canSeeInventory = hasPermission(member, "inventory", "view");
+    const canSeeCheques = hasPermission(member, "cheques", "view");
+    const canSeeRentals = hasPermission(member, "rentals", "view");
+    const canSeeField = hasPermission(member, "field", "view");
     const canSeeAllField = member.role === "admin" || member.role === "finance";
     const fieldQuery = canSeeField
       ? pool.query(
@@ -637,18 +674,18 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), requireFiel
     const outgoing = Number(cash.rows[0].outgoing);
     res.json({
       stats: {
-        incoming,
-        outgoing,
-        balance: incoming - outgoing,
-        purchases: Number(purchases.rows[0].total),
-        inventoryValue: Number(inventory.rows[0].total),
-        pendingCheques: Number(cheques.rows[0].pending_amount),
-        pendingChequeCount: Number(cheques.rows[0].pending_count),
-        dueCheques: Number(cheques.rows[0].due_amount),
-        dueChequeCount: Number(cheques.rows[0].due_count),
-        rentalRemaining: Number(rentals.rows[0].remaining),
+        incoming: canSeeFinance ? incoming : 0,
+        outgoing: canSeeFinance ? outgoing : 0,
+        balance: canSeeFinance ? incoming - outgoing : 0,
+        purchases: canSeeInventory ? Number(purchases.rows[0].total) : 0,
+        inventoryValue: canSeeInventory ? Number(inventory.rows[0].total) : 0,
+        pendingCheques: canSeeCheques ? Number(cheques.rows[0].pending_amount) : 0,
+        pendingChequeCount: canSeeCheques ? Number(cheques.rows[0].pending_count) : 0,
+        dueCheques: canSeeCheques ? Number(cheques.rows[0].due_amount) : 0,
+        dueChequeCount: canSeeCheques ? Number(cheques.rows[0].due_count) : 0,
+        rentalRemaining: canSeeRentals ? Number(rentals.rows[0].remaining) : 0,
       },
-      recentOperations: recent.rows,
+      recentOperations: canSeeFinance ? recent.rows : [],
       fieldExpenses: field.rows,
     });
   } catch (error) {
@@ -786,7 +823,7 @@ app.get("/api/inventory", authenticate, requireSection("inventory"), async (req,
   }
 });
 
-app.post("/api/inventory", authenticate, requireSection("inventory"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.post("/api/inventory", authenticate, requireSection("inventory"), requirePermission("inventory", "create"), async (req: AuthenticatedRequest, res) => {
   const purchase = validInventoryPurchase(req.body ?? {});
   if (!purchase) return fail(res, 400, "تحقق من اسم السلعة والكمية والأسعار والمورد وتاريخ الشراء.");
 
@@ -815,7 +852,7 @@ app.post("/api/inventory", authenticate, requireSection("inventory"), requireRol
   }
 });
 
-app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requirePermission("inventory", "edit"), async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const purchase = validInventoryPurchase(req.body ?? {});
   if (!Number.isSafeInteger(id) || id <= 0 || !purchase || !validIsoDate(purchase.purchaseDate)) {
@@ -861,7 +898,7 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
   }
 });
 
-app.post("/api/inventory/:id/movements", authenticate, requireSection("inventory"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.post("/api/inventory/:id/movements", authenticate, requireSection("inventory"), requirePermission("inventory", "create"), async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const { type, quantity, unitPrice, movementDate } = req.body ?? {};
   const counterparty = typeof req.body?.counterparty === "string" ? req.body.counterparty.trim() : "";
@@ -1017,7 +1054,7 @@ app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res
   }
 });
 
-app.post("/api/cheques", authenticate, requireSection("cheques"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.post("/api/cheques", authenticate, requireSection("cheques"), requirePermission("cheques", "create"), async (req: AuthenticatedRequest, res) => {
   const cheque = validCheque(req.body ?? {});
   if (!cheque) return fail(res, 400, "تحقق من رقم الشيك والمبلغ والمستفيد والبنك والتواريخ والحالة.");
   const client = await pool.connect();
@@ -1043,7 +1080,7 @@ app.post("/api/cheques", authenticate, requireSection("cheques"), requireRole("f
   }
 });
 
-app.patch("/api/cheques/:id", authenticate, requireSection("cheques"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.patch("/api/cheques/:id", authenticate, requireSection("cheques"), requirePermission("cheques", "edit"), async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم الشيك غير صالح.");
   const client = await pool.connect();
@@ -1084,7 +1121,7 @@ app.patch("/api/cheques/:id", authenticate, requireSection("cheques"), requireRo
   }
 });
 
-app.delete("/api/cheques/:id", authenticate, requireSection("cheques"), requireAdmin, async (req: AuthenticatedRequest, res) => {
+app.delete("/api/cheques/:id", authenticate, requireSection("cheques"), requirePermission("cheques", "delete"), async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم الشيك غير صالح.");
   const client = await pool.connect();
@@ -1110,7 +1147,7 @@ app.delete("/api/cheques/:id", authenticate, requireSection("cheques"), requireA
   }
 });
 
-app.post("/api/cheques/:id/attachments", authenticate, requireSection("cheques"), requireRole("finance"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/cheques/:id/attachments", authenticate, requireSection("cheques"), requireAnyPermission("cheques", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
@@ -1212,7 +1249,7 @@ app.get("/api/rentals", requireRentalSchema, authenticate, requireSection("renta
   }
 });
 
-app.post("/api/rentals", requireRentalSchema, authenticate, requireSection("rentals"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.post("/api/rentals", requireRentalSchema, authenticate, requireSection("rentals"), requirePermission("rentals", "create"), async (req: AuthenticatedRequest, res) => {
   const rental = validRental(req.body ?? {});
   if (!rental) return fail(res, 400, "تحقق من بيانات الكراء والتواريخ والسعر والمبلغ المدفوع.");
   const client = await pool.connect();
@@ -1239,7 +1276,7 @@ app.post("/api/rentals", requireRentalSchema, authenticate, requireSection("rent
   }
 });
 
-app.patch("/api/rentals/:id", requireRentalSchema, authenticate, requireSection("rentals"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.patch("/api/rentals/:id", requireRentalSchema, authenticate, requireSection("rentals"), requirePermission("rentals", "edit"), async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم عقد الكراء غير صالح.");
   const client = await pool.connect();
@@ -1279,7 +1316,7 @@ app.patch("/api/rentals/:id", requireRentalSchema, authenticate, requireSection(
   }
 });
 
-app.delete("/api/rentals/:id", requireRentalSchema, authenticate, requireSection("rentals"), requireAdmin, async (req: AuthenticatedRequest, res) => {
+app.delete("/api/rentals/:id", requireRentalSchema, authenticate, requireSection("rentals"), requirePermission("rentals", "delete"), async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم عقد الكراء غير صالح.");
   const client = await pool.connect();
@@ -1302,7 +1339,7 @@ app.delete("/api/rentals/:id", requireRentalSchema, authenticate, requireSection
   }
 });
 
-app.post("/api/rentals/:id/attachments", requireRentalSchema, authenticate, requireSection("rentals"), requireRole("finance"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/rentals/:id/attachments", requireRentalSchema, authenticate, requireSection("rentals"), requireAnyPermission("rentals", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
@@ -1408,11 +1445,8 @@ app.patch("/api/record-notes/:entity/:id", requireRecordNotesSchema, authenticat
     if (target.section === "audit" && member.role !== "admin") {
       return fail(res, 403, "ملاحظات سجل التدقيق متاحة للمدير فقط.");
     }
-    if (member.role !== "admin" && !member.allowed_sections.includes(target.section)) {
+    if (!hasPermission(member, target.section, "edit")) {
       return fail(res, 403, "ليس لديك صلاحية الوصول إلى هذا القسم.");
-    }
-    if (target.section !== "field" && member.role !== "admin" && member.role !== "finance") {
-      return fail(res, 403, "دور الحساب لا يسمح بتعديل ملاحظات هذا السجل.");
     }
   }
 
@@ -1441,10 +1475,6 @@ app.patch("/api/record-notes/:entity/:id", requireRecordNotesSchema, authenticat
         [Number(rawId), notes, member.clerk_user_id, member.name],
       );
     } else if (entity === "fieldExpense" && member.role !== "admin") {
-      if (!["field", "supervisor"].includes(member.role)) {
-        await client.query("ROLLBACK");
-        return fail(res, 403, "دور الحساب لا يسمح بتعديل ملاحظات مصاريف الميدان.");
-      }
       result = await client.query(
         "UPDATE field_expenses SET notes = $1 WHERE id = $2 AND created_by_id = $3 RETURNING notes",
         [notes, Number(rawId), member.clerk_user_id],
@@ -1490,7 +1520,7 @@ app.get("/api/machinery", requireMachinerySchema, authenticate, requireSection("
   }
 });
 
-app.post("/api/machinery", requireMachinerySchema, authenticate, requireSection("machinery"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.post("/api/machinery", requireMachinerySchema, authenticate, requireSection("machinery"), requirePermission("machinery", "create"), async (req: AuthenticatedRequest, res) => {
   const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
   const category = typeof req.body?.category === "string" ? req.body.category.trim() : "";
@@ -1529,7 +1559,7 @@ app.get("/api/machinery/spare-parts", requireMachinerySchema, authenticate, requ
   }
 });
 
-app.post("/api/machinery/spare-parts", requireMachinerySchema, authenticate, requireSection("machinery"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.post("/api/machinery/spare-parts", requireMachinerySchema, authenticate, requireSection("machinery"), requirePermission("machinery", "create"), async (req: AuthenticatedRequest, res) => {
   const body = req.body ?? {};
   const machineryId = Number(body.machineryId);
   const name = typeof body.name === "string" ? body.name.trim() : "";
@@ -1581,7 +1611,7 @@ app.post("/api/machinery/spare-parts", requireMachinerySchema, authenticate, req
   }
 });
 
-app.post("/api/machinery/spare-parts/:id/attachments", requireMachinerySchema, authenticate, requireSection("machinery"), requireRole("finance"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/machinery/spare-parts/:id/attachments", requireMachinerySchema, authenticate, requireSection("machinery"), requireAnyPermission("machinery", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
@@ -1652,7 +1682,7 @@ app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest
   if (!allSectionIds.includes(section)) return fail(res, 404, "القسم غير موجود.");
   if (section === "users" || section === "audit") {
     if (req.member?.role !== "admin") return fail(res, 403, "هذه الصفحة متاحة للمدير فقط.");
-  } else if (req.member?.role !== "admin" && !req.member?.allowed_sections.includes(section)) {
+  } else if (!hasPermission(req.member, section, "view")) {
     return fail(res, 403, "ليس لديك صلاحية الوصول إلى هذا القسم.");
   }
 
@@ -1675,9 +1705,15 @@ app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest
         FROM audit_logs a LEFT JOIN audit_log_notes n ON n.audit_log_id = a.id
         ORDER BY a.created_at DESC LIMIT 100`,
     };
-    const query = queries[section];
+    const canSeeAllField = req.member?.role === "admin" || req.member?.role === "finance";
+    const query = section === "field" && !canSeeAllField
+      ? queries.field?.replace("FROM field_expenses", "FROM field_expenses WHERE created_by_id = $1")
+      : queries[section];
     if (!query) return res.json({ items: [] });
-    const result = await pool.query(query);
+    const result = await pool.query(
+      query,
+      section === "field" && !canSeeAllField ? [req.member?.clerk_user_id] : [],
+    );
     res.json({ items: result.rows });
   } catch (error) {
     console.error(`Section query failed for ${section}:`, error);
@@ -1685,7 +1721,7 @@ app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest
   }
 });
 
-app.post("/api/transactions", authenticate, requireSection("finance"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.post("/api/transactions", authenticate, requireSection("finance"), requirePermission("finance", "create"), async (req: AuthenticatedRequest, res) => {
   const { type, amount, party, reason, paymentMethod, transactionDate, notes } = req.body ?? {};
   if (!["income", "expense"].includes(type) || !Number.isFinite(Number(amount)) || Number(amount) <= 0 ||
       typeof party !== "string" || !party.trim() || !paymentMethods.includes(paymentMethod) ||
@@ -1722,7 +1758,7 @@ app.post("/api/transactions", authenticate, requireSection("finance"), requireRo
   }
 });
 
-app.patch("/api/transactions/:id", authenticate, requireSection("finance"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+app.patch("/api/transactions/:id", authenticate, requireSection("finance"), requirePermission("finance", "edit"), async (req: AuthenticatedRequest, res) => {
   const { type, amount, party, reason, paymentMethod, transactionDate, notes } = req.body ?? {};
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id <= 0 || !["income", "expense"].includes(type) ||
@@ -1763,7 +1799,7 @@ app.patch("/api/transactions/:id", authenticate, requireSection("finance"), requ
   }
 });
 
-app.delete("/api/transactions/:id", authenticate, requireSection("finance"), requireAdmin, async (req: AuthenticatedRequest, res) => {
+app.delete("/api/transactions/:id", authenticate, requireSection("finance"), requirePermission("finance", "delete"), async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم العملية غير صالح.");
   const client = await pool.connect();
@@ -1788,7 +1824,7 @@ app.delete("/api/transactions/:id", authenticate, requireSection("finance"), req
   }
 });
 
-app.post("/api/transactions/:id/attachments", authenticate, requireSection("finance"), requireRole("finance"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/transactions/:id/attachments", authenticate, requireSection("finance"), requireAnyPermission("finance", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
@@ -1846,7 +1882,7 @@ app.get("/api/transaction-attachments/:id", authenticate, requireSection("financ
   }
 });
 
-app.post("/api/inventory/:id/attachments", authenticate, requireSection("inventory"), requireRole("finance"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/inventory/:id/attachments", authenticate, requireSection("inventory"), requireAnyPermission("inventory", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
@@ -1943,7 +1979,7 @@ app.get("/api/field-expenses", requireFieldExpenseSchema, authenticate, requireS
   }
 });
 
-app.post("/api/field-expenses", requireFieldExpenseSchema, authenticate, requireSection("field"), requireRole("field", "supervisor"), async (req: AuthenticatedRequest, res) => {
+app.post("/api/field-expenses", requireFieldExpenseSchema, authenticate, requireSection("field"), requirePermission("field", "create"), async (req: AuthenticatedRequest, res) => {
   const { category, amount, siteName, details, fuelLiters, notes } = req.body ?? {};
   const categoryText = typeof category === "string" ? category.trim() : "";
   const siteText = typeof siteName === "string" ? siteName.trim() : "";
@@ -1982,7 +2018,7 @@ app.post("/api/field-expenses", requireFieldExpenseSchema, authenticate, require
   }
 });
 
-app.patch("/api/field-expenses/:id/review", requireFieldExpenseSchema, authenticate, requireAdmin, async (req: AuthenticatedRequest, res) => {
+app.patch("/api/field-expenses/:id/review", requireFieldExpenseSchema, authenticate, requireSection("field"), requirePermission("field", "edit"), async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const status = req.body?.status;
   const reviewNotes = typeof req.body?.reviewNotes === "string" ? req.body.reviewNotes.trim() : "";
@@ -2010,7 +2046,7 @@ app.patch("/api/field-expenses/:id/review", requireFieldExpenseSchema, authentic
   }
 });
 
-app.post("/api/field-expenses/:id/attachments", requireFieldExpenseSchema, authenticate, requireSection("field"), requireRole("field", "supervisor"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+app.post("/api/field-expenses/:id/attachments", requireFieldExpenseSchema, authenticate, requireSection("field"), requireAnyPermission("field", "create", "edit"), uploadFiles, async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   const files = (req.files ?? []) as Express.Multer.File[];
   if (!Number.isSafeInteger(id) || id <= 0 || !files.length) return fail(res, 400, "اختر صورة أو وثيقة واحدة على الأقل.");
@@ -2098,27 +2134,69 @@ app.get("/api/field-expense-attachments/:id", requireFieldExpenseSchema, authent
 
 app.get("/api/members", requireRecordNotesSchema, authenticate, requireAdmin, async (_req, res) => {
   const result = await pool.query(
-    "SELECT clerk_user_id, email, name, role, active, allowed_sections, notes, created_at FROM members ORDER BY created_at",
+    "SELECT clerk_user_id, email, name, role, role_name, active, allowed_sections, permissions, notes, created_at FROM members ORDER BY created_at",
   );
-  res.json({ members: result.rows });
+  res.json({
+    members: result.rows.map((item) => ({
+      ...item,
+      permissions: effectivePermissions(item as Member),
+    })),
+  });
 });
 
 app.patch("/api/members/:id", authenticate, requireAdmin, async (req: AuthenticatedRequest, res) => {
   const targetId = req.params.id;
-  const { active, allowedSections, role } = req.body ?? {};
+  const { active, permissions, roleName } = req.body ?? {};
   if (targetId === req.member?.clerk_user_id) return fail(res, 400, "لا يمكن تعديل صلاحيات حساب المدير الحالي.");
-  if (typeof active !== "boolean" || !Array.isArray(allowedSections) ||
-      !allowedSections.every((section) => allSectionIds.includes(section))) {
+  if (typeof active !== "boolean" || typeof roleName !== "string" ||
+      !roleName.trim() || roleName.trim().length > 80 ||
+      !permissions || typeof permissions !== "object" || Array.isArray(permissions)) {
     return fail(res, 400, "بيانات الصلاحيات غير صالحة.");
   }
-  const safeRole = ["finance", "field", "supervisor", "viewer"].includes(role) ? role : "viewer";
-  const sections = [...new Set(["dashboard", ...allowedSections.filter((section) => section !== "users" && section !== "audit")])];
+  const cleanPermissions: MemberPermissions = Object.fromEntries(
+    allSectionIds
+      .filter((section) => section !== "users" && section !== "audit")
+      .map((section) => [
+        section,
+        { view: false, create: false, edit: false, delete: false },
+      ]),
+  ) as MemberPermissions;
+  for (const [section, raw] of Object.entries(permissions as Record<string, unknown>)) {
+    if (!allSectionIds.includes(section as SectionId) || !raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return fail(res, 400, "قائمة الصلاحيات تحتوي على بيانات غير صالحة.");
+    }
+    const sectionRules = raw as Record<string, unknown>;
+    for (const [action, allowed] of Object.entries(sectionRules)) {
+      if (!permissionActions.includes(action as (typeof permissionActions)[number]) || typeof allowed !== "boolean") {
+        return fail(res, 400, "إحدى صلاحيات القسم غير صالحة.");
+      }
+    }
+    if (section === "users" || section === "audit") {
+      if (Object.values(sectionRules).some(Boolean)) {
+        return fail(res, 400, "إدارة المستخدمين وسجل التدقيق متاحان للمدير فقط.");
+      }
+      continue;
+    }
+    const rules = Object.fromEntries(
+      permissionActions.map((action) => [action, sectionRules[action] === true]),
+    );
+    if (rules.create || rules.edit || rules.delete) rules.view = true;
+    cleanPermissions[section as SectionId] = rules;
+  }
+  cleanPermissions.dashboard = { view: true, create: false, edit: false, delete: false };
+  const sections = allSectionIds.filter((section) =>
+    section !== "users" && section !== "audit" &&
+    cleanPermissions[section]?.view === true,
+  );
+  if (!sections.includes("dashboard")) sections.push("dashboard");
+  const safeRoleName = roleName.trim();
   try {
     const result = await pool.query(
-      `UPDATE members SET active = $1, allowed_sections = $2, role = $3, updated_at = NOW()
-       WHERE clerk_user_id = $4
-       RETURNING clerk_user_id, email, name, role, active, allowed_sections, created_at`,
-      [active, sections, safeRole, targetId],
+      `UPDATE members SET active = $1, allowed_sections = $2, role_name = $3,
+        permissions = $4::jsonb, updated_at = NOW()
+       WHERE clerk_user_id = $5
+       RETURNING clerk_user_id, email, name, role, role_name, active, allowed_sections, permissions, created_at`,
+      [active, sections, safeRoleName, JSON.stringify(cleanPermissions), targetId],
     );
     if (!result.rowCount) return fail(res, 404, "العضو غير موجود.");
     await writeAudit(req.member!, "تعديل صلاحيات عضو", `تحديث الوصول للحساب ${result.rows[0].email}.`);

@@ -13,6 +13,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
+import { hasPermission } from "../../shared/access";
 
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type InventoryItem = {
@@ -125,8 +126,10 @@ export default function InventorySection() {
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const isAdmin = member?.role === "admin";
-  const canAccess = isAdmin || !!member?.allowed_sections.includes("inventory");
-  const canManage = canAccess && (isAdmin || member?.role === "finance");
+  const canAccess = hasPermission(member, "inventory", "view");
+  const canCreate = hasPermission(member, "inventory", "create");
+  const canEdit = hasPermission(member, "inventory", "edit");
+  const canManage = canCreate || canEdit;
   const queryString = useMemo(() => {
     const params = new URLSearchParams({ page: String(page) });
     for (const [key, value] of Object.entries(appliedFilters)) {
@@ -392,7 +395,7 @@ export default function InventorySection() {
             <Text style={styles.title}>المشتريات والمخزون 📦</Text>
             <Text style={styles.subtitle}>سجّل الشراء، تابع الكميات، واحسب الربح المتوقع والمحقق من المبيعات.</Text>
           </View>
-          {canManage ? (
+          {canCreate ? (
             <Pressable onPress={purchaseOpen ? () => { setPurchaseOpen(false); setEditingItem(null); setPickedDocs([]); } : startNewPurchase} style={styles.primaryButton}>
               {purchaseOpen ? <X size={17} color={colors.navy} /> : <Plus size={18} color={colors.navy} />}
               <Text style={styles.primaryButtonText}>{purchaseOpen ? "إغلاق النموذج" : "تسجيل عملية شراء"}</Text>
@@ -413,7 +416,7 @@ export default function InventorySection() {
           </View>
         ) : null}
 
-        {purchaseOpen && canManage ? (
+        {purchaseOpen && (editingItem ? canEdit : canCreate) ? (
           <View style={styles.card}>
             <Text style={styles.cardHeading}>{editingItem ? "تعديل بيانات الشراء" : "تسجيل شراء جديد"}</Text>
             <View style={styles.formGrid}>
@@ -540,15 +543,15 @@ export default function InventorySection() {
               <Metric label="الربح المتوقع" value={item.expected_profit == null ? "غير محدد" : profitLabel(item.expected_profit)} accent="#15803D" />
               <Metric label="الربح المحقق" value={profitLabel(item.realized_profit)} accent="#B45309" />
             </View>
-            <RecordNotes entity="inventory" recordId={item.id} initialNotes={item.notes} editable={canManage} />
+            <RecordNotes entity="inventory" recordId={item.id} initialNotes={item.notes} editable={canEdit} />
             <View style={styles.actionsRow}>
-              {canManage && item.remaining_quantity > 0 ? (
+              {canCreate && item.remaining_quantity > 0 ? (
                 <>
                   <ActionButton label="تسجيل بيع" onPress={() => startMovement(item, "sale")} />
                   <ActionButton label="تسجيل استعمال" onPress={() => startMovement(item, "use")} />
                 </>
               ) : null}
-              {canManage ? <ActionButton label="تعديل الشراء" onPress={() => startEdit(item)} icon={<Pencil size={14} color={colors.blue} />} /> : null}
+              {canEdit ? <ActionButton label="تعديل الشراء" onPress={() => startEdit(item)} icon={<Pencil size={14} color={colors.blue} />} /> : null}
               <ActionButton label={historyItemId === item.id ? "إخفاء الحركات" : "سجل الحركات"} onPress={() => void toggleHistory(item)} />
             </View>
             {item.attachments.length ? (
@@ -596,7 +599,7 @@ export default function InventorySection() {
                       <Text style={styles.itemMeta}>
                         {dateLabel(movement.movement_date)} · {movement.counterparty || "—"} · {movement.recorded_by_name}
                       </Text>
-                      <RecordNotes entity="inventoryMovement" recordId={movement.id} initialNotes={movement.notes} editable={canManage} />
+                      <RecordNotes entity="inventoryMovement" recordId={movement.id} initialNotes={movement.notes} editable={canEdit} />
                     </View>
                     {movement.movement_type === "sale" ? (
                       <Text style={styles.realizedValue}>{profitLabel((amount(movement.unit_price) - amount(item.buy_price)) * movement.quantity)}</Text>

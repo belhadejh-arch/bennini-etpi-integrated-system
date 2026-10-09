@@ -14,6 +14,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
+import { hasPermission } from "../../shared/access";
 
 type Status = "pending" | "paid" | "cancelled";
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
@@ -115,8 +116,10 @@ export default function ChequesSection() {
   const [pickedDocs, setPickedDocs] = useState<PickedDocument[]>([]);
 
   const isAdmin = member?.role === "admin";
-  const canAccess = isAdmin || !!member?.allowed_sections.includes("cheques");
-  const canManage = canAccess && (isAdmin || member?.role === "finance");
+  const canAccess = hasPermission(member, "cheques", "view");
+  const canCreate = hasPermission(member, "cheques", "create");
+  const canEdit = hasPermission(member, "cheques", "edit");
+  const canManage = canCreate || canEdit;
   const queryString = useMemo(() => {
     const params = new URLSearchParams({ page: String(page) });
     if (search) params.set("q", search);
@@ -455,14 +458,14 @@ export default function ChequesSection() {
           </View>
         ) : null}
 
-        {canManage ? (
+        {canCreate ? (
           <Pressable onPress={formOpen ? closeForm : beginCreate} style={styles.addButton} disabled={saving}>
             {formOpen ? <X size={17} color={colors.navy} /> : <Plus size={18} color={colors.navy} />}
             <Text style={styles.addButtonText}>{formOpen ? "إغلاق النموذج" : "تسجيل شيك جديد"}</Text>
           </Pressable>
         ) : null}
 
-        {formOpen && canManage ? (
+        {formOpen && (editingCheque ? canEdit : canCreate) ? (
           <View style={styles.formCard}>
             <View style={styles.formHeading}>
               <Text style={styles.cardHeading}>{editingCheque ? `تعديل الشيك ${editingCheque.cheque_number}` : "بيانات الشيك"}</Text>
@@ -594,7 +597,7 @@ export default function ChequesSection() {
                     </View>
                   ) : null}
                 </View>
-                <RecordNotes entity="cheque" recordId={item.id} initialNotes={item.notes} editable={canManage} />
+                <RecordNotes entity="cheque" recordId={item.id} initialNotes={item.notes} editable={canEdit} />
                 {item.attachments.length ? (
                   <View style={styles.attachmentBlock}>
                     <Text style={styles.fieldLabel}>صورة الشيك والفاتورة / الوثائق</Text>
@@ -610,19 +613,19 @@ export default function ChequesSection() {
                 ) : (
                   <Text style={styles.noAttachment}>لا توجد صورة أو وثيقة مرفقة.</Text>
                 )}
-                {canManage ? (
+                {canManage || hasPermission(member, "cheques", "delete") ? (
                   <View style={styles.actionsRow}>
-                    <ActionButton label="تعديل البيانات" onPress={() => beginEdit(item)} icon={<Pencil size={14} color={colors.blue} />} />
-                    {item.status === "pending" ? (
+                    {canEdit ? <ActionButton label="تعديل البيانات" onPress={() => beginEdit(item)} icon={<Pencil size={14} color={colors.blue} />} /> : null}
+                    {canEdit && item.status === "pending" ? (
                       <>
                         <ActionButton label="تعليم كمدفوع" onPress={() => void updateStatus(item, "paid")} icon={<Check size={14} color={colors.green} />} />
                         <ActionButton label="إلغاء الشيك" onPress={() => void updateStatus(item, "cancelled")} icon={<X size={14} color={colors.red} />} />
                       </>
                     ) : null}
-                    {item.attachments.length < 5 ? (
+                    {canManage && item.attachments.length < 5 ? (
                       <ActionButton label="إضافة مرفق" onPress={() => void addAttachments(item)} icon={<FilePlus2 size={14} color={colors.blue} />} />
                     ) : null}
-                    {isAdmin ? <ActionButton label="حذف" onPress={() => deleteCheque(item)} icon={<Trash2 size={14} color={colors.red} />} danger /> : null}
+                    {hasPermission(member, "cheques", "delete") ? <ActionButton label="حذف" onPress={() => deleteCheque(item)} icon={<Trash2 size={14} color={colors.red} />} danger /> : null}
                   </View>
                 ) : null}
               </View>

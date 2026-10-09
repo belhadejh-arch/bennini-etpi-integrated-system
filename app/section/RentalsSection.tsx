@@ -14,6 +14,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
+import { hasPermission } from "../../shared/access";
 
 type Status = "active" | "completed" | "cancelled";
 type RatePeriod = "daily" | "monthly";
@@ -121,8 +122,10 @@ export default function RentalsSection() {
   const [statusFilter, setStatusFilter] = useState<Status | "">("");
 
   const isAdmin = member?.role === "admin";
-  const canAccess = isAdmin || !!member?.allowed_sections.includes("rentals");
-  const canManage = canAccess && (isAdmin || member?.role === "finance");
+  const canAccess = hasPermission(member, "rentals", "view");
+  const canCreate = hasPermission(member, "rentals", "create");
+  const canEdit = hasPermission(member, "rentals", "edit");
+  const canManage = canCreate || canEdit;
   const duration = durationFor(draft.startDate, draft.endDate, draft.ratePeriod);
   const totalAmount = Math.round(duration * amount(draft.rentalRate) * 100) / 100;
   const remainingAmount = Math.max(0, totalAmount - amount(draft.paidAmount));
@@ -430,14 +433,14 @@ export default function RentalsSection() {
           </View>
         ) : null}
 
-        {canManage ? (
+        {canCreate ? (
           <Pressable onPress={formOpen ? closeForm : startCreate} disabled={saving} style={styles.addButton}>
             {formOpen ? <X size={17} color={colors.navy} /> : <Plus size={18} color={colors.navy} />}
             <Text style={styles.addButtonText}>{formOpen ? "إغلاق النموذج" : "تسجيل عملية كراء"}</Text>
           </Pressable>
         ) : null}
 
-        {formOpen && canManage ? (
+        {formOpen && (editing ? canEdit : canCreate) ? (
           <View style={styles.formCard}>
             <View style={styles.formHeading}>
               <Text style={styles.cardHeading}>{editing ? "تعديل عملية الكراء" : "بيانات عملية الكراء"}</Text>
@@ -566,7 +569,7 @@ export default function RentalsSection() {
                     <Detail label="تنبيه النهاية" value={left < 0 ? `انتهى منذ ${Math.abs(left)} يوم` : left === 0 ? "ينتهي اليوم" : `خلال ${left} يوم`} highlight />
                   ) : null}
                 </View>
-                <RecordNotes entity="rental" recordId={rental.id} initialNotes={rental.notes} editable={canManage} />
+                <RecordNotes entity="rental" recordId={rental.id} initialNotes={rental.notes} editable={canEdit} />
                 {rental.attachments.length ? (
                   <View style={styles.attachmentBlock}>
                     <Text style={styles.fieldLabel}>العقد والوثائق</Text>
@@ -580,16 +583,16 @@ export default function RentalsSection() {
                     </View>
                   </View>
                 ) : <Text style={styles.noAttachment}>لا توجد وثائق مرفقة.</Text>}
-                {canManage ? (
+                {canManage || hasPermission(member, "rentals", "delete") ? (
                   <View style={styles.actionsRow}>
-                    <ActionButton label="تعديل البيانات" onPress={() => startEdit(rental)} icon={<Pencil size={14} color={colors.blue} />} />
-                    {rental.status === "active" ? (
+                    {canEdit ? <ActionButton label="تعديل البيانات" onPress={() => startEdit(rental)} icon={<Pencil size={14} color={colors.blue} />} /> : null}
+                    {canEdit && rental.status === "active" ? (
                       <ActionButton label="إنهاء الكراء" onPress={() => void changeStatus(rental, "completed")} icon={<Check size={14} color={colors.green} />} />
                     ) : null}
-                    {rental.attachments.length < 5 ? (
+                    {canManage && rental.attachments.length < 5 ? (
                       <ActionButton label="إضافة مستند" onPress={() => void addAttachments(rental)} icon={<FilePlus2 size={14} color={colors.blue} />} />
                     ) : null}
-                    {isAdmin ? <ActionButton label="حذف العقد" onPress={() => deleteRental(rental)} icon={<Trash2 size={14} color={colors.red} />} danger /> : null}
+                    {hasPermission(member, "rentals", "delete") ? <ActionButton label="حذف العقد" onPress={() => deleteRental(rental)} icon={<Trash2 size={14} color={colors.red} />} danger /> : null}
                   </View>
                 ) : null}
               </View>

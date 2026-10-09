@@ -14,6 +14,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
+import { hasPermission } from "../../shared/access";
 
 type Machinery = {
   id: number;
@@ -78,8 +79,10 @@ export default function MachinerySection() {
   const [pickedDocuments, setPickedDocuments] = useState<DocumentAsset[]>([]);
 
   const isAdmin = member?.role === "admin";
-  const canAccess = isAdmin || !!member?.allowed_sections.includes("machinery");
-  const canManage = canAccess && (isAdmin || member?.role === "finance");
+  const canAccess = hasPermission(member, "machinery", "view");
+  const canCreate = hasPermission(member, "machinery", "create");
+  const canEdit = hasPermission(member, "machinery", "edit");
+  const canManage = canCreate || canEdit;
   const filteredParts = useMemo(
     () => selectedMachineId === null ? parts : parts.filter((part) => part.machinery_id === selectedMachineId),
     [parts, selectedMachineId],
@@ -310,7 +313,7 @@ export default function MachinerySection() {
             <Text style={styles.sectionTitle}>المركبات والآليات</Text>
             <Text style={styles.sectionHint}>اختر آلية لعرض سجل مصاريفها وإصلاحاتها.</Text>
           </View>
-          {canManage ? (
+          {canCreate ? (
             <Pressable onPress={() => { setMachineFormOpen((open) => !open); setError(""); }} style={styles.smallButton}>
               {machineFormOpen ? <X size={15} color={colors.navy} /> : <Plus size={15} color={colors.navy} />}
               <Text style={styles.smallButtonText}>{machineFormOpen ? "إغلاق" : "إضافة آلية"}</Text>
@@ -318,7 +321,7 @@ export default function MachinerySection() {
           ) : null}
         </View>
 
-        {machineFormOpen && canManage ? (
+        {machineFormOpen && canCreate ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>تسجيل مركبة أو آلية</Text>
             <Field label="الرقم التعريفي *" value={machineDraft.code} onChange={(value) => setMachineDraft((draft) => ({ ...draft, code: value }))} placeholder="مثال: TR-001" />
@@ -345,7 +348,7 @@ export default function MachinerySection() {
                     <Text style={styles.machineMeta}>{machine.repair_count} سجل · {formatDzd(numberValue(machine.total_expenses))}</Text>
                   </View>
                 </Pressable>
-                <RecordNotes entity="machinery" recordId={machine.id} initialNotes={machine.notes} editable={canManage} />
+                <RecordNotes entity="machinery" recordId={machine.id} initialNotes={machine.notes} editable={canEdit} />
               </View>
             );
           })}
@@ -361,7 +364,7 @@ export default function MachinerySection() {
               {selectedMachineId === null ? "السجل الكامل للمصاريف والإصلاحات." : `السجل المرتبط بـ ${machinery.find((item) => item.id === selectedMachineId)?.name ?? "الآلية المحددة"}.`}
             </Text>
           </View>
-          {canManage ? (
+          {canCreate ? (
             <Pressable
               onPress={() => {
                 setPartFormOpen((open) => !open);
@@ -380,7 +383,7 @@ export default function MachinerySection() {
           ) : null}
         </View>
 
-        {partFormOpen && canManage ? (
+        {partFormOpen && canCreate ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>بيانات قطعة الغيار والإصلاح</Text>
             <Text style={styles.fieldLabel}>المركبة أو الآلية *</Text>
@@ -445,7 +448,7 @@ export default function MachinerySection() {
               <Text style={styles.costLabel}>تكلفة الشراء والإصلاح</Text>
               <Text style={styles.costValue}>{formatDzd(part.quantity * numberValue(part.buy_price) + numberValue(part.repair_expense))}</Text>
             </View>
-            <RecordNotes entity="machinerySparePart" recordId={part.id} initialNotes={part.notes} editable={canManage} />
+            <RecordNotes entity="machinerySparePart" recordId={part.id} initialNotes={part.notes} editable={canEdit} />
             <Text style={styles.recordedBy}>سجلها: {part.recorded_by_name}</Text>
             {part.attachments?.length ? (
               <View style={styles.attachmentBlock}>

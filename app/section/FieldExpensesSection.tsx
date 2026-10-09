@@ -13,6 +13,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
+import { hasPermission } from "../../shared/access";
 
 type ReviewStatus = "pending" | "reviewed";
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
@@ -84,8 +85,9 @@ export default function FieldExpensesSection() {
   const [statusFilter, setStatusFilter] = useState<ReviewStatus | "all">("all");
 
   const isAdmin = member?.role === "admin";
-  const canAccess = isAdmin || !!member?.allowed_sections.includes("field");
-  const canRecord = canAccess && (isAdmin || member?.role === "field" || member?.role === "supervisor");
+  const canAccess = hasPermission(member, "field", "view");
+  const canRecord = hasPermission(member, "field", "create");
+  const canEdit = hasPermission(member, "field", "edit");
   const visibleItems = useMemo(
     () => statusFilter === "all" ? items : items.filter((item) => item.review_status === statusFilter),
     [items, statusFilter],
@@ -413,7 +415,7 @@ export default function FieldExpensesSection() {
         ) : visibleItems.length ? (
           visibleItems.map((expense) => (
             <ExpenseCard key={expense.id} expense={expense} isAdmin={isAdmin} canRecord={canRecord}
-              canEditNotes={isAdmin || (canRecord && expense.created_by_id === member?.clerk_user_id)}
+              canReview={canEdit} canEditNotes={canEdit && (isAdmin || expense.created_by_id === member?.clerk_user_id)}
               saving={saving} onReview={() => void changeReview(expense, expense.review_status === "pending" ? "reviewed" : "pending")}
               onAddAttachment={() => void addAttachments(expense)} onOpenAttachment={(attachment) => void openAttachment(attachment)} />
           ))
@@ -459,10 +461,11 @@ function FilterChip({ label, selected, onPress }: { label: string; selected: boo
   );
 }
 
-function ExpenseCard({ expense, isAdmin, canRecord, canEditNotes, saving, onReview, onAddAttachment, onOpenAttachment }: {
+function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, saving, onReview, onAddAttachment, onOpenAttachment }: {
   expense: FieldExpense;
   isAdmin: boolean;
   canRecord: boolean;
+  canReview: boolean;
   canEditNotes: boolean;
   saving: boolean;
   onReview: () => void;
@@ -514,9 +517,9 @@ function ExpenseCard({ expense, isAdmin, canRecord, canEditNotes, saving, onRevi
         </View>
       ) : <Text style={styles.noAttachments}>لا توجد فاتورة أو وصل مرفق.</Text>}
 
-      {(isAdmin || canRecord && expense.created_by_id) ? (
+      {(canReview || canRecord) ? (
         <View style={styles.actions}>
-          {isAdmin ? (
+          {canReview ? (
             <Pressable onPress={onReview} disabled={saving} style={[styles.reviewAction, expense.review_status === "reviewed" && styles.returnAction]}>
               {expense.review_status === "pending" ? <Check size={15} color={colors.green} /> : <AlertTriangle size={15} color={colors.amber} />}
               <Text style={[styles.reviewActionText, expense.review_status === "reviewed" && { color: colors.amber }]}>

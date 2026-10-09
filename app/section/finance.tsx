@@ -10,6 +10,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
+import { hasPermission } from "../../shared/access";
 
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type Transaction = {
@@ -74,8 +75,10 @@ export default function FinanceSection() {
   });
 
   const isAdmin = member?.role === "admin";
-  const canAccess = isAdmin || !!member?.allowed_sections.includes("finance");
-  const canManage = canAccess && (isAdmin || member?.role === "finance");
+  const canAccess = hasPermission(member, "finance", "view");
+  const canCreate = hasPermission(member, "finance", "create");
+  const canEdit = hasPermission(member, "finance", "edit");
+  const canManage = canCreate || canEdit;
   const queryString = useMemo(() => {
     const params = new URLSearchParams({ page: String(page) });
     if (appliedFilters.from) params.set("from", appliedFilters.from);
@@ -302,7 +305,7 @@ export default function FinanceSection() {
             <Text style={styles.title}>التسيير المالي</Text>
             <Text style={styles.subtitle}>تسجيل ومتابعة الأموال الداخلة والخارجة من الشركة.</Text>
           </View>
-          {canManage ? (
+          {canCreate ? (
             <Pressable
               onPress={() => {
                 if (formOpen) { setFormOpen(false); clearForm(); }
@@ -324,7 +327,7 @@ export default function FinanceSection() {
           <Text style={styles.summaryHint}>يُحتسب من العمليات النقدية فقط؛ الشيكات والتحويلات لا تغيّر رصيد الصندوق.</Text>
         </View>
 
-        {formOpen && canManage ? (
+        {formOpen && (editingId ? canEdit : canCreate) ? (
           <View style={styles.formCard}>
             <View style={styles.formHeading}>
               <Text style={styles.formTitle}>{editingId ? `تعديل العملية رقم ${editingId}` : "تسجيل عملية مالية جديدة"}</Text>
@@ -457,15 +460,15 @@ export default function FinanceSection() {
                       <TableCell text={formatDzd(Number(item.cash_balance_after))} width={155} strong />
                       <View style={[styles.tableCell, styles.actionsCell, { width: 250 }]}>
                         <ActionButton label="عرض" onPress={() => setExpandedId(expandedId === item.id ? null : item.id)} icon={<Eye size={14} color={colors.blue} />} />
-                        {canManage ? <ActionButton label="تعديل" onPress={() => beginEdit(item)} icon={<Pencil size={14} color={colors.blue} />} /> : null}
+                        {canEdit ? <ActionButton label="تعديل" onPress={() => beginEdit(item)} icon={<Pencil size={14} color={colors.blue} />} /> : null}
                         {canManage ? <ActionButton label="مرفق" onPress={() => void chooseDocuments(item.id)} icon={<FilePlus2 size={14} color={colors.blue} />} /> : null}
-                        {isAdmin ? <ActionButton label="حذف" danger onPress={() => deleteTransaction(item.id)} icon={<Trash2 size={14} color={colors.red} />} /> : null}
+                        {hasPermission(member, "finance", "delete") ? <ActionButton label="حذف" danger onPress={() => deleteTransaction(item.id)} icon={<Trash2 size={14} color={colors.red} />} /> : null}
                       </View>
                     </View>
                     {expandedId === item.id ? (
                       <View style={styles.detailPanel}>
                         <Text style={styles.detailTitle}>تفاصيل العملية</Text>
-                        <RecordNotes entity="transaction" recordId={item.id} initialNotes={item.notes} editable={canManage} />
+                        <RecordNotes entity="transaction" recordId={item.id} initialNotes={item.notes} editable={canEdit} />
                         <Text style={styles.detailText}>المعرف: {item.id} · سجلها: {item.recorded_by_name}</Text>
                         <View style={styles.attachmentList}>
                           {item.attachments?.length ? item.attachments.map((attachment) => (

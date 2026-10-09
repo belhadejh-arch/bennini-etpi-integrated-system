@@ -1,5 +1,6 @@
 import Constants from "expo-constants";
 import { Platform } from "react-native";
+import type { MemberPermissions } from "../shared/access";
 
 const configuredApiUrl = Constants.expoConfig?.extra?.apiUrl as string | undefined;
 
@@ -40,8 +41,10 @@ export type Member = {
   email: string;
   name: string;
   role: string;
+  role_name?: string;
   active: boolean;
   allowed_sections: string[];
+  permissions?: MemberPermissions;
   notes?: string;
 };
 

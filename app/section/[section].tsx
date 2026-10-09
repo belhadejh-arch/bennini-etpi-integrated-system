@@ -21,6 +21,7 @@ import MachinerySection from "./MachinerySection";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 import { sections, type SectionId } from "../../shared/sections";
+import { hasPermission } from "../../shared/access";
 
 type SectionResult = { items: Array<Record<string, unknown>> };
 type ApiError = Error & { status?: number; body?: { pending?: boolean } };
@@ -68,11 +69,10 @@ export default function SectionScreen() {
     else if (section !== "inventory" && section !== "cheques" && section !== "rentals" && section !== "field") void refresh();
   }, [isLoaded, isSignedIn, refresh, router, section]);
 
-  const isAdmin = member?.role === "admin";
-  const canSee = isAdmin || !!member?.allowed_sections.includes(section);
+  const canSee = hasPermission(member, section, "view");
   const canAdd = useMemo(
-    () => canSee && section === "finance" && (isAdmin || member?.role === "finance"),
-    [canSee, isAdmin, member, section],
+    () => canSee && section === "finance" && hasPermission(member, "finance", "create"),
+    [canSee, member, section],
   );
 
   const save = async () => {
@@ -166,7 +166,14 @@ export default function SectionScreen() {
             <Text style={styles.empty}>لا توجد بيانات مسجلة في هذا القسم بعد.</Text>
             {canAdd ? <Text style={styles.emptyHint}>استخدم زر الإضافة لتسجيل أول عملية.</Text> : null}
           </View>
-        ) : items.map((item) => <DataCard key={String(item.id)} item={item} section={section} editable={isAdmin} />)}
+        ) : items.map((item) => (
+          <DataCard
+            key={String(item.id)}
+            item={item}
+            section={section}
+            editable={hasPermission(member, section, "edit")}
+          />
+        ))}
       </ScrollView>
       <View style={styles.footer}>
         <Text style={styles.footerText}>الحساب: {member?.name || user?.firstName || ""}</Text>
