@@ -1,4 +1,4 @@
-import { useAuth, useUser } from "@clerk/expo";
+import { useAuth, useUser } from "../lib/auth";
 import { useRouter } from "expo-router";
 import { ArrowRight, LogOut, ShieldCheck, UserRound } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -64,7 +64,7 @@ export default function SettingsScreen() {
                 <Text style={styles.cardTitle}>الحساب</Text>
               </View>
               <InfoRow label="الاسم" value={member.name || user?.fullName || "—"} />
-              <InfoRow label="البريد الإلكتروني" value={member.email || user?.primaryEmailAddress?.emailAddress || "—"} />
+               <InfoRow label="طريقة الدخول" value="رقم تسلسلي من 6 أرقام" />
               <InfoRow label="الصلاحية" value={member.role_name || "مدير النظام"} last />
             </View>
             <View style={styles.card}>

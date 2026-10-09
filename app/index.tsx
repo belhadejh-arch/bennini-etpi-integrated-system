@@ -1,4 +1,4 @@
-import { useAuth, useUser } from "@clerk/expo";
+import { useAuth, useUser } from "../lib/auth";
 import { Redirect, useRouter } from "expo-router";
 import {
   ArrowDownLeft,
@@ -126,7 +126,7 @@ export default function HomeScreen() {
           <View style={styles.pendingIcon}><Clock3 size={25} color={colors.amber} /></View>
           <Text style={[styles.title, { marginTop: 18 }]}>الحساب بانتظار التفعيل</Text>
           <Text style={[styles.muted, { textAlign: "center", lineHeight: 22, maxWidth: 330 }]}>
-            تم تأكيد البريد {user?.primaryEmailAddress?.emailAddress ? `(${user.primaryEmailAddress.emailAddress})` : ""}. سيحدد المدير الأقسام المتاحة لحسابك.
+            سيحدد المدير الأقسام المتاحة لحسابك. تواصل معه إذا كنت تحتاج إلى تفعيل الحساب.
           </Text>
           <Pressable onPress={() => void signOut()} style={styles.outlineButton}>
             <LogOut size={16} color={colors.blue} />

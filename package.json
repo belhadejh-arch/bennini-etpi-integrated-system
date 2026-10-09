@@ -11,9 +11,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@clerk/expo": "^4.10.0",
-    "@clerk/express": "^2.1.77",
-    "@clerk/shared": "^4.39.1",
     "@expo/metro-runtime": "~6.1.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.25",
@@ -33,7 +30,6 @@
     "expo-sharing": "~14.0.7",
     "expo-status-bar": "~3.0.0",
     "express": "^4.22.3",
-    "http-proxy-middleware": "^4.2.0",
     "lucide-react-native": "^1.53.0",
     "multer": "^2.4.0",
     "pg": "^8.23.1",

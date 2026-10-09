@@ -1,6 +1,6 @@
-import { useAuth, useUser } from "@clerk/expo";
+import { useAuth, useUser } from "../lib/auth";
 import { useRouter } from "expo-router";
-import { ArrowRight, Check, Search, ShieldCheck, Users, X } from "lucide-react-native";
+import { ArrowRight, Check, Plus, Search, ShieldCheck, Users, X } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "./components/AppHeader";
@@ -24,6 +24,12 @@ export default function MembersScreen() {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
   const [roleNameDrafts, setRoleNameDrafts] = useState<Record<string, string>>({});
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newRole, setNewRole] = useState("viewer");
+  const [newRoleName, setNewRoleName] = useState("");
+  const [createdSerial, setCreatedSerial] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
@@ -79,6 +85,28 @@ export default function MembersScreen() {
     }
   };
 
+  const createMember = async () => {
+    setCreating(true);
+    setError("");
+    setCreatedSerial("");
+    try {
+      const result = await apiRequest<{ member: TeamMember; serial: string }>("/members", () => getToken(), {
+        method: "POST",
+        body: JSON.stringify({ name: newName, role: newRole, roleName: newRoleName }),
+      });
+      setCreatedSerial(result.serial);
+      setNewName("");
+      setNewRoleName("");
+      setNewRole("viewer");
+      setCreateOpen(false);
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "تعذر إنشاء حساب العضو.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const admin = member?.role === "admin";
   const canViewUsers = hasPermission(member, "users", "view");
   const selfId = user?.id;
@@ -114,16 +142,72 @@ export default function MembersScreen() {
             <View style={styles.summaryIcon}><Users size={21} color={colors.blue} /></View>
             <View style={{ flex: 1 }}>
               <Text style={styles.summaryTitle}>إدارة المستخدمين والصلاحيات</Text>
-              <Text style={styles.summarySub}>فعّل الحساب، اكتب المسمى الوظيفي بحرية، وحدد ما يستطيع المستخدم فعله في كل قسم.</Text>
+              <Text style={styles.summarySub}>أنشئ حساب العضو ورقم دخوله، ثم حدّد الأقسام والصلاحيات المسموح بها.</Text>
             </View>
           </View>
+          {admin ? (
+            <Pressable onPress={() => { setCreatedSerial(""); setCreateOpen((open) => !open); }} style={[styles.action, { flexDirection: "row", alignSelf: "flex-start", alignItems: "center", gap: 8 }]}>
+              <Plus size={16} color="#FFFFFF" />
+              <Text style={styles.actionText}>{createOpen ? "إغلاق النموذج" : "إضافة عضو"}</Text>
+            </Pressable>
+          ) : null}
+          {createdSerial ? (
+            <View style={styles.serialNotice}>
+              <Text style={styles.serialTitle}>تم إنشاء الحساب. احفظ رقم الدخول الآن؛ لن يظهر مرة أخرى.</Text>
+              <Text selectable style={styles.serialCode}>{createdSerial}</Text>
+              <Text style={styles.permissionLegend}>أرسله للعضو بطريقة آمنة. يمكنه استخدام الرقم لتسجيل الدخول.</Text>
+              <Pressable onPress={() => setCreatedSerial("")} style={{ alignSelf: "flex-start", paddingVertical: 8 }}>
+                <Text style={{ color: colors.blue, fontWeight: "700" }}>إخفاء الرقم</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {createOpen && admin ? (
+            <View style={styles.card}>
+              <Text style={styles.sectionLabel}>إنشاء حساب عضو</Text>
+              <TextInput
+                value={newName}
+                onChangeText={setNewName}
+                placeholder="اسم العضو"
+                placeholderTextColor={colors.muted}
+                style={styles.roleInput}
+                textAlign="right"
+                maxLength={100}
+              />
+              <Text style={[styles.sectionLabel, { marginTop: 14 }]}>نوع الحساب</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 8 }}>
+                {[
+                  { value: "viewer", label: "عضو" },
+                  { value: "finance", label: "الإدارة المالية" },
+                  { value: "field", label: "رئيس أشغال" },
+                  { value: "supervisor", label: "مشرف" },
+                ].map((option) => (
+                  <Pressable key={option.value} onPress={() => setNewRole(option.value)} style={[styles.permissionChip, newRole === option.value && styles.chipActive]}>
+                    <Text style={[styles.chipText, newRole === option.value && styles.chipTextActive]}>{option.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={[styles.sectionLabel, { marginTop: 14 }]}>المسمى الوظيفي (اختياري)</Text>
+              <TextInput
+                value={newRoleName}
+                onChangeText={setNewRoleName}
+                placeholder="مثال: مسؤول المشتريات"
+                placeholderTextColor={colors.muted}
+                style={styles.roleInput}
+                textAlign="right"
+                maxLength={80}
+              />
+              <Pressable onPress={() => void createMember()} disabled={creating || newName.trim().length < 2} style={[styles.action, { alignSelf: "flex-start", marginTop: 14, opacity: creating || newName.trim().length < 2 ? 0.6 : 1 }]}>
+                {creating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.actionText}>إنشاء رقم الدخول</Text>}
+              </Pressable>
+            </View>
+          ) : null}
           {error ? <View style={styles.error}><Text style={{ color: colors.red, textAlign: "right" }}>{error}</Text></View> : null}
           <View style={styles.searchBox}>
             <Search size={17} color={colors.muted} />
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="ابحث بالاسم أو البريد أو المسمى الوظيفي"
+              placeholder="ابحث بالاسم أو المسمى الوظيفي"
               placeholderTextColor={colors.muted}
               style={styles.searchInput}
               accessibilityLabel="البحث عن عضو"
@@ -155,7 +239,7 @@ export default function MembersScreen() {
                 <View style={styles.memberTop}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.name}>{item.name || "عضو جديد"}</Text>
-                    <Text style={styles.email}>{item.email}</Text>
+                    <Text style={styles.email}>{item.has_serial ? "رقم دخول مخصص" : "لا يوجد رقم دخول"}</Text>
                     <Text style={styles.role}>{item.role_name || roleLabel(item.role)}{item.role === "pending" ? " · بانتظار التفعيل" : ""}</Text>
                     {admin ? <RecordNotes entity="member" recordId={item.clerk_user_id} initialNotes={item.notes} editable /> : null}
                   </View>
@@ -267,7 +351,7 @@ export default function MembersScreen() {
               </View>
             );
           })}
-          <Text style={styles.footerText}>الحسابات الجديدة تنشأ عبر صفحة «إنشاء حساب»، ثم تظهر هنا بانتظار تفعيل المدير. وتُفرض الصلاحيات أيضاً على طلبات الخادم.</Text>
+          <Text style={styles.footerText}>تنشأ الأرقام التسلسلية تلقائياً عند إضافة العضو، وتُفرض الصلاحيات أيضاً على طلبات الخادم.</Text>
           <Pressable onPress={() => void signOut()} style={styles.logout}><Text style={styles.logoutText}>تسجيل الخروج</Text></Pressable>
         </ScrollView>
       )}
@@ -313,6 +397,9 @@ const styles = {
   summaryIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#EAF1FB", alignItems: "center" as const, justifyContent: "center" as const },
   summaryTitle: { color: colors.navy, fontWeight: "800" as const, textAlign: "right" as const, fontSize: 14 },
   summarySub: { color: colors.muted, textAlign: "right" as const, fontSize: 11, marginTop: 4 },
+  serialNotice: { backgroundColor: "#FFF9E8", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#F0D78C", gap: 5 },
+  serialTitle: { color: colors.navy, fontWeight: "800" as const, textAlign: "right" as const, fontSize: 12 },
+  serialCode: { color: colors.navy, fontSize: 29, fontWeight: "900" as const, letterSpacing: 9, textAlign: "center" as const, paddingVertical: 8 },
   searchBox: { minHeight: 46, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFFFFF", flexDirection: "row" as const, alignItems: "center" as const, gap: 9 },
   searchInput: { flex: 1, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, fontSize: 12 },
   empty: { minHeight: 150, alignItems: "center" as const, justifyContent: "center" as const, gap: 8, padding: 20, backgroundColor: "#FFFFFF", borderRadius: 15, borderWidth: 1, borderColor: colors.border },

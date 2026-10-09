@@ -1,6 +1,8 @@
 CREATE TABLE IF NOT EXISTS members (
   clerk_user_id TEXT PRIMARY KEY,
-  email TEXT NOT NULL UNIQUE,
+  email TEXT UNIQUE,
+  serial_lookup TEXT UNIQUE,
+  serial_hash TEXT,
   name TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'pending',
   active BOOLEAN NOT NULL DEFAULT FALSE,
@@ -10,6 +12,9 @@ CREATE TABLE IF NOT EXISTS members (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE members ALTER COLUMN email DROP NOT NULL;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS serial_lookup TEXT UNIQUE;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS serial_hash TEXT;
 ALTER TABLE members ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
 ALTER TABLE members ADD COLUMN IF NOT EXISTS role_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE members ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{}'::jsonb;
@@ -326,6 +331,13 @@ CREATE TABLE IF NOT EXISTS audit_log_notes (
   updated_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
   updated_by_name TEXT NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS login_attempts (
+  bucket_key TEXT PRIMARY KEY,
+  failures INTEGER NOT NULL DEFAULT 0,
+  window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_until TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS transactions_date_idx ON transactions (transaction_date DESC);

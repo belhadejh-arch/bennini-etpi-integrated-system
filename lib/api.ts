@@ -26,8 +26,10 @@ export async function apiRequest<T>(
       Accept: "application/json",
       ...(options.body && !isFormData ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(Platform.OS !== "web" ? { "X-App-Client": "native" } : {}),
       ...options.headers,
     },
+    credentials: "include",
   });
   const isJson = response.headers.get("content-type")?.includes("application/json");
   const body = (isJson ? await response.json().catch(() => ({})) : {}) as T & { error?: string };
@@ -45,6 +47,7 @@ export type Member = {
   email: string;
   name: string;
   role: string;
+  has_serial?: boolean;
   role_name?: string;
   active: boolean;
   allowed_sections: string[];

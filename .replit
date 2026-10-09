@@ -7,9 +7,6 @@ expertMode = true
 
 [userenv]
 
-[userenv.shared]
-INITIAL_ADMIN_EMAIL = "admin@benninietpi.com"
-
 [workflows]
 runButton = "Project"
 
@@ -21,6 +18,7 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "Start application"
+waitForPort = 5000
 
 [[workflows.workflow]]
 name = "Start application"

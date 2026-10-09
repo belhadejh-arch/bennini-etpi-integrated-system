@@ -1,4 +1,4 @@
-import { useAuth } from "@clerk/expo";
+import { useAuth } from "../lib/auth";
 import { useRouter } from "expo-router";
 import {
   AlertTriangle,

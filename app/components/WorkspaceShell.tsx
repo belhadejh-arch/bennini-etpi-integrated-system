@@ -1,4 +1,4 @@
-import { useAuth, useUser } from "@clerk/expo";
+import { useAuth, useUser } from "../../lib/auth";
 import { useGlobalSearchParams, usePathname, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform, View, useWindowDimensions } from "react-native";
@@ -70,7 +70,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
       : null,
     [compact, visibleMember],
   );
-  const isAuthRoute = pathname.includes("/sign-in") || pathname.includes("/sign-up");
+  const isAuthRoute = pathname.includes("/sign-in") || pathname.includes("/setup");
   const canShowSidebar = !!visibleMember && !isAuthRoute;
 
   return (

@@ -1,4 +1,4 @@
-import { useAuth, useUser } from "@clerk/expo";
+import { useAuth, useUser } from "../../lib/auth";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowRight, Plus, RefreshCw } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";

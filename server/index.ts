@@ -1,10 +1,10 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createHmac, randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual, randomUUID } from "node:crypto";
+import { promisify } from "node:util";
 import multer from "multer";
-import { clerkClient, clerkMiddleware, getAuth } from "@clerk/express";
 import cors from "cors";
-import { publishableKeyFromHost } from "@clerk/shared/keys";
 import pg from "pg";
 import { allSectionIds, type SectionId } from "../shared/sections";
 import {
@@ -15,36 +15,27 @@ import {
   type MemberPermissions,
   type PermissionAction,
 } from "../shared/access";
-import {
-  CLERK_PROXY_PATH,
-  clerkProxyMiddleware,
-  getClerkProxyHost,
-} from "./middlewares/clerkProxyMiddleware";
 
 const { Pool } = pg;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const databaseUrl = process.env.NEON_DATABASE_URL;
+if (!databaseUrl) throw new Error("NEON_DATABASE_URL is required.");
+const pool = new Pool({ connectionString: databaseUrl, options: "-c search_path=bennini,public" });
 const app = express();
 const port = Number(process.env.PORT ?? 5000);
-const bootstrapEmail = process.env.INITIAL_ADMIN_EMAIL?.trim().toLowerCase();
+const sessionSecret = process.env.SESSION_SECRET;
+if (!sessionSecret) throw new Error("SESSION_SECRET is required.");
+const bootstrapToken = process.env.ADMIN_BOOTSTRAP_TOKEN;
+const scrypt = promisify(scryptCallback);
 
 app.disable("x-powered-by");
-app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+app.set("trust proxy", 1);
 app.use(cors({ credentials: true, origin: true }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
-app.use(
-  "/api",
-  clerkMiddleware((req) => ({
-    publishableKey: publishableKeyFromHost(
-      getClerkProxyHost(req) ?? "",
-      process.env.CLERK_PUBLISHABLE_KEY,
-    ),
-  })),
-);
 
 type Member = {
   clerk_user_id: string;
-  email: string;
+  email: string | null;
   name: string;
   role: string;
   active: boolean;
@@ -62,6 +53,99 @@ const adminSections = [...allSectionIds];
 let memberSchemaPromise: Promise<void> | null = null;
 let auditLogSchemaPromise: Promise<void> | null = null;
 let notificationSchemaPromise: Promise<void> | null = null;
+
+function serialLookup(serial: string) {
+  return createHmac("sha256", sessionSecret!).update(`serial:${serial}`).digest("hex");
+}
+
+async function hashSerial(serial: string) {
+  const salt = randomBytes(16);
+  const derived = await scrypt(serial, salt, 64) as Buffer;
+  return `${salt.toString("hex")}:${derived.toString("hex")}`;
+}
+
+async function verifySerial(serial: string, encoded: string) {
+  const [saltHex, hashHex] = encoded.split(":");
+  if (!saltHex || !hashHex) return false;
+  const expected = Buffer.from(hashHex, "hex");
+  const actual = await scrypt(serial, Buffer.from(saltHex, "hex"), expected.length) as Buffer;
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function issueSession(memberId: string) {
+  const expiresAt = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7;
+  const payload = Buffer.from(JSON.stringify({ memberId, expiresAt })).toString("base64url");
+  const signature = createHmac("sha256", sessionSecret!).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function sessionMemberId(req: Request) {
+  const bearer = req.header("authorization")?.match(/^Bearer ([\w.-]+)$/)?.[1];
+  const cookies = req.header("cookie") ?? "";
+  const sessionCookie = cookies.split(";").map((part) => part.trim()).find((part) => part.startsWith("bennini_session="));
+  const token = bearer ?? sessionCookie?.slice("bennini_session=".length);
+  if (!token) return null;
+  const [payload, suppliedSignature] = token.split(".");
+  if (!payload || !suppliedSignature) return null;
+  const expected = createHmac("sha256", sessionSecret!).update(payload).digest();
+  let supplied: Buffer;
+  try {
+    supplied = Buffer.from(suppliedSignature, "base64url");
+  } catch {
+    return null;
+  }
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { memberId?: unknown; expiresAt?: unknown };
+    if (typeof parsed.memberId !== "string" || typeof parsed.expiresAt !== "number" || parsed.expiresAt <= Date.now() / 1000) return null;
+    return parsed.memberId;
+  } catch {
+    return null;
+  }
+}
+
+function getClientIp(req: Request) {
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
+function loginBucket(value: string) {
+  return createHmac("sha256", sessionSecret!).update(`login:${value}`).digest("hex");
+}
+
+async function isLoginLocked(keys: string[]) {
+  const result = await pool.query(
+    "SELECT 1 FROM login_attempts WHERE bucket_key = ANY($1::text[]) AND locked_until > NOW() LIMIT 1",
+    [keys],
+  );
+  return result.rowCount !== 0;
+}
+
+async function recordLoginFailure(keys: string[]) {
+  await pool.query(
+    `INSERT INTO login_attempts (bucket_key, failures, window_started_at, locked_until)
+     SELECT bucket_key, 1, NOW(), NULL FROM unnest($1::text[]) AS bucket(bucket_key)
+     ON CONFLICT (bucket_key) DO UPDATE SET
+       failures = CASE WHEN login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
+         THEN 1 ELSE login_attempts.failures + 1 END,
+       window_started_at = CASE WHEN login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
+         THEN NOW() ELSE login_attempts.window_started_at END,
+       locked_until = CASE WHEN login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
+         THEN NULL
+         WHEN login_attempts.failures + 1 >= 5 THEN NOW() + INTERVAL '30 minutes'
+         ELSE login_attempts.locked_until END`,
+    [keys],
+  );
+}
+
+async function clearLoginFailures(key: string) {
+  await pool.query("DELETE FROM login_attempts WHERE bucket_key = $1", [key]);
+}
+
+function constantTimeTextMatch(supplied: string, expected: string) {
+  const left = Buffer.from(supplied);
+  const right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
 
 function ensureNotificationSchema() {
   if (!notificationSchemaPromise) {
@@ -180,55 +264,20 @@ function fail(res: Response, status: number, message: string) {
 
 async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Member | null> {
   await ensureMemberSchema();
-  const auth = getAuth(req);
-  if (!auth.userId) {
+  const memberId = sessionMemberId(req);
+  if (!memberId) {
     fail(res, 401, "يلزم تسجيل الدخول.");
     return null;
   }
 
-  let result = await pool.query<Member>(
+  const result = await pool.query<Member>(
     "SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities FROM members WHERE clerk_user_id = $1",
-    [auth.userId],
+    [memberId],
   );
 
   if (result.rowCount === 0) {
-    const identity = await clerkClient.users.getUser(auth.userId);
-    const primaryEmail = identity.emailAddresses.find(
-      (address) => address.id === identity.primaryEmailAddressId,
-    );
-    const email = primaryEmail?.emailAddress.trim().toLowerCase();
-    const verified = primaryEmail?.verification?.status === "verified";
-
-    if (!email || !verified) {
-      fail(res, 403, "يجب تأكيد البريد الإلكتروني قبل طلب الوصول.");
-      return null;
-    }
-
-    const isFirstAdmin = bootstrapEmail !== undefined && email === bootstrapEmail;
-    const inserted = await pool.query<Member>(
-      `INSERT INTO members (clerk_user_id, email, name, role, active, allowed_sections)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (clerk_user_id) DO UPDATE SET email = EXCLUDED.email
-       RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
-      [
-        auth.userId,
-        email,
-        [identity.firstName, identity.lastName].filter(Boolean).join(" ") || email,
-        isFirstAdmin ? "admin" : "pending",
-        isFirstAdmin,
-        isFirstAdmin ? adminSections : [],
-      ],
-    );
-    result = inserted;
-
-    if (isFirstAdmin) {
-      await writeAudit(
-        inserted.rows[0],
-        "تهيئة المدير الأول",
-        "تم إنشاء حساب المدير الأول بعد التحقق من بريده.",
-        { section: "system", eventType: "setup", entityId: auth.userId },
-      );
-    }
+    fail(res, 401, "يلزم تسجيل الدخول.");
+    return null;
   }
 
   const member = result.rows[0];
@@ -775,6 +824,144 @@ async function recalculateCashBalances(client: pg.PoolClient) {
      WHERE target.id = balances.id`,
   );
 }
+
+app.get("/api/auth/status", async (_req, res) => {
+  try {
+    const result = await pool.query("SELECT EXISTS (SELECT 1 FROM members WHERE role = 'admin' AND serial_hash IS NOT NULL) AS configured");
+    res.json({ administratorConfigured: result.rows[0].configured === true, bootstrapAvailable: Boolean(bootstrapToken) });
+  } catch (error) {
+    console.error("Authentication status check failed:", error);
+    fail(res, 503, "قاعدة البيانات غير متاحة.");
+  }
+});
+
+app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
+  if (!bootstrapToken || bootstrapToken.length < 32) return fail(res, 503, "إعداد المدير الأول غير متاح.");
+  const suppliedToken = typeof req.body?.bootstrapToken === "string" ? req.body.bootstrapToken : "";
+  if (!constantTimeTextMatch(suppliedToken, bootstrapToken)) return fail(res, 401, "بيانات التهيئة غير صحيحة.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('bennini-initial-admin-setup'))");
+    const existing = await client.query<Member & { serial_hash: string | null }>(
+      `SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities, serial_hash
+       FROM members WHERE role = 'admin' AND serial_hash IS NULL
+       ORDER BY created_at ASC LIMIT 1 FOR UPDATE`,
+    );
+    const alreadyConfigured = await client.query(
+      "SELECT 1 FROM members WHERE role = 'admin' AND serial_hash IS NOT NULL LIMIT 1",
+    );
+    if (alreadyConfigured.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 409, "تم إعداد حساب المدير مسبقاً.");
+    }
+
+    let serial = "";
+    let saved: Member | undefined;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      serial = String(randomInt(0, 1_000_000)).padStart(6, "0");
+      const lookup = serialLookup(serial);
+      const hash = await hashSerial(serial);
+      if (existing.rowCount) {
+        const updated = await client.query<Member>(
+          `UPDATE members SET serial_lookup = $1, serial_hash = $2, active = TRUE, role = 'admin',
+            allowed_sections = $3, role_name = CASE WHEN role_name = '' THEN 'مدير النظام' ELSE role_name END,
+            updated_at = NOW()
+           WHERE clerk_user_id = $4 AND serial_lookup IS NULL
+           RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
+          [lookup, hash, adminSections, existing.rows[0].clerk_user_id],
+        );
+        if (updated.rowCount) saved = updated.rows[0];
+      } else {
+        const inserted = await client.query<Member>(
+          `INSERT INTO members
+             (clerk_user_id, email, serial_lookup, serial_hash, name, role, active, allowed_sections, role_name)
+           VALUES ($1, NULL, $2, $3, 'مدير النظام', 'admin', TRUE, $4, 'مدير النظام')
+           ON CONFLICT (serial_lookup) DO NOTHING
+           RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
+          [randomUUID(), lookup, hash, adminSections],
+        );
+        if (inserted.rowCount) saved = inserted.rows[0];
+      }
+      if (saved) break;
+    }
+    if (!saved) {
+      await client.query("ROLLBACK");
+      return fail(res, 503, "تعذر إنشاء رقم المدير. أعد المحاولة.");
+    }
+    await writeAuditWithClient(client, saved, "تهيئة المدير الأول", "تم إنشاء رقم الدخول الأول للمدير.",
+      { section: "system", eventType: "setup", entityId: saved.clerk_user_id });
+    await client.query("COMMIT");
+    res.status(201).json({ member: saved, serial });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Initial administrator setup failed:", error);
+    fail(res, 500, "تعذر تهيئة حساب المدير.");
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/auth/login", async (req: Request, res: Response) => {
+  const serial = typeof req.body?.serial === "string" ? req.body.serial : "";
+  const ipKey = loginBucket(getClientIp(req));
+  const serialKey = loginBucket(`serial:${serial}`);
+  const buckets = [ipKey, serialKey];
+  try {
+    if (await isLoginLocked(buckets)) return fail(res, 429, "محاولات كثيرة. انتظر قليلاً قبل المحاولة مجدداً.");
+    const validFormat = /^\d{6}$/.test(serial);
+    const result = validFormat
+      ? await pool.query<Member & { serial_hash: string }>(
+        `SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities, serial_hash
+         FROM members WHERE serial_lookup = $1 LIMIT 1`,
+        [serialLookup(serial)],
+      )
+      : { rows: [], rowCount: 0 };
+    const candidate = result.rows[0];
+    const validCode = candidate ? await verifySerial(serial, candidate.serial_hash) : false;
+    if (!candidate || !validCode || !candidate.active) {
+      await recordLoginFailure(buckets);
+      return fail(res, 401, "رقم الدخول غير صحيح أو الحساب موقوف.");
+    }
+
+    await Promise.all(buckets.map(clearLoginFailures));
+    const token = issueSession(candidate.clerk_user_id);
+    const { serial_hash: _serialHash, ...publicMember } = candidate;
+    const nativeClient = req.header("x-app-client") === "native";
+    if (nativeClient) {
+      res.json({ token, member: publicMember });
+    } else {
+      res.cookie("bennini_session", token, {
+        httpOnly: true,
+        secure: req.secure,
+        sameSite: "lax",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        path: "/",
+      });
+      res.json({ member: publicMember });
+    }
+  } catch (error) {
+    console.error("Member sign-in failed:", error);
+    fail(res, 500, "تعذر تسجيل الدخول حالياً.");
+  }
+});
+
+app.get("/api/auth/session", async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const member = await loadMember(req, res);
+    if (!member) return;
+    if (!member.active) return fail(res, 403, "الحساب موقوف.");
+    res.json({ member });
+  } catch (error) {
+    console.error("Session check failed:", error);
+    fail(res, 500, "تعذر التحقق من الجلسة.");
+  }
+});
+
+app.post("/api/auth/logout", (_req, res) => {
+  res.clearCookie("bennini_session", { httpOnly: true, secure: _req.secure, sameSite: "lax", path: "/" });
+  res.json({ ok: true });
+});
 
 app.get("/api/health", async (_req, res) => {
   try {
@@ -2752,7 +2939,7 @@ app.get("/api/field-expense-attachments/:id", requireFieldExpenseSchema, authent
 
 app.get("/api/members", requireRecordNotesSchema, authenticate, requireSection("users"), async (req: AuthenticatedRequest, res) => {
   const result = await pool.query(
-    "SELECT clerk_user_id, email, name, role, role_name, active, allowed_sections, permissions, capabilities, notes, created_at FROM members ORDER BY created_at",
+    "SELECT clerk_user_id, COALESCE(email, '') AS email, name, role, role_name, active, allowed_sections, permissions, capabilities, notes, created_at, (serial_hash IS NOT NULL) AS has_serial FROM members ORDER BY created_at",
   );
   const isAdmin = req.member?.role === "admin";
   res.json({
@@ -2763,6 +2950,7 @@ app.get("/api/members", requireRecordNotesSchema, authenticate, requireSection("
       role: item.role,
       role_name: item.role_name,
       active: item.active,
+      has_serial: item.has_serial,
       created_at: item.created_at,
       ...(isAdmin ? {
         allowed_sections: item.allowed_sections,
@@ -2775,6 +2963,58 @@ app.get("/api/members", requireRecordNotesSchema, authenticate, requireSection("
       } : {}),
     })),
   });
+});
+
+app.post("/api/members", authenticate, requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const roleName = typeof req.body?.roleName === "string" ? req.body.roleName.trim() : "";
+  const role = typeof req.body?.role === "string" ? req.body.role : "viewer";
+  const roles = new Set(["finance", "field", "supervisor", "viewer"]);
+  if (name.length < 2 || name.length > 100 || !roles.has(role) || roleName.length > 80) {
+    return fail(res, 400, "أدخل اسماً صحيحاً واختر نوع حساب صالحاً.");
+  }
+  const labels: Record<string, string> = {
+    finance: "الإدارة المالية",
+    field: "رئيس أشغال",
+    supervisor: "مشرف",
+    viewer: "عضو",
+  };
+  const safeRoleName = roleName || labels[role];
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    let serial = "";
+    let created: Member | undefined;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      serial = String(randomInt(0, 1_000_000)).padStart(6, "0");
+      const result = await client.query<Member>(
+        `INSERT INTO members
+           (clerk_user_id, email, serial_lookup, serial_hash, name, role, active, allowed_sections, role_name, permissions)
+         VALUES ($1, NULL, $2, $3, $4, $5, TRUE, ARRAY['dashboard']::text[], $6, '{}'::jsonb)
+         ON CONFLICT (serial_lookup) DO NOTHING
+         RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
+        [randomUUID(), serialLookup(serial), await hashSerial(serial), name, role, safeRoleName],
+      );
+      if (result.rowCount) {
+        created = result.rows[0];
+        break;
+      }
+    }
+    if (!created) {
+      await client.query("ROLLBACK");
+      return fail(res, 503, "تعذر توليد رقم دخول فريد. أعد المحاولة.");
+    }
+    await writeAuditWithClient(client, req.member!, "إنشاء حساب عضو", `تم إنشاء حساب ${name}.`,
+      { section: "users", eventType: "create", entityId: created.clerk_user_id, data: { role, roleName: safeRoleName } });
+    await client.query("COMMIT");
+    res.status(201).json({ member: created, serial });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Member creation failed:", error);
+    fail(res, 500, "تعذر إنشاء حساب العضو.");
+  } finally {
+    client.release();
+  }
 });
 
 app.patch("/api/members/:id", authenticate, requireAdmin, async (req: AuthenticatedRequest, res) => {
@@ -2921,6 +3161,18 @@ if (existsSync(webRoot)) {
   });
 }
 
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Bennini API and web app listening on port ${port}`);
-});
+async function startServer() {
+  try {
+    await pool.query("CREATE SCHEMA IF NOT EXISTS bennini");
+    const schema = readFileSync(path.resolve(process.cwd(), "server/schema.sql"), "utf8");
+    await pool.query(schema);
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`Bennini API and web app listening on port ${port}`);
+    });
+  } catch (error) {
+    console.error("Application startup failed while preparing the PostgreSQL schema:", error);
+    process.exitCode = 1;
+  }
+}
+
+void startServer();
