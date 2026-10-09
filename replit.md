@@ -20,7 +20,7 @@ All other accounts are created by an administrator from the Users and Permission
 
 - `render.yaml` deploys only the Express API. It runs `npm ci && npm run typecheck` then `npm start`, uses `/api/health` for health checks, and disables serving the web build.
 - `vercel.json` builds the Expo web export into `dist` and rewrites app routes to `index.html`.
-- Configure `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_BOOTSTRAP_TOKEN`, and `CORS_ORIGINS` on Render. Use a persistent PostgreSQL service; the app applies `server/schema.sql` on startup. Render generates `SESSION_SECRET`; set `ADMIN_BOOTSTRAP_TOKEN` to a private random value and keep it available for the one-time `/setup` flow.
-- Set `CORS_ORIGINS` to the exact Vercel site origin, such as `https://your-project.vercel.app` (no path or trailing slash). Add other exact origins as comma-separated values if needed.
+- Configure `DATABASE_URL`, `SESSION_SECRET`, and `ADMIN_BOOTSTRAP_TOKEN` on Render. Use a persistent PostgreSQL service; the app applies `server/schema.sql` on startup. Render generates `SESSION_SECRET`; set `ADMIN_BOOTSTRAP_TOKEN` to a private random value and keep it available for the one-time `/setup` flow.
+- `CORS_ORIGINS` is optional until the Vercel frontend exists. With it unset, the API can run and same-origin or non-browser requests work, while browsers cannot read cross-origin API responses. Once Vercel is deployed, set `CORS_ORIGINS` to the exact site origin, such as `https://your-project.vercel.app` (no path or trailing slash). Add other exact origins as comma-separated values if needed.
 - Set Vercel's `EXPO_PUBLIC_API_URL` to the Render service's HTTPS origin, such as `https://your-api.onrender.com` (no trailing slash). This is a public URL, not a secret.
 - Do not put database URLs, session secrets, or the bootstrap token in Vercel or in committed files.

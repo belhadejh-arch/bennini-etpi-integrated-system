@@ -35,9 +35,6 @@ const allowedOrigins = (process.env.CORS_ORIGINS ?? "")
   .split(",")
   .map((origin) => origin.trim().replace(/\/+$/, ""))
   .filter(Boolean);
-if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
-  throw new Error("CORS_ORIGINS is required in production; set it to the Vercel site origin.");
-}
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);

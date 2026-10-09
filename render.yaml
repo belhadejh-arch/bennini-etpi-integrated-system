@@ -16,5 +16,3 @@ services:
         generateValue: true
       - key: ADMIN_BOOTSTRAP_TOKEN
         sync: false
-      - key: CORS_ORIGINS
-        sync: false
