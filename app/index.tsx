@@ -250,7 +250,11 @@ export default function HomeScreen() {
                     <View style={[styles.activityIcon, { backgroundColor: colors.amberSoft }]}><HardHat size={18} color={colors.amber} /></View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.activityTitle}>{item.category}</Text>
-                      <Text style={styles.activityDetail} numberOfLines={1}>{item.site_name} · {item.created_by_name}</Text>
+                      <Text style={styles.activityDetail} numberOfLines={1}>
+                        {item.site_name} · {item.created_by_name}
+                        {item.fuel_liters ? ` · ${item.fuel_liters} لتر` : ""}
+                        {item.review_status === "pending" ? " · بانتظار المراجعة" : ""}
+                      </Text>
                     </View>
                     <View style={{ alignItems: "flex-start" }}>
                       <Text style={styles.activityAmount}>{formatDzd(Number(item.amount))}</Text>

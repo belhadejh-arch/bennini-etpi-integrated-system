@@ -15,6 +15,7 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import InventorySection from "./InventorySection";
 import ChequesSection from "./ChequesSection";
 import RentalsSection from "./RentalsSection";
+import FieldExpensesSection from "./FieldExpensesSection";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 import { sections, type SectionId } from "../../shared/sections";
@@ -38,9 +39,6 @@ export default function SectionScreen() {
   const [amount, setAmount] = useState("");
   const [party, setParty] = useState("");
   const [reason, setReason] = useState("");
-  const [category, setCategory] = useState("مصاريف ورشة");
-  const [siteName, setSiteName] = useState("");
-  const [details, setDetails] = useState("");
 
   const sectionMeta = sections.find((entry) => entry.id === section);
   const refresh = useCallback(async () => {
@@ -65,14 +63,13 @@ export default function SectionScreen() {
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
     else if (section === "dashboard") router.replace("/");
-    else if (section !== "inventory" && section !== "cheques") void refresh();
+    else if (section !== "inventory" && section !== "cheques" && section !== "rentals" && section !== "field") void refresh();
   }, [isLoaded, isSignedIn, refresh, router, section]);
 
   const isAdmin = member?.role === "admin";
   const canSee = isAdmin || !!member?.allowed_sections.includes(section);
   const canAdd = useMemo(
-    () => canSee && ((section === "finance" && (isAdmin || member?.role === "finance")) ||
-      (section === "field" && (isAdmin || member?.role === "field" || member?.role === "supervisor"))),
+    () => canSee && section === "finance" && (isAdmin || member?.role === "finance"),
     [canSee, isAdmin, member, section],
   );
 
@@ -81,18 +78,11 @@ export default function SectionScreen() {
     setError("");
     try {
       const token = () => getToken();
-      if (section === "finance") {
-        await apiRequest("/transactions", token, {
-          method: "POST",
-          body: JSON.stringify({ type: kind, amount: Number(amount), party, reason, paymentMethod: "نقداً" }),
-        });
-      } else {
-        await apiRequest("/field-expenses", token, {
-          method: "POST",
-          body: JSON.stringify({ category, amount: Number(amount), siteName, details }),
-        });
-      }
-      setAmount(""); setParty(""); setReason(""); setSiteName(""); setDetails("");
+      await apiRequest("/transactions", token, {
+        method: "POST",
+        body: JSON.stringify({ type: kind, amount: Number(amount), party, reason, paymentMethod: "نقداً" }),
+      });
+      setAmount(""); setParty(""); setReason("");
       setFormOpen(false);
       await refresh();
     } catch (caught) {
@@ -107,6 +97,7 @@ export default function SectionScreen() {
   if (section === "inventory") return <InventorySection />;
   if (section === "cheques") return <ChequesSection />;
   if (section === "rentals") return <RentalsSection />;
+  if (section === "field") return <FieldExpensesSection />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>
@@ -149,26 +140,15 @@ export default function SectionScreen() {
                 ))}
               </View>
             ) : null}
-            {section === "field" ? (
-              <>
-                <Text style={styles.label}>الفئة</Text>
-                <TextInput style={styles.input} value={category} onChangeText={setCategory} placeholder="مثال: وقود أو صيانة" placeholderTextColor="#98A5B4" />
-                <Text style={styles.label}>الورشة / الموقع</Text>
-                <TextInput style={styles.input} value={siteName} onChangeText={setSiteName} placeholder="اسم موقع العمل" placeholderTextColor="#98A5B4" />
-              </>
-            ) : (
-              <>
-                <Text style={styles.label}>الجهة</Text>
-                <TextInput style={styles.input} value={party} onChangeText={setParty} placeholder="المصدر أو الجهة المستفيدة" placeholderTextColor="#98A5B4" />
-                <Text style={styles.label}>طريقة الدفع</Text>
-                <Text style={styles.readonly}>نقداً</Text>
-              </>
-            )}
+            <Text style={styles.label}>الجهة</Text>
+            <TextInput style={styles.input} value={party} onChangeText={setParty} placeholder="المصدر أو الجهة المستفيدة" placeholderTextColor="#98A5B4" />
+            <Text style={styles.label}>طريقة الدفع</Text>
+            <Text style={styles.readonly}>نقداً</Text>
             <Text style={styles.label}>المبلغ (دج)</Text>
             <TextInput style={styles.input} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0" placeholderTextColor="#98A5B4" />
-            <Text style={styles.label}>{section === "finance" ? "السبب" : "التفاصيل"}</Text>
-            <TextInput style={[styles.input, { minHeight: 76, textAlignVertical: "top" }]} value={section === "finance" ? reason : details} onChangeText={section === "finance" ? setReason : setDetails} multiline placeholder="ملاحظات إضافية" placeholderTextColor="#98A5B4" />
-            <Pressable onPress={save} disabled={saving || !amount || Number(amount) <= 0 || (section === "finance" ? !party.trim() : !siteName.trim())} style={[styles.saveButton, (saving || !amount) && { opacity: 0.55 }]}>
+            <Text style={styles.label}>السبب</Text>
+            <TextInput style={[styles.input, { minHeight: 76, textAlignVertical: "top" }]} value={reason} onChangeText={setReason} multiline placeholder="ملاحظات إضافية" placeholderTextColor="#98A5B4" />
+            <Pressable onPress={save} disabled={saving || !amount || Number(amount) <= 0 || !party.trim()} style={[styles.saveButton, (saving || !amount) && { opacity: 0.55 }]}>
               {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveText}>حفظ العملية</Text>}
             </Pressable>
           </View>

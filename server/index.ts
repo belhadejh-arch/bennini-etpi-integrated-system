@@ -293,6 +293,63 @@ async function requireRentalSchema(_req: Request, res: Response, next: NextFunct
   }
 }
 
+let fieldExpenseSchemaPromise: Promise<void> | null = null;
+
+function ensureFieldExpenseSchema() {
+  if (!fieldExpenseSchemaPromise) {
+    fieldExpenseSchemaPromise = pool.query(`
+      CREATE TABLE IF NOT EXISTS field_expenses (
+        id BIGSERIAL PRIMARY KEY,
+        category TEXT NOT NULL,
+        amount NUMERIC(16, 2) NOT NULL CHECK (amount > 0),
+        site_name TEXT NOT NULL,
+        details TEXT NOT NULL DEFAULT '',
+        fuel_liters NUMERIC(10, 2),
+        notes TEXT NOT NULL DEFAULT '',
+        review_status TEXT NOT NULL DEFAULT 'pending',
+        reviewed_by_id TEXT REFERENCES members(clerk_user_id),
+        reviewed_by_name TEXT,
+        reviewed_at TIMESTAMPTZ,
+        review_notes TEXT NOT NULL DEFAULT '',
+        created_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+        created_by_name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      ALTER TABLE field_expenses
+        ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending',
+        ADD COLUMN IF NOT EXISTS reviewed_by_id TEXT REFERENCES members(clerk_user_id),
+        ADD COLUMN IF NOT EXISTS reviewed_by_name TEXT,
+        ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS review_notes TEXT NOT NULL DEFAULT '';
+      CREATE TABLE IF NOT EXISTS field_expense_attachments (
+        id BIGSERIAL PRIMARY KEY,
+        field_expense_id BIGINT NOT NULL REFERENCES field_expenses(id) ON DELETE CASCADE,
+        file_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        file_data BYTEA NOT NULL,
+        uploaded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+        uploaded_by_name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS field_expenses_review_created_idx ON field_expenses (review_status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS field_expense_attachments_expense_idx ON field_expense_attachments (field_expense_id, created_at);
+    `).then(() => undefined);
+  }
+  return fieldExpenseSchemaPromise;
+}
+
+async function requireFieldExpenseSchema(_req: Request, res: Response, next: NextFunction) {
+  try {
+    await ensureFieldExpenseSchema();
+    next();
+  } catch (error) {
+    console.error("Field expense database setup failed:", error);
+    fail(res, 503, "قاعدة بيانات مصاريف الميدان غير جاهزة. يرجى المحاولة لاحقاً.");
+  }
+}
+
 const inventoryItemSelect = `
   SELECT i.id, i.name, i.quantity, i.remaining_quantity, i.buy_price, i.total_cost,
     i.sale_price, i.supplier, i.invoice_number, i.purchase_date, i.notes, i.created_at,
@@ -446,8 +503,19 @@ app.get("/api/me", async (req: AuthenticatedRequest, res) => {
   }
 });
 
-app.get("/api/dashboard", authenticate, requireSection("dashboard"), async (_req, res) => {
+app.get("/api/dashboard", authenticate, requireSection("dashboard"), requireFieldExpenseSchema, async (req: AuthenticatedRequest, res) => {
   try {
+    const member = req.member!;
+    const canSeeField = member.role === "admin" || member.allowed_sections.includes("field");
+    const canSeeAllField = member.role === "admin" || member.role === "finance";
+    const fieldQuery = canSeeField
+      ? pool.query(
+        `SELECT id, category, amount, site_name, details, created_by_name, created_at, fuel_liters, review_status
+         FROM field_expenses ${canSeeAllField ? "" : "WHERE created_by_id = $1"}
+         ORDER BY created_at DESC LIMIT 5`,
+        canSeeAllField ? [] : [member.clerk_user_id],
+      )
+      : Promise.resolve({ rows: [] });
     const [cash, purchases, inventory, cheques, rentals, recent, field] = await Promise.all([
       pool.query(`
         SELECT
@@ -470,10 +538,7 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), async (_req
         SELECT id, type, amount, party, reason, transaction_date AS date, recorded_by_name AS recorded_by
         FROM transactions ORDER BY transaction_date DESC, created_at DESC LIMIT 6
       `),
-      pool.query(`
-        SELECT id, category, amount, site_name, details, created_by_name, created_at, fuel_liters
-        FROM field_expenses ORDER BY created_at DESC LIMIT 5
-      `),
+      fieldQuery,
     ]);
 
     const incoming = Number(cash.rows[0].income);
@@ -1468,25 +1533,187 @@ app.get("/api/inventory-attachments/:id", authenticate, requireSection("inventor
   }
 });
 
-app.post("/api/field-expenses", authenticate, requireSection("field"), requireRole("field", "supervisor"), async (req: AuthenticatedRequest, res) => {
-  const { category, amount, siteName, details, fuelLiters } = req.body ?? {};
-  if (typeof category !== "string" || !category.trim() || typeof siteName !== "string" ||
-      !siteName.trim() || !Number.isFinite(Number(amount)) || Number(amount) <= 0) {
-    return fail(res, 400, "أدخل الفئة والورشة والمبلغ بشكل صحيح.");
-  }
+app.get("/api/field-expenses", requireFieldExpenseSchema, authenticate, requireSection("field"), async (req: AuthenticatedRequest, res) => {
   try {
     const member = req.member!;
+    const where = member.role === "admin" || member.role === "finance" ? "" : "WHERE f.created_by_id = $1";
+    const values = where ? [member.clerk_user_id] : [];
     const result = await pool.query(
-      `INSERT INTO field_expenses (category, amount, site_name, details, fuel_liters, created_by_id, created_by_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, category, amount, site_name, details, created_by_name, created_at, fuel_liters`,
-      [category.trim(), amount, siteName.trim(), String(details ?? "").trim(), fuelLiters ? Number(fuelLiters) : null, member.clerk_user_id, member.name],
+      `SELECT f.id, f.category, f.amount, f.site_name, f.details, f.notes, f.fuel_liters,
+        f.created_by_id, f.created_by_name, f.created_at, f.review_status,
+        f.reviewed_by_name, f.reviewed_at, f.review_notes,
+        COALESCE((
+          SELECT json_agg(json_build_object(
+            'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
+          ) ORDER BY a.created_at, a.id)
+          FROM field_expense_attachments a WHERE a.field_expense_id = f.id
+        ), '[]'::json) AS attachments
+       FROM field_expenses f ${where}
+       ORDER BY CASE WHEN f.review_status = 'pending' THEN 0 ELSE 1 END, f.created_at DESC, f.id DESC
+       LIMIT 200`,
+      values,
     );
-    await writeAudit(member, "تسجيل مصروف ميداني", `${category.trim()} بقيمة ${amount} دج.`);
-    res.status(201).json({ item: result.rows[0] });
+    const pending = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM field_expenses ${member.role === "admin" || member.role === "finance" ? "WHERE review_status = 'pending'" : "WHERE created_by_id = $1 AND review_status = 'pending'"}`,
+      values,
+    );
+    res.json({ items: result.rows, pendingCount: Number(pending.rows[0].count) });
   } catch (error) {
+    console.error("Field expense list failed:", error);
+    fail(res, 500, "تعذر تحميل سجل مصاريف الميدان.");
+  }
+});
+
+app.post("/api/field-expenses", requireFieldExpenseSchema, authenticate, requireSection("field"), requireRole("field", "supervisor"), async (req: AuthenticatedRequest, res) => {
+  const { category, amount, siteName, details, fuelLiters, notes } = req.body ?? {};
+  const categoryText = typeof category === "string" ? category.trim() : "";
+  const siteText = typeof siteName === "string" ? siteName.trim() : "";
+  const numericAmount = Number(amount);
+  const liters = fuelLiters === undefined || fuelLiters === null || fuelLiters === "" ? null : Number(fuelLiters);
+  if (!categoryText || categoryText.length > 120 || !siteText || siteText.length > 200 ||
+      !Number.isFinite(numericAmount) || numericAmount <= 0 || numericAmount > 99999999999999.99 ||
+      (categoryText === "مازوت" && liters === null) ||
+      (liters !== null && (!Number.isFinite(liters) || liters <= 0 || liters > 99999999)) ||
+      String(details ?? "").length > 3000 || String(notes ?? "").length > 5000) {
+    return fail(res, 400, "أدخل نوع العملية والموقع والمبلغ والكمية بشكل صحيح.");
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const member = req.member!;
+    const result = await client.query(
+      `INSERT INTO field_expenses
+        (category, amount, site_name, details, fuel_liters, notes, created_by_id, created_by_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, category, amount, site_name, details, notes, fuel_liters,
+         created_by_id, created_by_name, created_at, review_status`,
+      [categoryText, numericAmount, siteText, String(details ?? "").trim(), liters,
+        String(notes ?? "").trim(), member.clerk_user_id, member.name],
+    );
+    await writeAuditWithClient(client, member, "تسجيل مصروف ميداني",
+      `${categoryText} بقيمة ${numericAmount} دج في ${siteText}.`);
+    await client.query("COMMIT");
+    res.status(201).json({ item: { ...result.rows[0], attachments: [] } });
+  } catch (error) {
+    await client.query("ROLLBACK");
     console.error("Field expense creation failed:", error);
     fail(res, 500, "تعذر حفظ المصروف الميداني.");
+  } finally {
+    client.release();
+  }
+});
+
+app.patch("/api/field-expenses/:id/review", requireFieldExpenseSchema, authenticate, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  const status = req.body?.status;
+  const reviewNotes = typeof req.body?.reviewNotes === "string" ? req.body.reviewNotes.trim() : "";
+  if (!Number.isSafeInteger(id) || id <= 0 || !["pending", "reviewed"].includes(status) || reviewNotes.length > 1000) {
+    return fail(res, 400, "بيانات مراجعة المصروف غير صالحة.");
+  }
+  const member = req.member!;
+  try {
+    const result = await pool.query(
+      `UPDATE field_expenses SET review_status = $1,
+        reviewed_by_id = CASE WHEN $1 = 'reviewed' THEN $2 ELSE NULL END,
+        reviewed_by_name = CASE WHEN $1 = 'reviewed' THEN $3 ELSE NULL END,
+        reviewed_at = CASE WHEN $1 = 'reviewed' THEN NOW() ELSE NULL END,
+        review_notes = $4
+       WHERE id = $5 RETURNING id`,
+      [status, member.clerk_user_id, member.name, reviewNotes, id],
+    );
+    if (!result.rowCount) return fail(res, 404, "المصروف الميداني غير موجود.");
+    await writeAudit(member, status === "reviewed" ? "مراجعة مصروف ميداني" : "إعادة مصروف للمراجعة",
+      `مراجعة العملية رقم ${id}${reviewNotes ? `: ${reviewNotes}` : ""}.`);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Field expense review update failed:", error);
+    fail(res, 500, "تعذر تحديث حالة مراجعة المصروف.");
+  }
+});
+
+app.post("/api/field-expenses/:id/attachments", requireFieldExpenseSchema, authenticate, requireSection("field"), requireRole("field", "supervisor"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  const files = (req.files ?? []) as Express.Multer.File[];
+  if (!Number.isSafeInteger(id) || id <= 0 || !files.length) return fail(res, 400, "اختر صورة أو وثيقة واحدة على الأقل.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const expense = await client.query(
+      "SELECT created_by_id FROM field_expenses WHERE id = $1 FOR UPDATE",
+      [id],
+    );
+    if (!expense.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "عملية المصروف غير موجودة.");
+    }
+    const member = req.member!;
+    if (member.role !== "admin" && member.role !== "finance" && expense.rows[0].created_by_id !== member.clerk_user_id) {
+      await client.query("ROLLBACK");
+      return fail(res, 403, "لا يمكنك إرفاق مستند بعملية سجلها مستخدم آخر.");
+    }
+    const count = await client.query(
+      "SELECT COUNT(*)::int AS total FROM field_expense_attachments WHERE field_expense_id = $1",
+      [id],
+    );
+    if (Number(count.rows[0].total) + files.length > 5) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, "الحد الأقصى هو خمسة مرفقات لكل عملية.");
+    }
+    const attachments = [];
+    for (const file of files) {
+      const saved = await client.query(
+        `INSERT INTO field_expense_attachments
+          (field_expense_id, file_name, mime_type, file_size, file_data, uploaded_by_id, uploaded_by_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, file_name, mime_type, file_size`,
+        [id, path.basename(file.originalname), file.mimetype, file.size, file.buffer, member.clerk_user_id, member.name],
+      );
+      attachments.push(saved.rows[0]);
+    }
+    await client.query(
+      `UPDATE field_expenses SET review_status = 'pending',
+        reviewed_by_id = NULL, reviewed_by_name = NULL, reviewed_at = NULL, review_notes = ''
+       WHERE id = $1`,
+      [id],
+    );
+    await writeAuditWithClient(client, member, "إرفاق وثيقة بمصروف ميداني", `إرفاق ${files.length} ملفات بالعملية رقم ${id}.`);
+    await client.query("COMMIT");
+    res.status(201).json({ attachments });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Field expense attachment upload failed:", error);
+    fail(res, 500, "تعذر حفظ صور الفواتير والوصولات.");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/field-expense-attachments/:id", requireFieldExpenseSchema, authenticate, requireSection("field"), async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم المرفق غير صالح.");
+  try {
+    const result = await pool.query(
+      `SELECT a.file_name, a.mime_type, a.file_data, e.created_by_id
+       FROM field_expense_attachments a
+       JOIN field_expenses e ON e.id = a.field_expense_id
+       WHERE a.id = $1`,
+      [id],
+    );
+    if (!result.rowCount) return fail(res, 404, "المرفق غير موجود.");
+    const attachment = result.rows[0];
+    const member = req.member!;
+    if (member.role !== "admin" && member.role !== "finance" && attachment.created_by_id !== member.clerk_user_id) {
+      return fail(res, 404, "المرفق غير موجود.");
+    }
+    const inline = attachment.mime_type === "application/pdf" || attachment.mime_type.startsWith("image/");
+    const safeName = encodeURIComponent(String(attachment.file_name).replace(/[\r\n"]/g, ""));
+    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${safeName}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(Buffer.from(attachment.file_data));
+  } catch (error) {
+    console.error("Field expense attachment read failed:", error);
+    fail(res, 500, "تعذر فتح المرفق.");
   }
 });
 

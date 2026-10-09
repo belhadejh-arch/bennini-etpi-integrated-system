@@ -72,8 +72,10 @@ export type DashboardData = {
     amount: number | string;
     site_name: string;
     details: string;
+    notes: string;
     created_by_name: string;
     created_at: string;
     fuel_liters: number | string | null;
+    review_status: "pending" | "reviewed";
   }>;
 };

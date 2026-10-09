@@ -147,8 +147,26 @@ CREATE TABLE IF NOT EXISTS field_expenses (
   site_name TEXT NOT NULL,
   details TEXT NOT NULL DEFAULT '',
   fuel_liters NUMERIC(10, 2),
+  notes TEXT NOT NULL DEFAULT '',
+  review_status TEXT NOT NULL DEFAULT 'pending' CHECK (review_status IN ('pending', 'reviewed')),
+  reviewed_by_id TEXT REFERENCES members(clerk_user_id),
+  reviewed_by_name TEXT,
+  reviewed_at TIMESTAMPTZ,
+  review_notes TEXT NOT NULL DEFAULT '',
   created_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
   created_by_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS field_expense_attachments (
+  id BIGSERIAL PRIMARY KEY,
+  field_expense_id BIGINT NOT NULL REFERENCES field_expenses(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL,
+  file_data BYTEA NOT NULL,
+  uploaded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+  uploaded_by_name TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -189,4 +207,6 @@ CREATE INDEX IF NOT EXISTS cheque_attachments_cheque_idx ON cheque_attachments (
 CREATE INDEX IF NOT EXISTS rentals_end_date_idx ON rentals (end_date);
 CREATE INDEX IF NOT EXISTS rental_attachments_rental_idx ON rental_attachments (rental_id, created_at);
 CREATE INDEX IF NOT EXISTS field_expenses_created_idx ON field_expenses (created_at DESC);
+CREATE INDEX IF NOT EXISTS field_expenses_review_created_idx ON field_expenses (review_status, created_at DESC);
+CREATE INDEX IF NOT EXISTS field_expense_attachments_expense_idx ON field_expense_attachments (field_expense_id, created_at);
 CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs (created_at DESC);
