@@ -2,7 +2,7 @@ import { useAuth, useUser } from "@clerk/expo";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   AlertTriangle, ArrowRight, Check, ClipboardCheck, FilePlus2, Fuel,
   HardHat, ImagePlus, RefreshCw, Search, Send, X,
@@ -70,6 +70,8 @@ function recordedAt(value: string) {
 
 export default function FieldExpensesSection() {
   const router = useRouter();
+  const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
+  const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
@@ -105,7 +107,7 @@ export default function FieldExpensesSection() {
       const token = () => getToken();
       const [me, result] = await Promise.all([
         apiRequest<{ member: Member }>("/me", token),
-        apiRequest<Result>("/field-expenses", token),
+        apiRequest<Result>(`/field-expenses${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token),
       ]);
       setMember(me.member);
       setItems(result.items);
@@ -117,7 +119,7 @@ export default function FieldExpensesSection() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, isSignedIn]);
+  }, [focusId, getToken, isSignedIn]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");

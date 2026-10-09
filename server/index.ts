@@ -61,6 +61,21 @@ type AuthenticatedRequest = Request & {
 const adminSections = [...allSectionIds];
 let memberSchemaPromise: Promise<void> | null = null;
 let auditLogSchemaPromise: Promise<void> | null = null;
+let notificationSchemaPromise: Promise<void> | null = null;
+
+function ensureNotificationSchema() {
+  if (!notificationSchemaPromise) {
+    notificationSchemaPromise = pool.query(`
+      CREATE TABLE IF NOT EXISTS notification_reads (
+        member_id TEXT NOT NULL REFERENCES members(clerk_user_id) ON DELETE CASCADE,
+        notification_id TEXT NOT NULL,
+        read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (member_id, notification_id)
+      );
+    `).then(() => undefined);
+  }
+  return notificationSchemaPromise;
+}
 
 function ensureAuditLogSchema() {
   if (!auditLogSchemaPromise) {
@@ -711,6 +726,192 @@ app.get("/api/me", async (req: AuthenticatedRequest, res) => {
   }
 });
 
+app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, res) => {
+  const member = req.member!;
+  const canSeeField = hasPermission(member, "field", "view");
+  const canReviewField = hasPermission(member, "field", "edit");
+  const canSeeTransactions = hasPermission(member, "finance", "view");
+  const canSeeCheques = hasPermission(member, "cheques", "view");
+  const canSeeRentals = hasPermission(member, "rentals", "view");
+  const canSeeInventory = hasPermission(member, "inventory", "view");
+  const canSeeMachinery = hasPermission(member, "machinery", "view");
+  const canSeeAllField = member.role === "admin" || member.role === "finance";
+
+  try {
+    await Promise.all([
+      ensureNotificationSchema(),
+      canSeeField ? ensureFieldExpenseSchema() : Promise.resolve(),
+      canSeeRentals ? ensureRentalSchema() : Promise.resolve(),
+      canSeeMachinery ? ensureMachinerySchema() : Promise.resolve(),
+    ]);
+
+    const sources: Array<Promise<{ rows: Array<Record<string, unknown>> }>> = [];
+    if (canSeeCheques) {
+      sources.push(pool.query(`
+        SELECT 'cheque_due' AS type, id AS record_id, cheque_number AS label,
+          due_date::text AS date_value, due_date - CURRENT_DATE AS days_left, created_at
+        FROM cheques
+        WHERE status = 'pending' AND due_date <= CURRENT_DATE + 7
+        ORDER BY due_date ASC, id ASC LIMIT 30
+      `));
+    }
+    if (canSeeRentals) {
+      sources.push(pool.query(`
+        SELECT 'rental_ending' AS type, id AS record_id, equipment AS label,
+          end_date::text AS date_value, end_date - CURRENT_DATE AS days_left, created_at
+        FROM rentals
+        WHERE status = 'active' AND end_date <= CURRENT_DATE + 7
+        ORDER BY end_date ASC, id ASC LIMIT 30
+      `));
+    }
+    if (canSeeTransactions) {
+      sources.push(pool.query(`
+        SELECT 'new_expense' AS type, id AS record_id, party AS label,
+          reason AS detail, created_at
+        FROM transactions
+        WHERE type = 'expense' AND created_at >= NOW() - INTERVAL '7 days'
+          AND recorded_by_id <> $1
+        ORDER BY created_at DESC, id DESC LIMIT 20
+      `, [member.clerk_user_id]));
+    }
+    if (canSeeField && canSeeAllField) {
+      sources.push(pool.query(`
+        SELECT 'field_operation' AS type, id AS record_id, category AS label,
+          site_name AS detail, created_by_name, created_at
+        FROM field_expenses
+        WHERE created_at >= NOW() - INTERVAL '7 days' AND created_by_id <> $1
+        ORDER BY created_at DESC, id DESC LIMIT 20
+      `, [member.clerk_user_id]));
+    }
+    if (canReviewField && canSeeAllField) {
+      sources.push(pool.query(`
+        SELECT 'field_review' AS type, id AS record_id, category AS label,
+          site_name AS detail, created_by_name, created_at
+        FROM field_expenses
+        WHERE review_status = 'pending' AND created_by_id <> $1
+        ORDER BY created_at DESC, id DESC LIMIT 50
+      `, [member.clerk_user_id]));
+    }
+    if (canSeeInventory) {
+      sources.push(pool.query(`
+        SELECT 'low_inventory' AS type, id AS record_id, name AS label,
+          remaining_quantity, quantity, created_at
+        FROM inventory_items
+        WHERE quantity > 0
+          AND remaining_quantity <= GREATEST(1, CEIL(quantity * 0.2))
+        ORDER BY remaining_quantity ASC, name ASC LIMIT 30
+      `));
+    }
+    if (canSeeMachinery) {
+      sources.push(pool.query(`
+        SELECT 'low_spare_part' AS type, id AS record_id, name AS label,
+          stock_quantity, quantity, created_at
+        FROM machinery_spare_parts
+        WHERE quantity > 0 AND stock_quantity <= GREATEST(1, CEIL(quantity * 0.2))
+        ORDER BY stock_quantity ASC, name ASC LIMIT 30
+      `));
+    }
+
+    const groups = await Promise.all(sources);
+    const notifications = groups.flatMap((group) => group.rows).map((row) => {
+      const type = String(row.type);
+      const recordId = Number(row.record_id);
+      let section: SectionId;
+      let view: string | undefined;
+      let title: string;
+      let message: string;
+      switch (type) {
+        case "cheque_due": {
+          section = "cheques";
+          const days = Number(row.days_left);
+          title = `اقتراب استحقاق الشيك ${String(row.label)}`;
+          message = days < 0 ? `متأخر منذ ${Math.abs(days)} يوم` : days === 0 ? "يستحق اليوم" : `يستحق خلال ${days} ${days === 1 ? "يوم" : "أيام"}`;
+          break;
+        }
+        case "rental_ending": {
+          section = "rentals";
+          const days = Number(row.days_left);
+          title = `اقتراب نهاية كراء ${String(row.label)}`;
+          message = days < 0 ? `انتهى منذ ${Math.abs(days)} يوم` : days === 0 ? "ينتهي اليوم" : `ينتهي خلال ${days} ${days === 1 ? "يوم" : "أيام"}`;
+          break;
+        }
+        case "new_expense":
+          section = "finance";
+          title = `مصروف جديد: ${String(row.label)}`;
+          message = String(row.detail || "أضيفت عملية مصروف جديدة.");
+          break;
+        case "field_operation":
+          section = "field";
+          title = `عملية ميدانية جديدة من ${String(row.created_by_name)}`;
+          message = `${String(row.label)} · ${String(row.detail)}`;
+          break;
+        case "field_review":
+          section = "field";
+          title = `عملية تحتاج إلى مراجعة: ${String(row.label)}`;
+          message = `الموقع: ${String(row.detail)} · أرسلها ${String(row.created_by_name)}`;
+          break;
+        case "low_inventory":
+          section = "inventory";
+          view = "stock";
+          title = `انخفاض مخزون ${String(row.label)}`;
+          message = `المتبقي ${Number(row.remaining_quantity)} من أصل ${Number(row.quantity)}.`;
+          break;
+        default:
+          section = "machinery";
+          view = "spare-parts";
+          title = `انخفاض مخزون قطعة ${String(row.label)}`;
+          message = `المتبقي ${Number(row.stock_quantity)} من أصل ${Number(row.quantity)}.`;
+      }
+      return {
+        id: `${type}:${recordId}`,
+        type,
+        title,
+        message,
+        section,
+        view,
+        recordId,
+        createdAt: row.created_at,
+      };
+    }).sort((a, b) => new Date(String(b.createdAt)).getTime() - new Date(String(a.createdAt)).getTime())
+      .slice(0, 100);
+
+    const readRows = notifications.length
+      ? await pool.query(
+        "SELECT notification_id FROM notification_reads WHERE member_id = $1 AND notification_id = ANY($2::text[])",
+        [member.clerk_user_id, notifications.map((item) => item.id)],
+      )
+      : { rows: [] as Array<{ notification_id: string }> };
+    const readIds = new Set(readRows.rows.map((row) => row.notification_id));
+    const items = notifications.map((item) => ({ ...item, read: readIds.has(item.id) }));
+    res.json({ items, unreadCount: items.filter((item) => !item.read).length });
+  } catch (error) {
+    console.error("Notification list failed:", error);
+    fail(res, 500, "تعذر تحميل الإشعارات.");
+  }
+});
+
+app.post("/api/notifications/read", authenticate, async (req: AuthenticatedRequest, res) => {
+  const member = req.member!;
+  const notificationIds: unknown = req.body?.notificationIds;
+  if (!Array.isArray(notificationIds) || notificationIds.length < 1 || notificationIds.length > 100 ||
+      notificationIds.some((id) => typeof id !== "string" || !/^[a-z_]+:\d+$/.test(id))) {
+    return fail(res, 400, "قائمة الإشعارات غير صالحة.");
+  }
+  try {
+    await ensureNotificationSchema();
+    await pool.query(
+      `INSERT INTO notification_reads (member_id, notification_id)
+       SELECT $1, unnest($2::text[])
+       ON CONFLICT (member_id, notification_id) DO UPDATE SET read_at = NOW()`,
+      [member.clerk_user_id, notificationIds],
+    );
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Notification read update failed:", error);
+    fail(res, 500, "تعذر تحديث حالة الإشعارات.");
+  }
+});
+
 app.get("/api/dashboard", authenticate, requireSection("dashboard"), requireFieldExpenseSchema, async (req: AuthenticatedRequest, res) => {
   try {
     const member = req.member!;
@@ -856,8 +1057,10 @@ app.get("/api/inventory", authenticate, requireSection("inventory"), async (req,
   const minSalePrice = typeof query.minSalePrice === "string" ? query.minSalePrice : "";
   const maxSalePrice = typeof query.maxSalePrice === "string" ? query.maxSalePrice : "";
   const stock = typeof query.stock === "string" ? query.stock : "";
+  const focusId = typeof query.focusId === "string" ? Number(query.focusId) : null;
   const maxMoney = 99999999999999.99;
 
+  if (focusId !== null && (!Number.isSafeInteger(focusId) || focusId <= 0)) return fail(res, 400, "رقم السلعة غير صالح.");
   if (name.length > 200 || supplier.length > 200 || invoice.length > 120) return fail(res, 400, "قيمة البحث أطول من الحد المسموح.");
   if (from && !validIsoDate(from)) return fail(res, 400, "تاريخ البداية غير صالح.");
   if (to && !validIsoDate(to)) return fail(res, 400, "تاريخ النهاية غير صالح.");
@@ -887,6 +1090,7 @@ app.get("/api/inventory", authenticate, requireSection("inventory"), async (req,
   if (maxSalePrice) where.push(`i.sale_price <= ${value(maxSalePrice)}`);
   if (stock === "available") where.push("i.remaining_quantity > 0");
   if (stock === "empty") where.push("i.remaining_quantity = 0");
+  if (focusId !== null) where.push(`i.id = ${value(focusId)}`);
 
   const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const page = Math.max(1, Math.min(100000, Number.parseInt(String(query.page ?? "1"), 10) || 1));
@@ -1066,7 +1270,9 @@ app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res
   const query = req.query;
   const search = typeof query.q === "string" ? query.q.trim() : "";
   const status = typeof query.status === "string" ? query.status : "";
+  const focusId = typeof query.focusId === "string" ? Number(query.focusId) : null;
   if (search.length > 200) return fail(res, 400, "عبارة البحث أطول من الحد المسموح.");
+  if (focusId !== null && (!Number.isSafeInteger(focusId) || focusId <= 0)) return fail(res, 400, "رقم الشيك غير صالح.");
   if (status && !chequeStatuses.includes(status as (typeof chequeStatuses)[number])) {
     return fail(res, 400, "حالة الشيك غير صالحة.");
   }
@@ -1092,6 +1298,7 @@ app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res
     )`);
   }
   if (status) where.push(`c.status = ${value(status)}`);
+  if (focusId !== null) where.push(`c.id = ${value(focusId)}`);
   const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
   const pagination = [...values, pageSize, (page - 1) * pageSize];
 
@@ -1306,7 +1513,9 @@ app.get("/api/cheque-attachments/:id", authenticate, requireSection("cheques"), 
   }
 });
 
-app.get("/api/rentals", requireRentalSchema, authenticate, requireSection("rentals"), async (_req, res) => {
+app.get("/api/rentals", requireRentalSchema, authenticate, requireSection("rentals"), async (req, res) => {
+  const focusId = typeof req.query.focusId === "string" ? Number(req.query.focusId) : null;
+  if (focusId !== null && (!Number.isSafeInteger(focusId) || focusId <= 0)) return fail(res, 400, "رقم عقد الكراء غير صالح.");
   try {
     const [items, alerts] = await Promise.all([
       pool.query(`
@@ -1319,9 +1528,9 @@ app.get("/api/rentals", requireRentalSchema, authenticate, requireSection("renta
             ) ORDER BY a.created_at, a.id)
             FROM rental_attachments a WHERE a.rental_id = r.id
           ), '[]'::json) AS attachments
-        FROM rentals r
+        FROM rentals r ${focusId === null ? "" : "WHERE r.id = $1"}
         ORDER BY CASE WHEN r.status = 'active' THEN 0 ELSE 1 END, r.end_date ASC, r.id DESC
-      `),
+      `, focusId === null ? [] : [focusId]),
       pool.query(`
         SELECT COUNT(*)::int AS total,
           COALESCE(json_agg(json_build_object(
@@ -1650,13 +1859,29 @@ app.post("/api/machinery", requireMachinerySchema, authenticate, requireSection(
 
 app.get("/api/machinery/spare-parts", requireMachinerySchema, authenticate, requireSection("machinery"), async (req, res) => {
   const machineryId = req.query.machineryId === undefined ? null : Number(req.query.machineryId);
+  const focusId = typeof req.query.focusId === "string" ? Number(req.query.focusId) : null;
   if (machineryId !== null && (!Number.isSafeInteger(machineryId) || machineryId <= 0)) {
     return fail(res, 400, "رقم المركبة أو الآلية غير صالح.");
   }
+  if (focusId !== null && (!Number.isSafeInteger(focusId) || focusId <= 0)) {
+    return fail(res, 400, "رقم قطعة الغيار غير صالح.");
+  }
   try {
-    const result = machineryId === null
-      ? await pool.query(`${machinerySparePartSelect} ORDER BY p.installation_date DESC NULLS LAST, p.created_at DESC LIMIT 300`)
-      : await pool.query(`${machinerySparePartSelect} WHERE p.machinery_id = $1 ORDER BY p.installation_date DESC NULLS LAST, p.created_at DESC LIMIT 300`, [machineryId]);
+    const where: string[] = [];
+    const values: number[] = [];
+    if (machineryId !== null) {
+      values.push(machineryId);
+      where.push(`p.machinery_id = $${values.length}`);
+    }
+    if (focusId !== null) {
+      values.push(focusId);
+      where.push(`p.id = $${values.length}`);
+    }
+    const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const result = await pool.query(
+      `${machinerySparePartSelect} ${clause} ORDER BY p.installation_date DESC NULLS LAST, p.created_at DESC LIMIT 300`,
+      values,
+    );
     res.json({ items: result.rows });
   } catch (error) {
     console.error("Machinery spare part list failed:", error);
@@ -1792,6 +2017,8 @@ app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest
   }
 
   try {
+    const focusId = typeof req.query.focusId === "string" ? Number(req.query.focusId) : null;
+    if (focusId !== null && (!Number.isSafeInteger(focusId) || focusId <= 0)) return fail(res, 400, "رقم السجل غير صالح.");
     const queries: Partial<Record<SectionId, string>> = {
       finance: `SELECT id, type, amount, party, reason, payment_method, transaction_date AS date, recorded_by_name
         FROM transactions ORDER BY transaction_date DESC, created_at DESC LIMIT 100`,
@@ -1811,13 +2038,25 @@ app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest
         ORDER BY a.created_at DESC LIMIT 100`,
     };
     const canSeeAllField = req.member?.role === "admin" || req.member?.role === "finance";
-    const query = section === "field" && !canSeeAllField
-      ? queries.field?.replace("FROM field_expenses", "FROM field_expenses WHERE created_by_id = $1")
-      : queries[section];
+    let query = queries[section];
     if (!query) return res.json({ items: [] });
+    const values: unknown[] = [];
+    if (section === "field" && !canSeeAllField) {
+      values.push(req.member?.clerk_user_id);
+      query = query.replace("FROM field_expenses", "FROM field_expenses WHERE created_by_id = $1");
+    }
+    if (focusId !== null) {
+      const insertion = section === "finance" ? "transactions" : null;
+      if (!insertion) return fail(res, 400, "لا يدعم هذا القسم فتح سجل محدد من الإشعار.");
+      const hasWhere = query.includes(" WHERE ");
+      const marker = `$${values.length + 1}`;
+      query = query.replace("FROM transactions", `FROM transactions${hasWhere ? " AND" : " WHERE"} id = ${marker}`);
+      values.push(focusId);
+      query = query.replace(/LIMIT \d+$/, "LIMIT 1");
+    }
     const result = await pool.query(
       query,
-      section === "field" && !canSeeAllField ? [req.member?.clerk_user_id] : [],
+      values,
     );
     res.json({ items: result.rows });
   } catch (error) {
@@ -2061,8 +2300,19 @@ app.get("/api/inventory-attachments/:id", authenticate, requireSection("inventor
 app.get("/api/field-expenses", requireFieldExpenseSchema, authenticate, requireSection("field"), async (req: AuthenticatedRequest, res) => {
   try {
     const member = req.member!;
-    const where = member.role === "admin" || member.role === "finance" ? "" : "WHERE f.created_by_id = $1";
-    const values = where ? [member.clerk_user_id] : [];
+    const focusId = typeof req.query.focusId === "string" ? Number(req.query.focusId) : null;
+    if (focusId !== null && (!Number.isSafeInteger(focusId) || focusId <= 0)) return fail(res, 400, "رقم المصروف غير صالح.");
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    if (member.role !== "admin" && member.role !== "finance") {
+      values.push(member.clerk_user_id);
+      conditions.push(`f.created_by_id = $${values.length}`);
+    }
+    if (focusId !== null) {
+      values.push(focusId);
+      conditions.push(`f.id = $${values.length}`);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = await pool.query(
       `SELECT f.id, f.category, f.amount, f.site_name, f.details, f.notes, f.fuel_liters,
         f.created_by_id, f.created_by_name, f.created_at, f.review_status,
@@ -2080,7 +2330,7 @@ app.get("/api/field-expenses", requireFieldExpenseSchema, authenticate, requireS
     );
     const pending = await pool.query(
       `SELECT COUNT(*)::int AS count FROM field_expenses ${member.role === "admin" || member.role === "finance" ? "WHERE review_status = 'pending'" : "WHERE created_by_id = $1 AND review_status = 'pending'"}`,
-      values,
+      member.role === "admin" || member.role === "finance" ? [] : [member.clerk_user_id],
     );
     res.json({ items: result.rows, pendingCount: Number(pending.rows[0].count) });
   } catch (error) {

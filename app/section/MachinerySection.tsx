@@ -2,7 +2,7 @@ import { useAuth } from "@clerk/expo";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowRight, FilePlus2, HardHat, Plus, RefreshCw, Search, Truck, Wrench, X,
 } from "lucide-react-native";
@@ -60,6 +60,8 @@ const dateLabel = (value: string | null) => value ? value.slice(0, 10) : "—";
 
 export default function MachinerySection() {
   const router = useRouter();
+  const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
+  const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const [member, setMember] = useState<Member | null>(null);
   const [machinery, setMachinery] = useState<Machinery[]>([]);
@@ -92,9 +94,10 @@ export default function MachinerySection() {
   );
   const filteredParts = useMemo(
     () => parts.filter((part) =>
+      (!focusId || String(part.id) === focusId) &&
       (selectedMachineId === null || part.machinery_id === selectedMachineId) &&
       (!searchTerm || `${part.name} ${part.machinery_name} ${part.machinery_code} ${part.supplier} ${part.invoice_number}`.toLocaleLowerCase().includes(searchTerm))),
-    [parts, selectedMachineId, searchTerm],
+    [focusId, parts, selectedMachineId, searchTerm],
   );
   const totalExpenses = parts.reduce(
     (total, part) => total + numberValue(part.buy_price) * part.quantity + numberValue(part.repair_expense), 0,
@@ -109,7 +112,7 @@ export default function MachinerySection() {
       const [me, machineResult, partResult] = await Promise.all([
         apiRequest<{ member: Member }>("/me", token),
         apiRequest<{ items: Machinery[] }>("/machinery", token),
-        apiRequest<{ items: SparePart[] }>("/machinery/spare-parts", token),
+        apiRequest<{ items: SparePart[] }>(`/machinery/spare-parts${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token),
       ]);
       setMember(me.member);
       setMachinery(machineResult.items);
@@ -121,7 +124,7 @@ export default function MachinerySection() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, isSignedIn]);
+  }, [focusId, getToken, isSignedIn]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");

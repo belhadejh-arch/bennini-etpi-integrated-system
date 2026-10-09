@@ -2,7 +2,7 @@ import { useAuth } from "@clerk/expo";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowRight, Boxes, ChevronLeft, ChevronRight, FilePlus2, Pencil, Plus, RefreshCw,
   Search, ShoppingCart, Trash2, X,
@@ -96,6 +96,8 @@ function dateLabel(value: string) {
 
 export default function InventorySection() {
   const router = useRouter();
+  const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
+  const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const { width } = useWindowDimensions();
   const wide = width >= 820;
@@ -136,8 +138,9 @@ export default function InventorySection() {
     for (const [key, value] of Object.entries(appliedFilters)) {
       if (value) params.set(key, value);
     }
+    if (focusId) params.set("focusId", focusId);
     return params.toString();
-  }, [appliedFilters, page]);
+  }, [appliedFilters, focusId, page]);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;

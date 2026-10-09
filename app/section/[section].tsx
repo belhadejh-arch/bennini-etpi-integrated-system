@@ -29,8 +29,9 @@ type ApiError = Error & { status?: number; body?: { pending?: boolean } };
 
 export default function SectionScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ section: string }>();
+  const params = useLocalSearchParams<{ section: string; focusId?: string | string[] }>();
   const section = params.section as SectionId;
+  const focusId = Array.isArray(params.focusId) ? params.focusId[0] : params.focusId;
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
@@ -53,7 +54,7 @@ export default function SectionScreen() {
       const token = () => getToken();
       const me = await apiRequest<{ member: Member }>("/me", token);
       setMember(me.member);
-      const data = await apiRequest<SectionResult>(`/sections/${section}`, token);
+      const data = await apiRequest<SectionResult>(`/sections/${section}${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token);
       setItems(data.items);
     } catch (caught) {
       const issue = caught as ApiError;
@@ -62,12 +63,13 @@ export default function SectionScreen() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, isSignedIn, section, sectionMeta]);
+  }, [focusId, getToken, isSignedIn, section, sectionMeta]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
     else if (section === "dashboard") router.replace("/");
-    else if (section !== "inventory" && section !== "cheques" && section !== "rentals" && section !== "field" && section !== "audit") void refresh();
+    else if (section !== "inventory" && section !== "cheques" && section !== "rentals" &&
+      section !== "machinery" && section !== "field" && section !== "audit") void refresh();
   }, [isLoaded, isSignedIn, refresh, router, section]);
 
   const canSee = hasPermission(member, section, "view");

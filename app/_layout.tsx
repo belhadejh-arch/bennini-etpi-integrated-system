@@ -36,6 +36,7 @@ export default function RootLayout() {
           <Stack.Screen name="section/[section]" />
           <Stack.Screen name="members" />
           <Stack.Screen name="settings" />
+          <Stack.Screen name="notifications" />
         </Stack>
       </WorkspaceShell>
     </ClerkProvider>

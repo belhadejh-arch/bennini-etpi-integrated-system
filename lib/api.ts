@@ -1,6 +1,7 @@
 import Constants from "expo-constants";
 import { Platform } from "react-native";
 import type { MemberCapabilities, MemberPermissions } from "../shared/access";
+import type { SectionId } from "../shared/sections";
 
 const configuredApiUrl = Constants.expoConfig?.extra?.apiUrl as string | undefined;
 
@@ -47,6 +48,23 @@ export type Member = {
   permissions?: MemberPermissions;
   capabilities?: MemberCapabilities;
   notes?: string;
+};
+
+export type AppNotification = {
+  id: string;
+  type: "cheque_due" | "rental_ending" | "new_expense" | "field_operation" | "field_review" | "low_inventory" | "low_spare_part";
+  title: string;
+  message: string;
+  section: SectionId;
+  view?: string;
+  recordId: number;
+  createdAt: string;
+  read: boolean;
+};
+
+export type NotificationsResult = {
+  items: AppNotification[];
+  unreadCount: number;
 };
 
 export type DashboardData = {

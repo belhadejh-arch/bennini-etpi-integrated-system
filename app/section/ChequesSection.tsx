@@ -2,7 +2,7 @@ import { useAuth, useUser } from "@clerk/expo";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   AlertTriangle, ArrowRight, Check, ChevronLeft, ChevronRight, FilePlus2,
   Pencil, Plus, RefreshCw, Search, Trash2, X,
@@ -96,6 +96,8 @@ function attachmentLabel(attachment: Attachment) {
 
 export default function ChequesSection() {
   const router = useRouter();
+  const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
+  const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
@@ -125,8 +127,9 @@ export default function ChequesSection() {
     const params = new URLSearchParams({ page: String(page) });
     if (search) params.set("q", search);
     if (statusFilter) params.set("status", statusFilter);
+    if (focusId) params.set("focusId", focusId);
     return params.toString();
-  }, [page, search, statusFilter]);
+  }, [focusId, page, search, statusFilter]);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;

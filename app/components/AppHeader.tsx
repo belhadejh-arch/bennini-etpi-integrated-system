@@ -1,9 +1,11 @@
 import type { ReactNode } from "react";
+import { useRouter } from "expo-router";
 import { Pressable, Text, View, useWindowDimensions } from "react-native";
-import { Menu } from "lucide-react-native";
+import { Bell, Menu } from "lucide-react-native";
 import { colors } from "../../lib/theme";
 import { CompanyLogo } from "./CompanyLogo";
 import { useSidebarAction } from "./AppSidebar";
+import { useNotificationBadge } from "./NotificationContext";
 
 type AppHeaderProps = {
   title: string;
@@ -40,6 +42,8 @@ export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
   const { width } = useWindowDimensions();
   const compact = width < 420;
   const sidebar = useSidebarAction();
+  const router = useRouter();
+  const { unreadCount } = useNotificationBadge();
   const logoWidth = compact ? 58 : 68;
   const logoHeight = compact ? 31 : 37;
 
@@ -56,7 +60,19 @@ export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
         <CompanyLogo width={logoWidth} height={logoHeight} framed />
         <Text numberOfLines={1} style={styles.title}>{title}</Text>
       </View>
-      <View style={styles.actionSlot}>{rightAction}</View>
+      <View style={[styles.actionSlot, styles.rightActions]}>
+        {rightAction}
+        <View style={styles.notificationWrap}>
+          <HeaderAction label={`الإشعارات${unreadCount ? `، ${unreadCount} غير مقروء` : ""}`} onPress={() => router.push("/notifications")}>
+            <Bell size={19} color="#FFFFFF" />
+          </HeaderAction>
+          {unreadCount > 0 ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
     </View>
   );
 }
@@ -78,6 +94,27 @@ const styles = {
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
+  rightActions: {
+    flexDirection: "row" as const,
+    gap: 6,
+    minWidth: 84,
+  },
+  notificationWrap: { position: "relative" as const },
+  badge: {
+    position: "absolute" as const,
+    top: -4,
+    right: -4,
+    minWidth: 17,
+    height: 17,
+    paddingHorizontal: 3,
+    borderRadius: 9,
+    backgroundColor: "#E5484D",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+    borderWidth: 1,
+    borderColor: colors.navy,
+  },
+  badgeText: { color: "#FFFFFF", fontSize: 8, fontWeight: "900" as const },
   action: {
     width: 42,
     height: 42,

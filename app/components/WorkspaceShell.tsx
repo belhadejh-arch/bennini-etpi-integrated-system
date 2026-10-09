@@ -5,6 +5,7 @@ import { Platform, View, useWindowDimensions } from "react-native";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors } from "../../lib/theme";
 import { AppSidebar, SidebarBackdrop, SidebarProvider, type SidebarEntry } from "./AppSidebar";
+import { NotificationProvider } from "./NotificationContext";
 
 export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -73,20 +74,22 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const canShowSidebar = !!visibleMember && !isAuthRoute;
 
   return (
-    <SidebarProvider value={sidebarAction}>
-      <View style={[styles.shell, canShowSidebar && !compact && styles.desktopShell]}>
-        {canShowSidebar && !compact ? (
-          <AppSidebar member={visibleMember!} activeId={activeId} onNavigate={onNavigate} />
-        ) : null}
-        <View style={styles.content}>{children}</View>
-        {canShowSidebar && compact && drawerOpen ? (
-          <>
-            <SidebarBackdrop onPress={() => setDrawerOpen(false)} />
-            <AppSidebar member={visibleMember!} activeId={activeId} onNavigate={onNavigate} onClose={() => setDrawerOpen(false)} drawer />
-          </>
-        ) : null}
-      </View>
-    </SidebarProvider>
+    <NotificationProvider>
+      <SidebarProvider value={sidebarAction}>
+        <View style={[styles.shell, canShowSidebar && !compact && styles.desktopShell]}>
+          {canShowSidebar && !compact ? (
+            <AppSidebar member={visibleMember!} activeId={activeId} onNavigate={onNavigate} />
+          ) : null}
+          <View style={styles.content}>{children}</View>
+          {canShowSidebar && compact && drawerOpen ? (
+            <>
+              <SidebarBackdrop onPress={() => setDrawerOpen(false)} />
+              <AppSidebar member={visibleMember!} activeId={activeId} onNavigate={onNavigate} onClose={() => setDrawerOpen(false)} drawer />
+            </>
+          ) : null}
+        </View>
+      </SidebarProvider>
+    </NotificationProvider>
   );
 }
 
