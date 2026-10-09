@@ -6,6 +6,7 @@ import { useRouter } from "expo-router";
 import { ArrowRight, ChevronLeft, ChevronRight, Eye, FilePlus2, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { AppHeader, HeaderAction } from "../components/AppHeader";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 
@@ -280,14 +281,19 @@ export default function FinanceSection() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.headerIcon} accessibilityLabel="رجوع"><ArrowRight size={19} color="#FFFFFF" /></Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.brand}>BENNINI ETPI</Text>
-          <Text style={styles.headerTitle}>التسيير المالي والصندوق</Text>
-        </View>
-        <Pressable onPress={() => void refresh()} style={styles.headerIcon} accessibilityLabel="تحديث"><RefreshCw size={17} color="#FFFFFF" /></Pressable>
-      </View>
+      <AppHeader
+        title="التسيير المالي والصندوق"
+        leftAction={
+          <HeaderAction label="رجوع" onPress={() => router.back()}>
+            <ArrowRight size={19} color="#FFFFFF" />
+          </HeaderAction>
+        }
+        rightAction={
+          <HeaderAction label="تحديث" onPress={() => void refresh()}>
+            <RefreshCw size={17} color="#FFFFFF" />
+          </HeaderAction>
+        }
+      />
 
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
         <View style={styles.intro}>
@@ -537,10 +543,6 @@ function ActionButton({ label, onPress, icon, danger }: { label: string; onPress
 
 const styles = {
   screen: { flex: 1, backgroundColor: colors.background, direction: "rtl" as const },
-  header: { minHeight: 70, paddingHorizontal: 16, backgroundColor: colors.navy, flexDirection: "row" as const, alignItems: "center" as const, gap: 11 },
-  headerIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#FFFFFF1A", alignItems: "center" as const, justifyContent: "center" as const },
-  brand: { color: colors.yellow, fontWeight: "900" as const, fontSize: 11 },
-  headerTitle: { color: "#FFFFFF", fontWeight: "700" as const, fontSize: 14, marginTop: 3 },
   page: { width: "100%" as const, maxWidth: 1240, alignSelf: "center" as const, padding: 18, paddingBottom: 36, gap: 14 },
   intro: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 12 },
   title: { color: colors.navy, fontWeight: "900" as const, fontSize: 23, textAlign: "right" as const },

@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { ArrowRight, Check, ShieldCheck, Users } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { AppHeader, HeaderAction } from "./components/AppHeader";
 import { apiRequest, type Member } from "../lib/api";
 import { colors } from "../lib/theme";
 import { sections, type SectionId } from "../shared/sections";
@@ -67,14 +68,15 @@ export default function MembersScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.back}><ArrowRight size={19} color="#FFFFFF" /></Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.brand}>BENNINI ETPI</Text>
-          <Text style={styles.headerTitle}>الأعضاء والصلاحيات</Text>
-        </View>
-        <View style={styles.icon}><ShieldCheck size={19} color={colors.yellow} /></View>
-      </View>
+      <AppHeader
+        title="الأعضاء والصلاحيات"
+        leftAction={
+          <HeaderAction label="رجوع" onPress={() => router.back()}>
+            <ArrowRight size={19} color="#FFFFFF" />
+          </HeaderAction>
+        }
+        rightAction={<View style={styles.icon}><ShieldCheck size={19} color={colors.yellow} /></View>}
+      />
 
       {!admin && !loading ? (
         <View style={styles.center}>
@@ -178,10 +180,6 @@ function roleLabel(role: string) {
 }
 
 const styles = {
-  header: { minHeight: 70, paddingHorizontal: 16, backgroundColor: colors.navy, flexDirection: "row" as const, alignItems: "center" as const, gap: 11 },
-  back: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#FFFFFF1A", alignItems: "center" as const, justifyContent: "center" as const },
-  brand: { color: colors.yellow, fontWeight: "900" as const, fontSize: 11 },
-  headerTitle: { color: "#FFFFFF", fontWeight: "700" as const, fontSize: 14, marginTop: 3 },
   icon: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#FFFFFF1A", alignItems: "center" as const, justifyContent: "center" as const },
   page: { width: "100%" as const, maxWidth: 860, alignSelf: "center" as const, padding: 17, paddingBottom: 40, gap: 13 },
   summary: { backgroundColor: "#FFFFFF", padding: 15, borderRadius: 15, borderWidth: 1, borderColor: colors.border, flexDirection: "row" as const, alignItems: "center" as const, gap: 12 },

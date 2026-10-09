@@ -25,7 +25,10 @@ import {
   ScrollView,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
+import { AppHeader, HeaderAction } from "./components/AppHeader";
+import { CompanyLogo } from "./components/CompanyLogo";
 import { apiRequest, type DashboardData, type Member } from "../lib/api";
 import { colors, formatDzd } from "../lib/theme";
 import { sections, type SectionId } from "../shared/sections";
@@ -46,6 +49,7 @@ const icons: Record<string, typeof Wallet> = {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { width: viewportWidth } = useWindowDimensions();
   const { isLoaded: authLoaded, isSignedIn, getToken, signOut } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
@@ -100,11 +104,19 @@ export default function HomeScreen() {
     return <Centered><ActivityIndicator size="large" color={colors.blue} /><Text style={styles.muted}>جارٍ التحقق من الحساب...</Text></Centered>;
   }
   if (!isSignedIn) return <PublicWelcome />;
+  const compact = viewportWidth < 560;
 
   if (pending) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>
-        <BrandHeader title="طلب الوصول" onSignOut={() => void signOut()} />
+        <AppHeader
+          title="طلب الوصول"
+          rightAction={
+            <HeaderAction label="تسجيل الخروج" onPress={() => void signOut()}>
+              <LogOut size={18} color="#D8E2EF" />
+            </HeaderAction>
+          }
+        />
         <Centered>
           <View style={styles.pendingIcon}><Clock3 size={25} color={colors.amber} /></View>
           <Text style={[styles.title, { marginTop: 18 }]}>الحساب بانتظار التفعيل</Text>
@@ -122,10 +134,21 @@ export default function HomeScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>
-      <BrandHeader
+      <AppHeader
         title="لوحة القيادة"
-        onMenu={() => setMenuOpen((open) => !open)}
-        onSignOut={() => void signOut()}
+        leftAction={
+          <HeaderAction
+            label={menuOpen ? "إغلاق قائمة الأقسام" : "فتح قائمة الأقسام"}
+            onPress={() => setMenuOpen((open) => !open)}
+          >
+            <Menu size={21} color="#FFFFFF" />
+          </HeaderAction>
+        }
+        rightAction={
+          <HeaderAction label="تسجيل الخروج" onPress={() => void signOut()}>
+            <LogOut size={18} color="#D8E2EF" />
+          </HeaderAction>
+        }
       />
       {menuOpen ? (
         <View style={styles.menuPanel}>
@@ -161,7 +184,7 @@ export default function HomeScreen() {
             <Text style={styles.welcomeSubtitle}>ملخص مالي وتشغيلي واضح لمتابعة المؤسسة.</Text>
             <View style={styles.rolePill}><Text style={styles.rolePillText}>{roleLabel(member?.role)}</Text></View>
           </View>
-          <View style={styles.welcomeMark}><Text style={styles.welcomeMarkText}>B</Text></View>
+          <View style={styles.welcomeMark}><CompanyLogo width={91} height={48} /></View>
         </View>
 
         {error ? <InlineError message={error} onRetry={() => void refresh()} /> : null}
@@ -174,25 +197,25 @@ export default function HomeScreen() {
             <View style={styles.statsGrid}>
               {permitted.has("finance") ? (
                 <>
-                  <StatCard title="الرصيد الحالي" value={formatDzd(dashboard.stats.balance)} icon={Wallet} tone="blue" onPress={() => goToSection("finance")} />
-                  <StatCard title="الأموال الداخلة" value={formatDzd(dashboard.stats.incoming)} icon={ArrowDownLeft} tone="green" onPress={() => goToSection("finance")} />
-                  <StatCard title="الأموال الخارجة" value={formatDzd(dashboard.stats.outgoing)} icon={ArrowUpRight} tone="red" onPress={() => goToSection("finance")} />
+                  <StatCard compact={compact} title="الرصيد الحالي" value={formatDzd(dashboard.stats.balance)} icon={Wallet} tone="blue" onPress={() => goToSection("finance")} />
+                  <StatCard compact={compact} title="الأموال الداخلة" value={formatDzd(dashboard.stats.incoming)} icon={ArrowDownLeft} tone="green" onPress={() => goToSection("finance")} />
+                  <StatCard compact={compact} title="الأموال الخارجة" value={formatDzd(dashboard.stats.outgoing)} icon={ArrowUpRight} tone="red" onPress={() => goToSection("finance")} />
                 </>
               ) : null}
               {permitted.has("inventory") ? (
                 <>
-                  <StatCard title="إجمالي المشتريات" value={formatDzd(dashboard.stats.purchases)} icon={ShoppingCart} tone="amber" onPress={() => goToSection("inventory")} />
-                  <StatCard title="قيمة المخزون" value={formatDzd(dashboard.stats.inventoryValue)} icon={Boxes} tone="blue" onPress={() => goToSection("inventory")} />
+                  <StatCard compact={compact} title="إجمالي المشتريات" value={formatDzd(dashboard.stats.purchases)} icon={ShoppingCart} tone="amber" onPress={() => goToSection("inventory")} />
+                  <StatCard compact={compact} title="قيمة المخزون" value={formatDzd(dashboard.stats.inventoryValue)} icon={Boxes} tone="blue" onPress={() => goToSection("inventory")} />
                 </>
               ) : null}
               {permitted.has("cheques") ? (
                 <>
-                  <StatCard title="الشيكات قيد الانتظار" value={formatDzd(dashboard.stats.pendingCheques)} detail={`${dashboard.stats.pendingChequeCount} شيك`} icon={ReceiptText} tone="violet" onPress={() => goToSection("cheques")} />
-                  <StatCard title="الشيكات المستحقة" value={formatDzd(dashboard.stats.dueCheques)} detail={`${dashboard.stats.dueChequeCount} شيك مستحق`} icon={Clock3} tone="amber" onPress={() => goToSection("cheques")} />
+                  <StatCard compact={compact} title="الشيكات قيد الانتظار" value={formatDzd(dashboard.stats.pendingCheques)} detail={`${dashboard.stats.pendingChequeCount} شيك`} icon={ReceiptText} tone="violet" onPress={() => goToSection("cheques")} />
+                  <StatCard compact={compact} title="الشيكات المستحقة" value={formatDzd(dashboard.stats.dueCheques)} detail={`${dashboard.stats.dueChequeCount} شيك مستحق`} icon={Clock3} tone="amber" onPress={() => goToSection("cheques")} />
                 </>
               ) : null}
               {permitted.has("rentals") ? (
-                <StatCard title="المبالغ المتبقية في الكراء" value={formatDzd(dashboard.stats.rentalRemaining)} icon={Building2} tone="blue" onPress={() => goToSection("rentals")} />
+                  <StatCard compact={compact} title="المبالغ المتبقية في الكراء" value={formatDzd(dashboard.stats.rentalRemaining)} icon={Building2} tone="blue" onPress={() => goToSection("rentals")} />
               ) : null}
             </View>
 
@@ -254,41 +277,22 @@ export default function HomeScreen() {
   );
 }
 
-function BrandHeader({ title, onMenu, onSignOut }: { title: string; onMenu?: () => void; onSignOut: () => void }) {
-  return (
-    <View style={styles.header}>
-      <View style={styles.headerBrand}>
-        {onMenu ? <Pressable onPress={onMenu} style={styles.headerIcon}><Menu size={21} color="#FFFFFF" /></Pressable> : null}
-        <View style={styles.headerLogo}><Text style={styles.headerLogoText}>B</Text></View>
-        <View>
-          <Text style={styles.headerCompany}>BENNINI ETPI</Text>
-          <Text style={styles.headerTitle}>{title}</Text>
-        </View>
-      </View>
-      <Pressable onPress={onSignOut} accessibilityLabel="تسجيل الخروج" style={styles.headerIcon}>
-        <LogOut size={18} color="#D8E2EF" />
-      </Pressable>
-    </View>
-  );
-}
-
 function PublicWelcome() {
+  const { width } = useWindowDimensions();
+  const compact = width < 620;
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: "center", padding: 20 }}>
-      <View style={{ width: "100%", maxWidth: 790, alignSelf: "center", borderRadius: 25, overflow: "hidden", backgroundColor: "#FFFFFF", flexDirection: "row", minHeight: 390, borderWidth: 1, borderColor: colors.border }}>
-        <LinearGradient colors={[colors.navy, colors.blue, "#6232A7"]} style={{ flex: 1, minWidth: 0, justifyContent: "space-between", padding: 26 }}>
+      <View style={{ width: "100%", maxWidth: 790, alignSelf: "center", borderRadius: 25, overflow: "hidden", backgroundColor: "#FFFFFF", flexDirection: compact ? "column" : "row", minHeight: compact ? undefined : 390, borderWidth: 1, borderColor: colors.border }}>
+        <LinearGradient colors={[colors.navy, colors.blue, "#6232A7"]} style={{ flex: compact ? undefined : 1, minWidth: 0, minHeight: compact ? 210 : undefined, justifyContent: "space-between", padding: compact ? 22 : 26 }}>
           <View>
-            <View style={{ width: 52, height: 52, borderRadius: 17, backgroundColor: colors.yellow, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: colors.navy, fontSize: 27, fontWeight: "900" }}>B</Text>
-            </View>
-            <Text style={{ color: "#FFFFFF", fontSize: 19, fontWeight: "900", marginTop: 18 }}>BENNINI ETPI</Text>
+            <CompanyLogo width={142} height={78} framed />
             <Text style={{ color: "#E1E8F4", fontSize: 12, marginTop: 6 }}>منصة العمل الموحدة</Text>
           </View>
           <Text style={{ color: "#E1E8F4", fontSize: 13, lineHeight: 23, textAlign: "right" }}>
             متابعة مالية وتشغيلية واضحة، مع وصول آمن لكل عضو بحسب صلاحياته.
           </Text>
         </LinearGradient>
-        <View style={{ flex: 1.12, minWidth: 0, justifyContent: "center", padding: 27 }}>
+        <View style={{ flex: compact ? undefined : 1.12, minWidth: 0, justifyContent: "center", padding: compact ? 22 : 27 }}>
           <Text style={{ color: colors.navy, fontSize: 22, fontWeight: "900", textAlign: "right" }}>الدخول إلى المنصة</Text>
           <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 21, textAlign: "right", marginTop: 8, marginBottom: 23 }}>
             واجهة موحدة للإدارة والفريق الميداني. تظهر الأقسام المتاحة بعد اعتماد حسابك.
@@ -313,7 +317,7 @@ function PublicWelcome() {
 }
 
 function StatCard({
-  title, value, detail, icon: Icon, tone, onPress,
+  title, value, detail, icon: Icon, tone, onPress, compact,
 }: {
   title: string;
   value: string;
@@ -321,6 +325,7 @@ function StatCard({
   icon: typeof Wallet;
   tone: "blue" | "green" | "red" | "amber" | "violet";
   onPress: () => void;
+  compact: boolean;
 }) {
   const palette = {
     blue: { fg: colors.blue, bg: "#EAF1FB" },
@@ -330,7 +335,7 @@ function StatCard({
     violet: { fg: colors.violet, bg: "#F2EDFF" },
   }[tone];
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.statCard, pressed && { transform: [{ scale: 0.985 }] }]}>
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.statCard, { width: compact ? "100%" : "48.2%" }, pressed && { transform: [{ scale: 0.985 }] }]}>
       <View style={styles.statTop}>
         <View style={[styles.statIcon, { backgroundColor: palette.bg }]}><Icon size={19} color={palette.fg} /></View>
         <ChevronLeft size={16} color="#A6B2C1" />
@@ -391,13 +396,6 @@ function formatDate(value: string) {
 }
 
 const styles = {
-  header: { minHeight: 70, paddingHorizontal: 18, backgroundColor: colors.navy, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const },
-  headerBrand: { flexDirection: "row" as const, alignItems: "center" as const, gap: 10 },
-  headerLogo: { width: 38, height: 38, borderRadius: 12, backgroundColor: colors.yellow, alignItems: "center" as const, justifyContent: "center" as const },
-  headerLogoText: { color: colors.navy, fontWeight: "900" as const, fontSize: 18 },
-  headerCompany: { color: "#FFFFFF", fontWeight: "900" as const, fontSize: 12, letterSpacing: 0.6 },
-  headerTitle: { color: "#D5DFEA", fontSize: 11, marginTop: 3 },
-  headerIcon: { minWidth: 38, height: 38, borderRadius: 12, alignItems: "center" as const, justifyContent: "center" as const, backgroundColor: "#FFFFFF1A" },
   page: { width: "100%" as const, maxWidth: 1000, alignSelf: "center" as const, padding: 18, paddingBottom: 30, gap: 18 },
   welcome: { minHeight: 142, borderRadius: 19, padding: 20, backgroundColor: colors.blue, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, overflow: "hidden" as const },
   welcomeCopy: { flex: 1, alignItems: "flex-start" as const },
@@ -406,10 +404,9 @@ const styles = {
   welcomeSubtitle: { color: "#D8E4F2", fontSize: 12, marginTop: 5, textAlign: "right" as const },
   rolePill: { marginTop: 11, borderRadius: 20, backgroundColor: "#FFFFFF20", paddingHorizontal: 11, paddingVertical: 5 },
   rolePillText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" as const },
-  welcomeMark: { width: 68, height: 68, borderRadius: 24, backgroundColor: colors.yellow, alignItems: "center" as const, justifyContent: "center" as const, marginLeft: 14, transform: [{ rotate: "-8deg" }] },
-  welcomeMarkText: { color: colors.navy, fontSize: 35, fontWeight: "900" as const },
+  welcomeMark: { borderRadius: 12, backgroundColor: "#FFFFFF", alignItems: "center" as const, justifyContent: "center" as const, padding: 7, marginLeft: 14 },
   statsGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, justifyContent: "space-between" as const, gap: 11 },
-  statCard: { width: "48.2%" as const, minHeight: 145, borderRadius: 16, backgroundColor: "#FFFFFF", padding: 13, borderWidth: 1, borderColor: colors.border, overflow: "hidden" as const },
+  statCard: { minHeight: 145, borderRadius: 16, backgroundColor: "#FFFFFF", padding: 13, borderWidth: 1, borderColor: colors.border, overflow: "hidden" as const },
   statTop: { flexDirection: "row" as const, justifyContent: "space-between" as const, alignItems: "center" as const },
   statIcon: { width: 36, height: 36, borderRadius: 12, alignItems: "center" as const, justifyContent: "center" as const },
   statTitle: { color: colors.muted, fontSize: 11, fontWeight: "600" as const, textAlign: "right" as const, marginTop: 12 },

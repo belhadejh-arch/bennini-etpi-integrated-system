@@ -2,11 +2,14 @@ import { useSignUp } from "@clerk/expo";
 import { Link, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { StatusBar } from "expo-status-bar";
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { CompanyLogo } from "../components/CompanyLogo";
 import { colors } from "../../lib/theme";
 
 export default function SignUpScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
   const { signUp, fetchStatus } = useSignUp();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -66,22 +69,22 @@ export default function SignUpScreen() {
   };
 
   return (
-    <LinearGradient colors={[colors.navy, "#103E7C", "#5E33AA"]} style={{ flex: 1 }}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 22 }} keyboardShouldPersistTaps="handled">
-        <View style={{ width: "100%", maxWidth: 440, alignSelf: "center" }}>
-          <View style={{ alignItems: "center", marginBottom: 22 }}>
-            <View style={{ width: 60, height: 60, borderRadius: 20, backgroundColor: colors.yellow, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: colors.navy, fontWeight: "900", fontSize: 21 }}>B</Text>
+    <LinearGradient colors={["#F7F9FC", "#EDF2F8", "#E5EDF6"]} style={{ flex: 1 }}>
+      <StatusBar style="dark" backgroundColor="#F7F9FC" />
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+        <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", paddingHorizontal: width < 380 ? 16 : 22, paddingVertical: 20 }} keyboardShouldPersistTaps="handled">
+          <View style={{ width: "100%", maxWidth: 440, alignSelf: "center" }}>
+            <View style={{ alignItems: "center", marginBottom: 19, backgroundColor: "transparent" }}>
+              <CompanyLogo width={Math.min(width - (width < 380 ? 64 : 100), 230)} height={116} />
+              <Text style={{ color: colors.navy, fontSize: 13, fontWeight: "700", marginTop: 5 }}>حساب منصة BENNINI ETPI</Text>
             </View>
-            <Text style={{ color: "#FFFFFF", fontSize: 19, fontWeight: "900", marginTop: 10 }}>حساب منصة BENNINI ETPI</Text>
-          </View>
-          <View style={{ backgroundColor: "#FFFFFF", borderRadius: 24, padding: 23 }}>
-            <Text style={{ color: colors.navy, fontSize: 21, fontWeight: "800", textAlign: "right" }}>
-              إنشاء حساب عضو
-            </Text>
-            <Text style={{ color: colors.muted, fontSize: 13, textAlign: "right", marginTop: 6, marginBottom: 20, lineHeight: 20 }}>
-              بعد تأكيد البريد، يبقى الحساب بانتظار تفعيل المدير وتحديد الأقسام.
-            </Text>
+            <View style={{ backgroundColor: "#FFFFFF", borderRadius: 24, padding: width < 380 ? 18 : 23 }}>
+              <Text style={{ color: colors.navy, fontSize: 21, fontWeight: "800", textAlign: "right" }}>
+                إنشاء حساب عضو
+              </Text>
+              <Text style={{ color: colors.muted, fontSize: 13, textAlign: "right", marginTop: 6, marginBottom: 20, lineHeight: 20 }}>
+                بعد تأكيد البريد، يبقى الحساب بانتظار تفعيل المدير وتحديد الأقسام.
+              </Text>
 
             {signUp.status === "missing_requirements" &&
             signUp.unverifiedFields.includes("email_address") &&
@@ -115,9 +118,10 @@ export default function SignUpScreen() {
                 <Pressable><Text style={{ color: colors.blue, fontWeight: "700" }}>لديك حساب؟ تسجيل الدخول</Text></Pressable>
               </Link>
             </View>
+            </View>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </LinearGradient>
   );
 }

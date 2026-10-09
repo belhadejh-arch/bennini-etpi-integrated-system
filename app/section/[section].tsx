@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { AppHeader, HeaderAction } from "../components/AppHeader";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 import { sections, type SectionId } from "../../shared/sections";
@@ -102,14 +103,19 @@ export default function SectionScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.back}><ArrowRight size={19} color="#FFFFFF" /></Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.brand}>BENNINI ETPI</Text>
-          <Text style={styles.headerTitle}>{title}</Text>
-        </View>
-        <Pressable onPress={() => void refresh()} style={styles.back}><RefreshCw size={17} color="#FFFFFF" /></Pressable>
-      </View>
+      <AppHeader
+        title={title}
+        leftAction={
+          <HeaderAction label="رجوع" onPress={() => router.back()}>
+            <ArrowRight size={19} color="#FFFFFF" />
+          </HeaderAction>
+        }
+        rightAction={
+          <HeaderAction label="تحديث" onPress={() => void refresh()}>
+            <RefreshCw size={17} color="#FFFFFF" />
+          </HeaderAction>
+        }
+      />
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
         <View style={styles.intro}>
           <Text style={styles.title}>{title}</Text>
@@ -225,10 +231,6 @@ function DataCard({ item, section }: { item: Record<string, unknown>; section: S
 }
 
 const styles = {
-  header: { minHeight: 70, paddingHorizontal: 16, backgroundColor: colors.navy, flexDirection: "row" as const, alignItems: "center" as const, gap: 11 },
-  back: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#FFFFFF1A", alignItems: "center" as const, justifyContent: "center" as const },
-  brand: { color: colors.yellow, fontWeight: "900" as const, fontSize: 11 },
-  headerTitle: { color: "#FFFFFF", fontWeight: "700" as const, fontSize: 14, marginTop: 3 },
   page: { width: "100%" as const, maxWidth: 840, alignSelf: "center" as const, padding: 18, paddingBottom: 34, gap: 13 },
   intro: { marginBottom: 3 },
   title: { color: colors.navy, fontWeight: "900" as const, fontSize: 21, textAlign: "right" as const },

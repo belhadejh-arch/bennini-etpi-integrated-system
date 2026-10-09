@@ -2,6 +2,7 @@ import { useSignIn } from "@clerk/expo";
 import { Link, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { useState } from "react";
+import { StatusBar } from "expo-status-bar";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -11,11 +12,14 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
+import { CompanyLogo } from "../components/CompanyLogo";
 import { colors } from "../../lib/theme";
 
 export default function SignInScreen() {
   const router = useRouter();
+  const { width } = useWindowDimensions();
   const { signIn, fetchStatus } = useSignIn();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -78,34 +82,20 @@ export default function SignInScreen() {
   };
 
   return (
-    <LinearGradient colors={[colors.navy, "#103E7C", "#5E33AA"]} style={{ flex: 1 }}>
+    <LinearGradient colors={["#F7F9FC", "#EDF2F8", "#E5EDF6"]} style={{ flex: 1 }}>
+      <StatusBar style="dark" backgroundColor="#F7F9FC" />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1 }}
       >
         <ScrollView
-          contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 22 }}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: "center", paddingHorizontal: width < 380 ? 16 : 22, paddingVertical: 20 }}
           keyboardShouldPersistTaps="handled"
         >
           <View style={{ width: "100%", maxWidth: 440, alignSelf: "center" }}>
-            <View style={{ alignItems: "center", marginBottom: 24 }}>
-              <View
-                style={{
-                  width: 68,
-                  height: 68,
-                  borderRadius: 22,
-                  backgroundColor: colors.yellow,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginBottom: 12,
-                }}
-              >
-                <Text style={{ color: colors.navy, fontWeight: "900", fontSize: 22 }}>B</Text>
-              </View>
-              <Text style={{ color: "#FFFFFF", fontSize: 22, fontWeight: "900", letterSpacing: 1 }}>
-                BENNINI ETPI
-              </Text>
-              <Text style={{ color: "#DFE7F2", fontSize: 13, marginTop: 6, textAlign: "center" }}>
+            <View style={{ alignItems: "center", marginBottom: 22, backgroundColor: "transparent" }}>
+              <CompanyLogo width={Math.min(width - (width < 380 ? 64 : 100), 230)} height={116} />
+              <Text style={{ color: colors.navy, fontSize: 13, fontWeight: "700", marginTop: 5, textAlign: "center" }}>
                 منصة موحّدة لإدارة الأشغال والمالية
               </Text>
             </View>
@@ -114,7 +104,7 @@ export default function SignInScreen() {
               style={{
                 backgroundColor: colors.surface,
                 borderRadius: 25,
-                padding: 24,
+                padding: width < 380 ? 18 : 24,
                 shadowColor: "#000",
                 shadowOpacity: 0.18,
                 shadowRadius: 25,
