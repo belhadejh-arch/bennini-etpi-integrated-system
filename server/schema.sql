@@ -44,9 +44,45 @@ CREATE TABLE IF NOT EXISTS inventory_items (
   remaining_quantity INTEGER NOT NULL CHECK (remaining_quantity >= 0),
   buy_price NUMERIC(16, 2) NOT NULL CHECK (buy_price >= 0),
   total_cost NUMERIC(16, 2) NOT NULL CHECK (total_cost >= 0),
+  sale_price NUMERIC(16, 2) CHECK (sale_price IS NULL OR sale_price >= 0),
   supplier TEXT NOT NULL DEFAULT '',
   invoice_number TEXT NOT NULL DEFAULT '',
   purchase_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE inventory_items
+  ADD COLUMN IF NOT EXISTS sale_price NUMERIC(16, 2),
+  ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS inventory_movements (
+  id BIGSERIAL PRIMARY KEY,
+  inventory_item_id BIGINT NOT NULL REFERENCES inventory_items(id) ON DELETE RESTRICT,
+  movement_type TEXT NOT NULL CHECK (movement_type IN ('sale', 'use')),
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  unit_price NUMERIC(16, 2) CHECK (unit_price IS NULL OR unit_price >= 0),
+  counterparty TEXT NOT NULL DEFAULT '',
+  movement_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  notes TEXT NOT NULL DEFAULT '',
+  recorded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+  recorded_by_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (
+    (movement_type = 'sale' AND unit_price IS NOT NULL) OR
+    (movement_type = 'use' AND unit_price IS NULL)
+  )
+);
+
+CREATE TABLE IF NOT EXISTS inventory_attachments (
+  id BIGSERIAL PRIMARY KEY,
+  inventory_item_id BIGINT NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL CHECK (file_size > 0),
+  file_data BYTEA NOT NULL,
+  uploaded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+  uploaded_by_name TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -110,5 +146,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS transactions_date_idx ON transactions (transaction_date DESC);
 CREATE INDEX IF NOT EXISTS transactions_party_idx ON transactions (party);
 CREATE INDEX IF NOT EXISTS transaction_attachments_transaction_idx ON transaction_attachments (transaction_id, created_at);
+CREATE INDEX IF NOT EXISTS inventory_items_name_idx ON inventory_items (name);
+CREATE INDEX IF NOT EXISTS inventory_items_supplier_idx ON inventory_items (supplier);
+CREATE INDEX IF NOT EXISTS inventory_items_invoice_idx ON inventory_items (invoice_number);
+CREATE INDEX IF NOT EXISTS inventory_items_purchase_date_idx ON inventory_items (purchase_date DESC);
+CREATE INDEX IF NOT EXISTS inventory_movements_item_date_idx ON inventory_movements (inventory_item_id, movement_date DESC, id DESC);
+CREATE INDEX IF NOT EXISTS inventory_attachments_item_idx ON inventory_attachments (inventory_item_id, created_at);
 CREATE INDEX IF NOT EXISTS field_expenses_created_idx ON field_expenses (created_at DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs (created_at DESC);

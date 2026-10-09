@@ -195,12 +195,84 @@ function validIsoDate(value: unknown): value is string {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
+const inventoryItemSelect = `
+  SELECT i.id, i.name, i.quantity, i.remaining_quantity, i.buy_price, i.total_cost,
+    i.sale_price, i.supplier, i.invoice_number, i.purchase_date, i.notes, i.created_at,
+    CASE WHEN i.sale_price IS NULL THEN NULL
+      ELSE i.quantity * i.sale_price - i.total_cost END AS expected_profit,
+    COALESCE(m.sold_quantity, 0)::int AS sold_quantity,
+    COALESCE(m.used_quantity, 0)::int AS used_quantity,
+    COALESCE(m.realized_profit, 0) AS realized_profit,
+    COALESCE((
+      SELECT json_agg(json_build_object(
+        'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
+      ) ORDER BY a.created_at, a.id)
+      FROM inventory_attachments a WHERE a.inventory_item_id = i.id
+    ), '[]'::json) AS attachments
+  FROM inventory_items i
+  LEFT JOIN (
+    SELECT im.inventory_item_id,
+      SUM(im.quantity) FILTER (WHERE im.movement_type = 'sale') AS sold_quantity,
+      SUM(im.quantity) FILTER (WHERE im.movement_type = 'use') AS used_quantity,
+      SUM(CASE WHEN im.movement_type = 'sale'
+        THEN im.quantity * (im.unit_price - item.buy_price) ELSE 0 END) AS realized_profit
+    FROM inventory_movements im
+    JOIN inventory_items item ON item.id = im.inventory_item_id
+    GROUP BY im.inventory_item_id
+  ) m ON m.inventory_item_id = i.id`;
+
+const inventorySummaryQuery = `
+  WITH movement_totals AS (
+    SELECT im.inventory_item_id,
+      SUM(im.quantity) FILTER (WHERE im.movement_type = 'sale') AS sold_quantity,
+      SUM(im.quantity) FILTER (WHERE im.movement_type = 'use') AS used_quantity,
+      SUM(CASE WHEN im.movement_type = 'sale'
+        THEN im.quantity * (im.unit_price - item.buy_price) ELSE 0 END) AS realized_profit
+    FROM inventory_movements im
+    JOIN inventory_items item ON item.id = im.inventory_item_id
+    GROUP BY im.inventory_item_id
+  )
+  SELECT COUNT(*)::int AS item_count,
+    COALESCE(SUM(i.quantity), 0)::bigint AS purchased_quantity,
+    COALESCE(SUM(i.remaining_quantity), 0)::bigint AS remaining_quantity,
+    COALESCE(SUM(COALESCE(m.sold_quantity, 0)), 0)::bigint AS sold_quantity,
+    COALESCE(SUM(COALESCE(m.used_quantity, 0)), 0)::bigint AS used_quantity,
+    COALESCE(SUM(i.total_cost), 0) AS total_cost,
+    COALESCE(SUM(i.remaining_quantity * i.buy_price), 0) AS stock_value,
+    COALESCE(SUM(CASE WHEN i.sale_price IS NULL THEN 0
+      ELSE i.quantity * i.sale_price - i.total_cost END), 0) AS expected_profit,
+    COALESCE(SUM(COALESCE(m.realized_profit, 0)), 0) AS realized_profit
+  FROM inventory_items i
+  LEFT JOIN movement_totals m ON m.inventory_item_id = i.id`;
+
 function uploadFiles(req: Request, res: Response, next: NextFunction) {
   transactionUpload(req, res, (error) => {
     if (!error) return next();
     const message = error instanceof Error ? error.message : "تعذر رفع المستند.";
     return fail(res, error instanceof multer.MulterError ? 400 : 415, message);
   });
+}
+
+function validInventoryPurchase(body: Record<string, unknown>) {
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const supplier = typeof body.supplier === "string" ? body.supplier.trim() : "";
+  const invoiceNumber = typeof body.invoiceNumber === "string" ? body.invoiceNumber.trim() : "";
+  const notes = typeof body.notes === "string" ? body.notes.trim() : "";
+  const quantity = Number(body.quantity);
+  const buyPrice = Number(body.buyPrice);
+  const salePrice = Number(body.salePrice);
+  const purchaseDate = body.purchaseDate;
+  const maxMoney = 99999999999999.99;
+  if (!name || name.length > 200 || !supplier || supplier.length > 200 ||
+      invoiceNumber.length > 120 || notes.length > 5000 ||
+      !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1000000000 ||
+      !Number.isFinite(buyPrice) || buyPrice < 0 || buyPrice > maxMoney ||
+      !Number.isFinite(salePrice) || salePrice < 0 || salePrice > maxMoney ||
+      quantity * buyPrice > maxMoney || quantity * salePrice > maxMoney ||
+      (purchaseDate !== undefined && !validIsoDate(purchaseDate))) {
+    return null;
+  }
+  return { name, supplier, invoiceNumber, notes, quantity, buyPrice, salePrice, purchaseDate };
 }
 
 async function recalculateCashBalances(client: pg.PoolClient) {
@@ -364,6 +436,221 @@ app.get("/api/transactions", authenticate, requireSection("finance"), async (req
   } catch (error) {
     console.error("Transaction search failed:", error);
     fail(res, 500, "تعذر تحميل العمليات المالية.");
+  }
+});
+
+app.get("/api/inventory", authenticate, requireSection("inventory"), async (req, res) => {
+  const query = req.query;
+  const name = typeof query.name === "string" ? query.name.trim() : "";
+  const supplier = typeof query.supplier === "string" ? query.supplier.trim() : "";
+  const invoice = typeof query.invoice === "string" ? query.invoice.trim() : "";
+  const from = typeof query.from === "string" ? query.from : "";
+  const to = typeof query.to === "string" ? query.to : "";
+  const minPrice = typeof query.minPrice === "string" ? query.minPrice : "";
+  const maxPrice = typeof query.maxPrice === "string" ? query.maxPrice : "";
+  const minSalePrice = typeof query.minSalePrice === "string" ? query.minSalePrice : "";
+  const maxSalePrice = typeof query.maxSalePrice === "string" ? query.maxSalePrice : "";
+  const stock = typeof query.stock === "string" ? query.stock : "";
+  const maxMoney = 99999999999999.99;
+
+  if (name.length > 200 || supplier.length > 200 || invoice.length > 120) return fail(res, 400, "قيمة البحث أطول من الحد المسموح.");
+  if (from && !validIsoDate(from)) return fail(res, 400, "تاريخ البداية غير صالح.");
+  if (to && !validIsoDate(to)) return fail(res, 400, "تاريخ النهاية غير صالح.");
+  if (from && to && from > to) return fail(res, 400, "تاريخ البداية يجب أن يسبق تاريخ النهاية.");
+  if (minPrice && (!Number.isFinite(Number(minPrice)) || Number(minPrice) < 0 || Number(minPrice) > maxMoney)) return fail(res, 400, "الحد الأدنى للسعر غير صالح.");
+  if (maxPrice && (!Number.isFinite(Number(maxPrice)) || Number(maxPrice) < 0 || Number(maxPrice) > maxMoney)) return fail(res, 400, "الحد الأعلى للسعر غير صالح.");
+  if (minPrice && maxPrice && Number(minPrice) > Number(maxPrice)) return fail(res, 400, "الحد الأدنى للسعر أكبر من الحد الأعلى.");
+  if (minSalePrice && (!Number.isFinite(Number(minSalePrice)) || Number(minSalePrice) < 0 || Number(minSalePrice) > maxMoney)) return fail(res, 400, "الحد الأدنى لسعر البيع غير صالح.");
+  if (maxSalePrice && (!Number.isFinite(Number(maxSalePrice)) || Number(maxSalePrice) < 0 || Number(maxSalePrice) > maxMoney)) return fail(res, 400, "الحد الأعلى لسعر البيع غير صالح.");
+  if (minSalePrice && maxSalePrice && Number(minSalePrice) > Number(maxSalePrice)) return fail(res, 400, "الحد الأدنى لسعر البيع أكبر من الحد الأعلى.");
+  if (stock && !["available", "empty"].includes(stock)) return fail(res, 400, "حالة المخزون غير صالحة.");
+
+  const where: string[] = [];
+  const values: unknown[] = [];
+  const value = (item: unknown) => {
+    values.push(item);
+    return `$${values.length}`;
+  };
+  if (name) where.push(`i.name ILIKE ${value(`%${name}%`)}`);
+  if (supplier) where.push(`i.supplier ILIKE ${value(`%${supplier}%`)}`);
+  if (invoice) where.push(`i.invoice_number ILIKE ${value(`%${invoice}%`)}`);
+  if (from) where.push(`i.purchase_date >= ${value(from)}::date`);
+  if (to) where.push(`i.purchase_date <= ${value(to)}::date`);
+  if (minPrice) where.push(`i.buy_price >= ${value(minPrice)}`);
+  if (maxPrice) where.push(`i.buy_price <= ${value(maxPrice)}`);
+  if (minSalePrice) where.push(`i.sale_price >= ${value(minSalePrice)}`);
+  if (maxSalePrice) where.push(`i.sale_price <= ${value(maxSalePrice)}`);
+  if (stock === "available") where.push("i.remaining_quantity > 0");
+  if (stock === "empty") where.push("i.remaining_quantity = 0");
+
+  const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const page = Math.max(1, Math.min(100000, Number.parseInt(String(query.page ?? "1"), 10) || 1));
+  const pageSize = 25;
+  try {
+    const [items, count, summary] = await Promise.all([
+      pool.query(
+        `${inventoryItemSelect} ${clause}
+         ORDER BY i.purchase_date DESC, i.created_at DESC, i.id DESC
+         LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        [...values, pageSize, (page - 1) * pageSize],
+      ),
+      pool.query(`SELECT COUNT(*)::int AS total FROM inventory_items i ${clause}`, values),
+      pool.query(inventorySummaryQuery),
+    ]);
+    res.json({ items: items.rows, total: count.rows[0].total, page, pageSize, summary: summary.rows[0] });
+  } catch (error) {
+    console.error("Inventory search failed:", error);
+    fail(res, 500, "تعذر تحميل بيانات المشتريات والمخزون.");
+  }
+});
+
+app.post("/api/inventory", authenticate, requireSection("inventory"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+  const purchase = validInventoryPurchase(req.body ?? {});
+  if (!purchase) return fail(res, 400, "تحقق من اسم السلعة والكمية والأسعار والمورد وتاريخ الشراء.");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const member = req.member!;
+    const result = await client.query(
+      `INSERT INTO inventory_items
+        (name, quantity, remaining_quantity, buy_price, total_cost, sale_price, supplier, invoice_number, purchase_date, notes)
+       VALUES ($1, $2, $2, $3, $2 * $3, $4, $5, $6, COALESCE($7::date, CURRENT_DATE), $8)
+       RETURNING id`,
+      [purchase.name, purchase.quantity, purchase.buyPrice, purchase.salePrice, purchase.supplier,
+        purchase.invoiceNumber, purchase.purchaseDate ?? null, purchase.notes],
+    );
+    const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [result.rows[0].id]);
+    await writeAuditWithClient(client, member, "تسجيل عملية شراء", `${purchase.name} — ${purchase.quantity} قطعة من ${purchase.supplier} بقيمة ${purchase.quantity * purchase.buyPrice} دج.`);
+    await client.query("COMMIT");
+    res.status(201).json({ item: item.rows[0] });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Inventory purchase creation failed:", error);
+    fail(res, 500, "تعذر تسجيل عملية الشراء.");
+  } finally {
+    client.release();
+  }
+});
+
+app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  const purchase = validInventoryPurchase(req.body ?? {});
+  if (!Number.isSafeInteger(id) || id <= 0 || !purchase || !validIsoDate(purchase.purchaseDate)) {
+    return fail(res, 400, "بيانات الشراء غير صالحة.");
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query(
+      "SELECT id FROM inventory_items WHERE id = $1 FOR UPDATE",
+      [id],
+    );
+    if (!existing.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "عملية الشراء غير موجودة.");
+    }
+    const movements = await client.query(
+      "SELECT COALESCE(SUM(quantity), 0)::int AS quantity FROM inventory_movements WHERE inventory_item_id = $1",
+      [id],
+    );
+    if (purchase.quantity < Number(movements.rows[0].quantity)) {
+      await client.query("ROLLBACK");
+      return fail(res, 409, "لا يمكن تخفيض الكمية إلى أقل من الكمية المباعة أو المستعملة.");
+    }
+    await client.query(
+      `UPDATE inventory_items SET name = $1, quantity = $2, remaining_quantity = $2 - $3,
+        buy_price = $4, total_cost = $2 * $4, sale_price = $5, supplier = $6,
+        invoice_number = $7, purchase_date = $8, notes = $9
+       WHERE id = $10`,
+      [purchase.name, purchase.quantity, movements.rows[0].quantity, purchase.buyPrice, purchase.salePrice,
+        purchase.supplier, purchase.invoiceNumber, purchase.purchaseDate, purchase.notes, id],
+    );
+    const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [id]);
+    await writeAuditWithClient(client, req.member!, "تعديل بيانات شراء", `تحديث بيانات السلعة ${purchase.name}، رقم ${id}.`);
+    await client.query("COMMIT");
+    res.json({ item: item.rows[0] });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Inventory purchase update failed:", error);
+    fail(res, 500, "تعذر تعديل بيانات الشراء.");
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/inventory/:id/movements", authenticate, requireSection("inventory"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  const { type, quantity, unitPrice, movementDate } = req.body ?? {};
+  const counterparty = typeof req.body?.counterparty === "string" ? req.body.counterparty.trim() : "";
+  const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() : "";
+  const parsedQuantity = Number(quantity);
+  const parsedUnitPrice = unitPrice === undefined || unitPrice === null || unitPrice === "" ? null : Number(unitPrice);
+  if (!Number.isSafeInteger(id) || id <= 0 || !["sale", "use"].includes(type) ||
+      !Number.isSafeInteger(parsedQuantity) || parsedQuantity < 1 || parsedQuantity > 1000000000 ||
+      counterparty.length > 200 || notes.length > 5000 ||
+      (movementDate !== undefined && !validIsoDate(movementDate)) ||
+      (type === "sale" && (!Number.isFinite(parsedUnitPrice) || parsedUnitPrice! < 0 || parsedQuantity * parsedUnitPrice! > 99999999999999.99)) ||
+      (type === "use" && parsedUnitPrice !== null)) {
+    return fail(res, 400, "بيانات حركة المخزون غير صالحة.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const item = await client.query(
+      "SELECT id, name, remaining_quantity FROM inventory_items WHERE id = $1 FOR UPDATE",
+      [id],
+    );
+    if (!item.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "السلعة غير موجودة.");
+    }
+    if (parsedQuantity > Number(item.rows[0].remaining_quantity)) {
+      await client.query("ROLLBACK");
+      return fail(res, 409, "الكمية المطلوبة أكبر من المخزون المتبقي.");
+    }
+    const member = req.member!;
+    const movement = await client.query(
+      `INSERT INTO inventory_movements
+        (inventory_item_id, movement_type, quantity, unit_price, counterparty, movement_date, notes, recorded_by_id, recorded_by_name)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE), $7, $8, $9)
+       RETURNING id, inventory_item_id, movement_type, quantity, unit_price, counterparty, movement_date, notes, recorded_by_name, created_at`,
+      [id, type, parsedQuantity, type === "sale" ? parsedUnitPrice : null, counterparty,
+        movementDate ?? null, notes, member.clerk_user_id, member.name],
+    );
+    await client.query(
+      "UPDATE inventory_items SET remaining_quantity = remaining_quantity - $1 WHERE id = $2",
+      [parsedQuantity, id],
+    );
+    const action = type === "sale" ? "تسجيل بيع من المخزون" : "تسجيل استعمال من المخزون";
+    await writeAuditWithClient(client, member, action, `${item.rows[0].name} — ${parsedQuantity} قطعة.`);
+    await client.query("COMMIT");
+    res.status(201).json({ movement: movement.rows[0] });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Inventory movement creation failed:", error);
+    fail(res, 500, "تعذر تسجيل حركة المخزون.");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/inventory/:id/movements", authenticate, requireSection("inventory"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم السلعة غير صالح.");
+  try {
+    const result = await pool.query(
+      `SELECT id, inventory_item_id, movement_type, quantity, unit_price, counterparty,
+        movement_date, notes, recorded_by_name, created_at
+       FROM inventory_movements WHERE inventory_item_id = $1
+       ORDER BY movement_date DESC, created_at DESC, id DESC`,
+      [id],
+    );
+    res.json({ movements: result.rows });
+  } catch (error) {
+    console.error("Inventory movement history failed:", error);
+    fail(res, 500, "تعذر تحميل سجل حركة المخزون.");
   }
 });
 
@@ -558,6 +845,72 @@ app.get("/api/transaction-attachments/:id", authenticate, requireSection("financ
     res.send(Buffer.from(attachment.file_data));
   } catch (error) {
     console.error("Transaction attachment read failed:", error);
+    fail(res, 500, "تعذر فتح المستند.");
+  }
+});
+
+app.post("/api/inventory/:id/attachments", authenticate, requireSection("inventory"), requireRole("finance"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  const files = (req.files ?? []) as Express.Multer.File[];
+  if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const item = await client.query("SELECT id, name FROM inventory_items WHERE id = $1 FOR UPDATE", [id]);
+    if (!item.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "عملية الشراء غير موجودة.");
+    }
+    const count = await client.query(
+      "SELECT COUNT(*)::int AS total FROM inventory_attachments WHERE inventory_item_id = $1",
+      [id],
+    );
+    if (Number(count.rows[0].total) + files.length > 5) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, "الحد الأقصى هو خمسة مستندات لكل عملية شراء.");
+    }
+    const member = req.member!;
+    const saved = [];
+    for (const file of files) {
+      const result = await client.query(
+        `INSERT INTO inventory_attachments
+          (inventory_item_id, file_name, mime_type, file_size, file_data, uploaded_by_id, uploaded_by_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, file_name, mime_type, file_size`,
+        [id, path.basename(file.originalname), file.mimetype, file.size, file.buffer, member.clerk_user_id, member.name],
+      );
+      saved.push(result.rows[0]);
+    }
+    await writeAuditWithClient(client, member, "إرفاق مستند بعملية شراء", `إرفاق ${files.length} مستند للسلعة ${item.rows[0].name}.`);
+    await client.query("COMMIT");
+    res.status(201).json({ attachments: saved });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Inventory attachment upload failed:", error);
+    fail(res, 500, "تعذر حفظ مستندات الشراء.");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/inventory-attachments/:id", authenticate, requireSection("inventory"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم المستند غير صالح.");
+  try {
+    const result = await pool.query(
+      "SELECT file_name, mime_type, file_data FROM inventory_attachments WHERE id = $1",
+      [id],
+    );
+    if (!result.rowCount) return fail(res, 404, "المستند غير موجود.");
+    const attachment = result.rows[0];
+    const inline = attachment.mime_type === "application/pdf" || attachment.mime_type.startsWith("image/");
+    const safeName = encodeURIComponent(String(attachment.file_name).replace(/[\r\n"]/g, ""));
+    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${safeName}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(Buffer.from(attachment.file_data));
+  } catch (error) {
+    console.error("Inventory attachment read failed:", error);
     fail(res, 500, "تعذر فتح المستند.");
   }
 });
