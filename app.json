@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Bennini ETPI",
+    "slug": "bennini-etpi",
+    "scheme": "benninietpi",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.benninietpi.app"
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

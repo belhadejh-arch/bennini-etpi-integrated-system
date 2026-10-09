@@ -1,0 +1,1 @@
+- [Expo and Clerk versions](expo-clerk-versions.md) — SDK 54 and current Clerk peers disagree on the React patch version; verify before changing either.
