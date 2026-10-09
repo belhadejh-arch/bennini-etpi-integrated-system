@@ -121,6 +121,22 @@ CREATE TABLE IF NOT EXISTS rentals (
   total_amount NUMERIC(16, 2) NOT NULL CHECK (total_amount >= 0),
   paid_amount NUMERIC(16, 2) NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
   status TEXT NOT NULL DEFAULT 'active',
+  rate_period TEXT NOT NULL DEFAULT 'daily' CHECK (rate_period IN ('daily', 'monthly')),
+  rental_rate NUMERIC(16, 2) NOT NULL DEFAULT 0 CHECK (rental_rate >= 0),
+  duration INTEGER NOT NULL DEFAULT 1 CHECK (duration > 0),
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS rental_attachments (
+  id BIGSERIAL PRIMARY KEY,
+  rental_id BIGINT NOT NULL REFERENCES rentals(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL,
+  file_data BYTEA NOT NULL,
+  uploaded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+  uploaded_by_name TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -170,5 +186,7 @@ CREATE INDEX IF NOT EXISTS cheques_beneficiary_idx ON cheques (beneficiary);
 CREATE INDEX IF NOT EXISTS cheques_bank_idx ON cheques (bank);
 CREATE INDEX IF NOT EXISTS cheques_status_due_idx ON cheques (status, due_date);
 CREATE INDEX IF NOT EXISTS cheque_attachments_cheque_idx ON cheque_attachments (cheque_id, created_at);
+CREATE INDEX IF NOT EXISTS rentals_end_date_idx ON rentals (end_date);
+CREATE INDEX IF NOT EXISTS rental_attachments_rental_idx ON rental_attachments (rental_id, created_at);
 CREATE INDEX IF NOT EXISTS field_expenses_created_idx ON field_expenses (created_at DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs (created_at DESC);

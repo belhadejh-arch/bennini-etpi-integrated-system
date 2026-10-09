@@ -14,6 +14,7 @@ import {
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import InventorySection from "./InventorySection";
 import ChequesSection from "./ChequesSection";
+import RentalsSection from "./RentalsSection";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 import { sections, type SectionId } from "../../shared/sections";
@@ -105,6 +106,7 @@ export default function SectionScreen() {
 
   if (section === "inventory") return <InventorySection />;
   if (section === "cheques") return <ChequesSection />;
+  if (section === "rentals") return <RentalsSection />;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>

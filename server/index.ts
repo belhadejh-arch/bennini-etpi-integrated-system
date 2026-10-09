@@ -48,6 +48,7 @@ type AuthenticatedRequest = Request & {
 
 const adminSections = [...allSectionIds];
 const paymentMethods = ["نقداً", "شيك", "تحويل بنكي"] as const;
+const rentalStatuses = ["active", "completed", "cancelled"] as const;
 const transactionUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024, files: 5 },
@@ -193,6 +194,103 @@ function validIsoDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+type RentalInput = {
+  equipment: string;
+  clientOrOwner: string;
+  startDate: string;
+  endDate: string;
+  ratePeriod: "daily" | "monthly";
+  rentalRate: number;
+  duration: number;
+  totalAmount: number;
+  paidAmount: number;
+  status: (typeof rentalStatuses)[number];
+  notes: string;
+};
+
+function validRental(body: Record<string, unknown>, existing?: Partial<RentalInput>): RentalInput | null {
+  const equipment = String(body.equipment ?? existing?.equipment ?? "").trim();
+  const clientOrOwner = String(body.clientOrOwner ?? existing?.clientOrOwner ?? "").trim();
+  const startDate = body.startDate ?? existing?.startDate;
+  const endDate = body.endDate ?? existing?.endDate;
+  const ratePeriod = body.ratePeriod ?? existing?.ratePeriod ?? "daily";
+  const rentalRate = Number(body.rentalRate ?? existing?.rentalRate ?? 0);
+  const paidAmount = Number(body.paidAmount ?? existing?.paidAmount ?? 0);
+  const status = body.status ?? existing?.status ?? "active";
+  const notes = String(body.notes ?? existing?.notes ?? "").trim();
+  if (!equipment || equipment.length > 200 || !clientOrOwner || clientOrOwner.length > 200 ||
+      !validIsoDate(startDate) || !validIsoDate(endDate) || endDate < startDate ||
+      !["daily", "monthly"].includes(String(ratePeriod)) ||
+      !Number.isFinite(rentalRate) || rentalRate < 0 ||
+      !Number.isFinite(paidAmount) || paidAmount < 0 ||
+      !rentalStatuses.includes(status as (typeof rentalStatuses)[number]) || notes.length > 5000) return null;
+  const days = Math.max(1, Math.round(
+    (new Date(`${endDate}T00:00:00Z`).getTime() - new Date(`${startDate}T00:00:00Z`).getTime()) / 86400000,
+  ));
+  const duration = ratePeriod === "monthly" ? Math.ceil(days / 30) : days;
+  const totalAmount = Math.round(duration * rentalRate * 100) / 100;
+  if (paidAmount > totalAmount) return null;
+  return {
+    equipment, clientOrOwner, startDate, endDate,
+    ratePeriod: ratePeriod as RentalInput["ratePeriod"],
+    rentalRate, duration, totalAmount, paidAmount,
+    status: status as RentalInput["status"], notes,
+  };
+}
+
+let rentalSchemaPromise: Promise<void> | null = null;
+
+function ensureRentalSchema() {
+  if (!rentalSchemaPromise) {
+    rentalSchemaPromise = pool.query(`
+    CREATE TABLE IF NOT EXISTS rentals (
+      id BIGSERIAL PRIMARY KEY,
+      equipment TEXT NOT NULL,
+      client_or_owner TEXT NOT NULL,
+      start_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      end_date DATE NOT NULL,
+      total_amount NUMERIC(16, 2) NOT NULL CHECK (total_amount >= 0),
+      paid_amount NUMERIC(16, 2) NOT NULL DEFAULT 0 CHECK (paid_amount >= 0),
+      status TEXT NOT NULL DEFAULT 'active',
+      rate_period TEXT NOT NULL DEFAULT 'daily',
+      rental_rate NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      duration INTEGER NOT NULL DEFAULT 1,
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE rentals
+      ADD COLUMN IF NOT EXISTS rate_period TEXT NOT NULL DEFAULT 'daily',
+      ADD COLUMN IF NOT EXISTS rental_rate NUMERIC(16, 2) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS duration INTEGER NOT NULL DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+    CREATE TABLE IF NOT EXISTS rental_attachments (
+      id BIGSERIAL PRIMARY KEY,
+      rental_id BIGINT NOT NULL REFERENCES rentals(id) ON DELETE CASCADE,
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      file_size INTEGER NOT NULL,
+      file_data BYTEA NOT NULL,
+      uploaded_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+      uploaded_by_name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS rentals_end_date_idx ON rentals (end_date);
+    CREATE INDEX IF NOT EXISTS rental_attachments_rental_idx ON rental_attachments (rental_id, created_at);
+  `).then(() => undefined);
+  }
+  return rentalSchemaPromise;
+}
+
+async function requireRentalSchema(_req: Request, res: Response, next: NextFunction) {
+  try {
+    await ensureRentalSchema();
+    next();
+  } catch (error) {
+    console.error("Rental database setup failed:", error);
+    fail(res, 503, "قاعدة بيانات الكراء غير جاهزة. يرجى المحاولة لاحقاً.");
+  }
 }
 
 const inventoryItemSelect = `
@@ -921,6 +1019,193 @@ app.get("/api/cheque-attachments/:id", authenticate, requireSection("cheques"), 
   }
 });
 
+app.get("/api/rentals", requireRentalSchema, authenticate, requireSection("rentals"), async (_req, res) => {
+  try {
+    const [items, alerts] = await Promise.all([
+      pool.query(`
+        SELECT r.id, r.equipment, r.client_or_owner, r.start_date::text, r.end_date::text,
+          r.total_amount, r.paid_amount, GREATEST(r.total_amount - r.paid_amount, 0) AS remaining,
+          r.status, r.rate_period, r.rental_rate, r.duration, r.notes, r.created_at,
+          COALESCE((
+            SELECT json_agg(json_build_object(
+              'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
+            ) ORDER BY a.created_at, a.id)
+            FROM rental_attachments a WHERE a.rental_id = r.id
+          ), '[]'::json) AS attachments
+        FROM rentals r
+        ORDER BY CASE WHEN r.status = 'active' THEN 0 ELSE 1 END, r.end_date ASC, r.id DESC
+      `),
+      pool.query(`
+        SELECT COUNT(*)::int AS total,
+          COALESCE(json_agg(json_build_object(
+            'id', id, 'equipment', equipment, 'client_or_owner', client_or_owner,
+            'end_date', end_date, 'days_until_end', end_date - CURRENT_DATE
+          ) ORDER BY end_date ASC, id ASC) FILTER (WHERE id IS NOT NULL), '[]'::json) AS items
+        FROM (
+          SELECT id, equipment, client_or_owner, end_date
+          FROM rentals WHERE status = 'active' AND end_date <= CURRENT_DATE + 7
+          ORDER BY end_date ASC, id ASC LIMIT 8
+        ) due
+      `),
+    ]);
+    res.json({ items: items.rows, dueAlertCount: Number(alerts.rows[0].total), dueAlerts: alerts.rows[0].items });
+  } catch (error) {
+    console.error("Rental list failed:", error);
+    fail(res, 500, "تعذر تحميل سجل الكراء.");
+  }
+});
+
+app.post("/api/rentals", requireRentalSchema, authenticate, requireSection("rentals"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+  const rental = validRental(req.body ?? {});
+  if (!rental) return fail(res, 400, "تحقق من بيانات الكراء والتواريخ والسعر والمبلغ المدفوع.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `INSERT INTO rentals
+        (equipment, client_or_owner, start_date, end_date, total_amount, paid_amount, status,
+         rate_period, rental_rate, duration, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+      [rental.equipment, rental.clientOrOwner, rental.startDate, rental.endDate, rental.totalAmount,
+        rental.paidAmount, rental.status, rental.ratePeriod, rental.rentalRate, rental.duration, rental.notes],
+    );
+    await writeAuditWithClient(client, req.member!, "تسجيل عقد كراء",
+      `${rental.equipment} لصالح ${rental.clientOrOwner} بقيمة ${rental.totalAmount} دج.`);
+    await client.query("COMMIT");
+    res.status(201).json({ id: result.rows[0].id });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Rental creation failed:", error);
+    fail(res, 500, "تعذر تسجيل عملية الكراء.");
+  } finally {
+    client.release();
+  }
+});
+
+app.patch("/api/rentals/:id", requireRentalSchema, authenticate, requireSection("rentals"), requireRole("finance"), async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم عقد الكراء غير صالح.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query(
+      `SELECT equipment, client_or_owner AS "clientOrOwner", start_date::text AS "startDate",
+        end_date::text AS "endDate", rate_period AS "ratePeriod", rental_rate AS "rentalRate",
+        paid_amount AS "paidAmount", status, notes FROM rentals WHERE id = $1 FOR UPDATE`,
+      [id],
+    );
+    if (!existing.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "عقد الكراء غير موجود.");
+    }
+    const rental = validRental(req.body ?? {}, existing.rows[0]);
+    if (!rental) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, "بيانات الكراء غير صالحة. يجب ألا يتجاوز المدفوع الإجمالي.");
+    }
+    await client.query(
+      `UPDATE rentals SET equipment = $1, client_or_owner = $2, start_date = $3, end_date = $4,
+        total_amount = $5, paid_amount = $6, status = $7, rate_period = $8, rental_rate = $9,
+        duration = $10, notes = $11 WHERE id = $12`,
+      [rental.equipment, rental.clientOrOwner, rental.startDate, rental.endDate, rental.totalAmount,
+        rental.paidAmount, rental.status, rental.ratePeriod, rental.rentalRate, rental.duration, rental.notes, id],
+    );
+    await writeAuditWithClient(client, req.member!, "تعديل عقد كراء", `تحديث عقد الكراء رقم ${id}.`);
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Rental update failed:", error);
+    fail(res, 500, "تعذر تعديل بيانات الكراء.");
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/rentals/:id", requireRentalSchema, authenticate, requireSection("rentals"), requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم عقد الكراء غير صالح.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query("DELETE FROM rentals WHERE id = $1 RETURNING equipment", [id]);
+    if (!result.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "عقد الكراء غير موجود.");
+    }
+    await writeAuditWithClient(client, req.member!, "حذف عقد كراء", `حذف عقد كراء ${result.rows[0].equipment}.`);
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Rental deletion failed:", error);
+    fail(res, 500, "تعذر حذف عقد الكراء.");
+  } finally {
+    client.release();
+  }
+});
+
+app.post("/api/rentals/:id/attachments", requireRentalSchema, authenticate, requireSection("rentals"), requireRole("finance"), uploadFiles, async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  const files = (req.files ?? []) as Express.Multer.File[];
+  if (!Number.isSafeInteger(id) || id <= 0 || files.length === 0) return fail(res, 400, "اختر مستنداً واحداً على الأقل.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const rental = await client.query("SELECT equipment FROM rentals WHERE id = $1 FOR UPDATE", [id]);
+    if (!rental.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "عقد الكراء غير موجود.");
+    }
+    const count = await client.query("SELECT COUNT(*)::int AS total FROM rental_attachments WHERE rental_id = $1", [id]);
+    if (Number(count.rows[0].total) + files.length > 5) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, "الحد الأقصى هو خمسة مرفقات لكل عقد كراء.");
+    }
+    const member = req.member!;
+    const attachments = [];
+    for (const file of files) {
+      const saved = await client.query(
+        `INSERT INTO rental_attachments
+          (rental_id, file_name, mime_type, file_size, file_data, uploaded_by_id, uploaded_by_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, file_name, mime_type, file_size`,
+        [id, path.basename(file.originalname), file.mimetype, file.size, file.buffer, member.clerk_user_id, member.name],
+      );
+      attachments.push(saved.rows[0]);
+    }
+    await writeAuditWithClient(client, member, "إرفاق مستند بعقد كراء",
+      `إرفاق ${files.length} مستند بعقد ${rental.rows[0].equipment}.`);
+    await client.query("COMMIT");
+    res.status(201).json({ attachments });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Rental attachment upload failed:", error);
+    fail(res, 500, "تعذر حفظ مرفقات عقد الكراء.");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/rental-attachments/:id", requireRentalSchema, authenticate, requireSection("rentals"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم المستند غير صالح.");
+  try {
+    const result = await pool.query("SELECT file_name, mime_type, file_data FROM rental_attachments WHERE id = $1", [id]);
+    if (!result.rowCount) return fail(res, 404, "المستند غير موجود.");
+    const attachment = result.rows[0];
+    const inline = attachment.mime_type === "application/pdf" || attachment.mime_type.startsWith("image/");
+    const safeName = encodeURIComponent(String(attachment.file_name).replace(/[\r\n"]/g, ""));
+    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${safeName}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(Buffer.from(attachment.file_data));
+  } catch (error) {
+    console.error("Rental attachment read failed:", error);
+    fail(res, 500, "تعذر فتح مرفق عقد الكراء.");
+  }
+});
+
 app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest, res) => {
   const section = req.params.section as SectionId;
   if (!allSectionIds.includes(section)) return fail(res, 404, "القسم غير موجود.");
@@ -939,7 +1224,8 @@ app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest
       cheques: `SELECT id, cheque_number, invoice_number, amount, beneficiary, bank, issue_date, due_date, status, notes
         FROM cheques ORDER BY due_date ASC LIMIT 100`,
       rentals: `SELECT id, equipment, client_or_owner, start_date, end_date, total_amount, paid_amount,
-        GREATEST(total_amount - paid_amount, 0) AS remaining, status FROM rentals ORDER BY end_date ASC LIMIT 100`,
+        GREATEST(total_amount - paid_amount, 0) AS remaining, status, rate_period, rental_rate, duration, notes
+        FROM rentals ORDER BY end_date ASC LIMIT 100`,
       field: `SELECT id, category, amount, site_name, details, created_by_name, created_at, fuel_liters
         FROM field_expenses ORDER BY created_at DESC LIMIT 100`,
       machinery: "SELECT id, code, name, category, status, hours_worked FROM machinery ORDER BY code LIMIT 100",
