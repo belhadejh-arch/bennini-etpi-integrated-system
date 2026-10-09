@@ -1,0 +1,83 @@
+،2026-10-09T22:01:01.714907619Z ==> Cloning from https://github.com/belhadejh-arch/bennini-etpi-integrated-system
+2026-10-09T22:01:07.492430407Z ==> Checking out commit 473d6869c697ffe7a2c802a6ff3f491dae973cf9 in branch main
+2026-10-09T22:01:09.023270221Z ==> Using Node.js version 24.21.0 (default)
+2026-10-09T22:01:09.023275723Z ==> Docs on specifying a Node.js version: https://render.com/docs/node-version
+2026-10-09T22:01:09.055948983Z ==> Running build command 'npm ci && npm run typecheck'...
+2026-10-09T22:01:24.499321362Z 
+2026-10-09T22:01:24.499336427Z added 908 packages, and audited 909 packages in 15s
+2026-10-09T22:01:24.499382258Z 
+2026-10-09T22:01:24.499493993Z 89 packages are looking for funding
+2026-10-09T22:01:24.49954426Z   run `npm fund` for details
+2026-10-09T22:01:24.621437744Z 
+2026-10-09T22:01:24.621444782Z 39 vulnerabilities (16 moderate, 23 high)
+2026-10-09T22:01:24.62144633Z 
+2026-10-09T22:01:24.621448645Z To address issues that do not require attention, run:
+2026-10-09T22:01:24.621450062Z   npm audit fix
+2026-10-09T22:01:24.621451328Z 
+2026-10-09T22:01:24.62145276Z To address all issues (including breaking changes), run:
+2026-10-09T22:01:24.621454481Z   npm audit fix --force
+2026-10-09T22:01:24.62145567Z 
+2026-10-09T22:01:24.621457355Z Run `npm audit` for details.
+2026-10-09T22:01:24.785773395Z 
+2026-10-09T22:01:24.785781997Z > bennini-etpi@1.0.0 typecheck
+2026-10-09T22:01:24.785783778Z > tsc --noEmit
+2026-10-09T22:01:24.785785208Z 
+2026-10-09T22:01:29.049140858Z ==> Uploading build...
+2026-10-09T22:01:36.012126081Z ==> Uploaded in 4.6s. Compression took 2.4s
+2026-10-09T22:01:36.013812798Z ==> Build successful 🎉
+2026-10-09T22:01:37.774969618Z ==> Deploying...
+2026-10-09T22:01:37.971255357Z ==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+2026-10-09T22:01:56.116548503Z ==> Running 'npm start'
+2026-10-09T22:01:57.109126757Z 
+2026-10-09T22:01:57.10916942Z > bennini-etpi@1.0.0 start
+2026-10-09T22:01:57.10917763Z > tsx server/index.ts
+2026-10-09T22:01:57.10918081Z 
+2026-10-09T22:02:02.609515582Z /opt/render/project/src/server/index.ts:39
+2026-10-09T22:02:02.609541944Z   throw new Error("CORS_ORIGINS is required in production; set it to the Vercel site origin.");
+2026-10-09T22:02:02.609547174Z         ^
+2026-10-09T22:02:02.609549655Z 
+2026-10-09T22:02:02.609552855Z Error: CORS_ORIGINS is required in production; set it to the Vercel site origin.
+2026-10-09T22:02:02.609556195Z     at path (/opt/render/project/src/server/index.ts:39:9)
+2026-10-09T22:02:02.609559005Z     at Object.<anonymous> (/opt/render/project/src/server/index.ts:3164:18)
+2026-10-09T22:02:02.609561565Z     at Module._compile (node:internal/modules/cjs/loader:1929:14)
+2026-10-09T22:02:02.609565236Z     at Object.transformer (/opt/render/project/src/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+2026-10-09T22:02:02.609567785Z     at Module.load (node:internal/modules/cjs/loader:1651:32)
+2026-10-09T22:02:02.609570446Z     at Module._load (node:internal/modules/cjs/loader:1443:12)
+2026-10-09T22:02:02.609572996Z     at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+2026-10-09T22:02:02.609575636Z     at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:372:15)
+2026-10-09T22:02:02.609578346Z     at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:244:9)
+2026-10-09T22:02:02.609581006Z     at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+2026-10-09T22:02:02.609583446Z 
+2026-10-09T22:02:02.609585937Z Node.js v24.21.0
+2026-10-09T22:02:08.664311317Z ==> Running 'npm start'
+2026-10-09T22:02:09.566568023Z 
+2026-10-09T22:02:09.566596035Z > bennini-etpi@1.0.0 start
+2026-10-09T22:02:09.566604345Z > tsx server/index.ts
+2026-10-09T22:02:09.566608895Z 
+2026-10-09T22:02:14.960936026Z /opt/render/project/src/server/index.ts:39
+2026-10-09T22:02:14.960960348Z   throw new Error("CORS_ORIGINS is required in production; set it to the Vercel site origin.");
+2026-10-09T22:02:14.960964828Z         ^
+2026-10-09T22:02:14.960971308Z 
+2026-10-09T22:02:14.960975128Z Error: CORS_ORIGINS is required in production; set it to the Vercel site origin.
+2026-10-09T22:02:14.960978509Z     at path (/opt/render/project/src/server/index.ts:39:9)
+2026-10-09T22:02:14.960981409Z     at Object.<anonymous> (/opt/render/project/src/server/index.ts:3164:18)
+2026-10-09T22:02:14.960984399Z     at Module._compile (node:internal/modules/cjs/loader:1929:14)
+2026-10-09T22:02:14.960987919Z     at Object.transformer (/opt/render/project/src/node_modules/tsx/dist/register-B1c7OH6V.cjs:22:2188)
+2026-10-09T22:02:14.960990599Z     at Module.load (node:internal/modules/cjs/loader:1651:32)
+2026-10-09T22:02:14.960993279Z     at Module._load (node:internal/modules/cjs/loader:1443:12)
+2026-10-09T22:02:14.96099607Z     at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+2026-10-09T22:02:14.96099894Z     at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:372:15)
+2026-10-09T22:02:14.96100171Z     at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:244:9)
+2026-10-09T22:02:14.96100437Z     at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+2026-10-09T22:02:14.96100684Z 
+2026-10-09T22:02:14.96100972Z Node.js v24.21.0
+2026-10-09T22:02:22.541624334Z ==> Exited with status 1
+2026-10-09T22:02:22.544341586Z ==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
+2026-10-09T22:02:36.554445467Z ==> Running 'npm start'
+2026-10-09T22:02:37.444207883Z 
+2026-10-09T22:02:37.444236854Z > bennini-etpi@1.0.0 start
+2026-10-09T22:02:37.444242454Z > tsx server/index.ts
+2026-10-09T22:02:37.444245015Z 
+
+
+اصلاح
