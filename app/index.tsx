@@ -94,6 +94,12 @@ export default function HomeScreen() {
     () => new Set(sections.filter((section) => hasPermission(member, section.id, "view")).map((section) => section.id)),
     [member],
   );
+  const availableSections = useMemo(
+    () => sections.filter((section) => section.id !== "dashboard" && permitted.has(section.id)),
+    [permitted],
+  );
+  const hasDashboardStats = permitted.has("finance") ||
+    (canSeeFinancialData && (permitted.has("inventory") || permitted.has("cheques") || permitted.has("rentals")));
   const goToSection = (section: SectionId) => {
     if (section === "dashboard") router.push("/");
     else if (section === "users") router.push("/members");
@@ -147,7 +153,7 @@ export default function HomeScreen() {
           <View style={styles.welcomeCopy}>
             <Text style={styles.eyebrow}>BENNINI ETPI · النظام الموحد</Text>
             <Text style={styles.welcomeTitle}>مرحباً، {member?.name || user?.firstName || "عضو الفريق"}</Text>
-            <Text style={styles.welcomeSubtitle}>ملخص مالي وتشغيلي واضح لمتابعة المؤسسة.</Text>
+            <Text style={styles.welcomeSubtitle}>مساحة عملك الموحدة، مع الأقسام والمؤشرات المتاحة لحسابك.</Text>
             <View style={styles.rolePill}><Text style={styles.rolePillText}>{member?.role_name || roleLabel(member?.role)}</Text></View>
           </View>
           <View style={styles.welcomeMark}><CompanyLogo width={91} height={48} /></View>
@@ -159,8 +165,37 @@ export default function HomeScreen() {
           <Centered compact><ActivityIndicator size="large" color={colors.blue} /><Text style={styles.muted}>جارٍ تحميل المؤشرات...</Text></Centered>
         ) : dashboard ? (
           <>
-            <SectionHeading title="المؤشرات الرئيسية" description="اضغط على بطاقة لفتح تفاصيل القسم." />
-            <View style={styles.statsGrid}>
+            {availableSections.length ? (
+              <View style={styles.panel}>
+                <SectionHeading title="الأقسام المتاحة لك" description="تظهر هنا الأقسام التي منحك المدير صلاحية الوصول إليها." />
+                <View style={styles.quickAccessGrid}>
+                  {availableSections.map((section) => {
+                    const Icon = icons[section.id] ?? LayoutDashboard;
+                    return (
+                      <Pressable
+                        key={section.id}
+                        accessibilityRole="button"
+                        accessibilityLabel={`فتح قسم ${section.label}`}
+                        onPress={() => goToSection(section.id)}
+                        style={({ pressed }) => [styles.quickAccessCard, { width: compact ? "100%" : "31.7%" }, pressed && { opacity: 0.78 }]}
+                      >
+                        <View style={styles.quickAccessIcon}><Icon size={19} color={colors.blue} /></View>
+                        <View style={styles.quickAccessText}>
+                          <Text style={styles.quickAccessTitle} numberOfLines={1}>{section.label}</Text>
+                          <Text style={styles.quickAccessHint}>فتح القسم</Text>
+                        </View>
+                        <ChevronLeft size={16} color="#A6B2C1" />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
+            {hasDashboardStats ? (
+              <>
+                <SectionHeading title="المؤشرات الرئيسية" description="اضغط على بطاقة لفتح تفاصيل القسم." />
+                <View style={styles.statsGrid}>
               {permitted.has("finance") ? (
                 <>
                   <StatCard compact={compact} title="الرصيد الحالي" value={formatDzd(dashboard.stats.balance)} icon={Wallet} tone="blue" onPress={() => goToSection("finance")} />
@@ -183,7 +218,9 @@ export default function HomeScreen() {
               {permitted.has("rentals") && canSeeFinancialData ? (
                   <StatCard compact={compact} title="المبالغ المتبقية في الكراء" value={formatDzd(dashboard.stats.rentalRemaining)} icon={Building2} tone="blue" onPress={() => goToSection("rentals")} />
               ) : null}
-            </View>
+                </View>
+              </>
+            ) : null}
 
             {permitted.has("finance") ? (
               <View style={styles.panel}>
@@ -387,6 +424,12 @@ const styles = {
   rolePillText: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" as const },
   welcomeMark: { borderRadius: 14, backgroundColor: "#FFFFFF", alignItems: "center" as const, justifyContent: "center" as const, padding: 9, marginLeft: 14 },
   statsGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, justifyContent: "space-between" as const, gap: 11 },
+  quickAccessGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 10 },
+  quickAccessCard: { minHeight: 68, flexDirection: "row" as const, alignItems: "center" as const, gap: 11, padding: 12, borderRadius: 13, backgroundColor: "#F8FAFD", borderWidth: 1, borderColor: colors.border },
+  quickAccessIcon: { width: 38, height: 38, borderRadius: 12, alignItems: "center" as const, justifyContent: "center" as const, backgroundColor: "#EAF1FB" },
+  quickAccessText: { flex: 1, minWidth: 0 },
+  quickAccessTitle: { color: colors.navy, fontSize: 12, fontWeight: "800" as const, textAlign: "right" as const },
+  quickAccessHint: { color: colors.muted, fontSize: 10, marginTop: 3, textAlign: "right" as const },
   statCard: { minHeight: 150, borderRadius: 16, backgroundColor: colors.surface, padding: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden" as const },
   statTop: { flexDirection: "row" as const, justifyContent: "space-between" as const, alignItems: "center" as const },
   statIcon: { width: 36, height: 36, borderRadius: 12, alignItems: "center" as const, justifyContent: "center" as const },

@@ -24,13 +24,13 @@ export function hasPermission(
 ): boolean {
   if (!member) return false;
   if (member.role === "admin") return true;
+  if (section === "dashboard") return action === "view";
   if (section === "finance" && action === "view" && member.capabilities?.viewFinancialData === false) return false;
   if (section === "finance" && action !== "view" && member.capabilities?.manageOperations === false) return false;
 
   const saved = member.permissions?.[section];
   if (saved) return saved[action] === true;
 
-  if (section === "dashboard") return action === "view";
   if (!member.allowed_sections?.includes(section)) return false;
   if (action === "view") return true;
   if (member.role === "finance") return true;
