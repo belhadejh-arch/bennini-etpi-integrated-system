@@ -5,9 +5,12 @@ CREATE TABLE IF NOT EXISTS members (
   role TEXT NOT NULL DEFAULT 'pending',
   active BOOLEAN NOT NULL DEFAULT FALSE,
   allowed_sections TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  notes TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE members ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS transactions (
   id BIGSERIAL PRIMARY KEY,
@@ -177,8 +180,11 @@ CREATE TABLE IF NOT EXISTS machinery (
   category TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'working',
   hours_worked INTEGER NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE machinery ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS machinery_spare_parts (
   id BIGSERIAL PRIMARY KEY,
@@ -216,6 +222,14 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   performed_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
   performed_by_name TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS audit_log_notes (
+  audit_log_id BIGINT PRIMARY KEY REFERENCES audit_logs(id) ON DELETE CASCADE,
+  notes TEXT NOT NULL DEFAULT '',
+  updated_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+  updated_by_name TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS transactions_date_idx ON transactions (transaction_date DESC);

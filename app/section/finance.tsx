@@ -7,6 +7,7 @@ import { ArrowRight, ChevronLeft, ChevronRight, Eye, FilePlus2, Pencil, Plus, Re
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 
@@ -464,7 +465,7 @@ export default function FinanceSection() {
                     {expandedId === item.id ? (
                       <View style={styles.detailPanel}>
                         <Text style={styles.detailTitle}>تفاصيل العملية</Text>
-                        <Text style={styles.detailText}>الملاحظات: {item.notes || "لا توجد ملاحظات"}</Text>
+                        <RecordNotes entity="transaction" recordId={item.id} initialNotes={item.notes} editable={canManage} />
                         <Text style={styles.detailText}>المعرف: {item.id} · سجلها: {item.recorded_by_name}</Text>
                         <View style={styles.attachmentList}>
                           {item.attachments?.length ? item.attachments.map((attachment) => (

@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 
@@ -539,7 +540,7 @@ export default function InventorySection() {
               <Metric label="الربح المتوقع" value={item.expected_profit == null ? "غير محدد" : profitLabel(item.expected_profit)} accent="#15803D" />
               <Metric label="الربح المحقق" value={profitLabel(item.realized_profit)} accent="#B45309" />
             </View>
-            {item.notes ? <Text style={styles.itemNote}>ملاحظات: {item.notes}</Text> : null}
+            <RecordNotes entity="inventory" recordId={item.id} initialNotes={item.notes} editable={canManage} />
             <View style={styles.actionsRow}>
               {canManage && item.remaining_quantity > 0 ? (
                 <>
@@ -595,7 +596,7 @@ export default function InventorySection() {
                       <Text style={styles.itemMeta}>
                         {dateLabel(movement.movement_date)} · {movement.counterparty || "—"} · {movement.recorded_by_name}
                       </Text>
-                      {movement.notes ? <Text style={styles.itemMeta}>{movement.notes}</Text> : null}
+                      <RecordNotes entity="inventoryMovement" recordId={movement.id} initialNotes={movement.notes} editable={canManage} />
                     </View>
                     {movement.movement_type === "sale" ? (
                       <Text style={styles.realizedValue}>{profitLabel((amount(movement.unit_price) - amount(item.buy_price)) * movement.quantity)}</Text>

@@ -4,6 +4,7 @@ import { ArrowRight, Check, ShieldCheck, Users } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { AppHeader, HeaderAction } from "./components/AppHeader";
+import RecordNotes from "./components/RecordNotes";
 import { apiRequest, type Member } from "../lib/api";
 import { colors } from "../lib/theme";
 import { sections, type SectionId } from "../shared/sections";
@@ -104,6 +105,7 @@ export default function MembersScreen() {
                     <Text style={styles.name}>{item.name || "عضو جديد"}</Text>
                     <Text style={styles.email}>{item.email}</Text>
                     <Text style={styles.role}>{roleLabel(item.role)}{item.role === "pending" ? " · بانتظار التفعيل" : ""}</Text>
+                    <RecordNotes entity="member" recordId={item.clerk_user_id} initialNotes={item.notes} editable={admin} />
                   </View>
                   <View style={{ alignItems: "center", gap: 3 }}>
                     <Switch

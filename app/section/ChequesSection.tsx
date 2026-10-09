@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 
@@ -593,7 +594,7 @@ export default function ChequesSection() {
                     </View>
                   ) : null}
                 </View>
-                {item.notes ? <Text style={styles.notes}>ملاحظات: {item.notes}</Text> : null}
+                <RecordNotes entity="cheque" recordId={item.id} initialNotes={item.notes} editable={canManage} />
                 {item.attachments.length ? (
                   <View style={styles.attachmentBlock}>
                     <Text style={styles.fieldLabel}>صورة الشيك والفاتورة / الوثائق</Text>

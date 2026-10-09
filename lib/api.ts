@@ -42,6 +42,7 @@ export type Member = {
   role: string;
   active: boolean;
   allowed_sections: string[];
+  notes?: string;
 };
 
 export type DashboardData = {
@@ -65,6 +66,7 @@ export type DashboardData = {
     reason: string;
     date: string;
     recorded_by: string;
+    notes: string;
   }>;
   fieldExpenses: Array<{
     id: number;
@@ -77,5 +79,6 @@ export type DashboardData = {
     created_at: string;
     fuel_liters: number | string | null;
     review_status: "pending" | "reviewed";
+    created_by_id: string;
   }>;
 };

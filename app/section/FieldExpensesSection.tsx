@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 
@@ -412,6 +413,7 @@ export default function FieldExpensesSection() {
         ) : visibleItems.length ? (
           visibleItems.map((expense) => (
             <ExpenseCard key={expense.id} expense={expense} isAdmin={isAdmin} canRecord={canRecord}
+              canEditNotes={isAdmin || (canRecord && expense.created_by_id === member?.clerk_user_id)}
               saving={saving} onReview={() => void changeReview(expense, expense.review_status === "pending" ? "reviewed" : "pending")}
               onAddAttachment={() => void addAttachments(expense)} onOpenAttachment={(attachment) => void openAttachment(attachment)} />
           ))
@@ -457,10 +459,11 @@ function FilterChip({ label, selected, onPress }: { label: string; selected: boo
   );
 }
 
-function ExpenseCard({ expense, isAdmin, canRecord, saving, onReview, onAddAttachment, onOpenAttachment }: {
+function ExpenseCard({ expense, isAdmin, canRecord, canEditNotes, saving, onReview, onAddAttachment, onOpenAttachment }: {
   expense: FieldExpense;
   isAdmin: boolean;
   canRecord: boolean;
+  canEditNotes: boolean;
   saving: boolean;
   onReview: () => void;
   onAddAttachment: () => void;
@@ -492,7 +495,7 @@ function ExpenseCard({ expense, isAdmin, canRecord, saving, onReview, onAddAttac
         <Text style={styles.recordedText}>{recordedAt(expense.created_at)}</Text>
       </View>
       {expense.details ? <Text style={styles.detailsText}>{expense.details}</Text> : null}
-      {expense.notes ? <Text style={styles.notesText}>ملاحظات: {expense.notes}</Text> : null}
+      <RecordNotes entity="fieldExpense" recordId={expense.id} initialNotes={expense.notes} editable={canEditNotes} />
       {expense.review_status === "reviewed" && expense.reviewed_by_name ? (
         <Text style={styles.reviewedBy}>راجعها {expense.reviewed_by_name}{expense.reviewed_at ? ` · ${recordedAt(expense.reviewed_at)}` : ""}</Text>
       ) : null}

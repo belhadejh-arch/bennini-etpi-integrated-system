@@ -11,6 +11,7 @@ import {
   ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View,
 } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd } from "../../lib/theme";
 
@@ -23,6 +24,7 @@ type Machinery = {
   hours_worked: number;
   repair_count: number;
   total_expenses: number | string;
+  notes: string;
 };
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type SparePart = {
@@ -68,7 +70,7 @@ export default function MachinerySection() {
   const [notice, setNotice] = useState("");
   const [machineFormOpen, setMachineFormOpen] = useState(false);
   const [partFormOpen, setPartFormOpen] = useState(false);
-  const [machineDraft, setMachineDraft] = useState({ code: "", name: "", category: "" });
+  const [machineDraft, setMachineDraft] = useState({ code: "", name: "", category: "", notes: "" });
   const [partDraft, setPartDraft] = useState({
     machineryId: "", name: "", quantity: "", buyPrice: "", supplier: "",
     invoiceNumber: "", installationDate: localDate(), stockQuantity: "", repairExpense: "0", notes: "",
@@ -132,9 +134,10 @@ export default function MachinerySection() {
           code: machineDraft.code.trim(),
           name: machineDraft.name.trim(),
           category: machineDraft.category.trim(),
+          notes: machineDraft.notes.trim(),
         }),
       });
-      setMachineDraft({ code: "", name: "", category: "" });
+      setMachineDraft({ code: "", name: "", category: "", notes: "" });
       setMachineFormOpen(false);
       setNotice("تم تسجيل المركبة أو الآلية.");
       await refresh();
@@ -321,6 +324,7 @@ export default function MachinerySection() {
             <Field label="الرقم التعريفي *" value={machineDraft.code} onChange={(value) => setMachineDraft((draft) => ({ ...draft, code: value }))} placeholder="مثال: TR-001" />
             <Field label="اسم المركبة أو الآلية *" value={machineDraft.name} onChange={(value) => setMachineDraft((draft) => ({ ...draft, name: value }))} placeholder="مثال: شاحنة نقل" />
             <Field label="الفئة أو النوع" value={machineDraft.category} onChange={(value) => setMachineDraft((draft) => ({ ...draft, category: value }))} placeholder="شاحنة، حفارة، سيارة..." />
+            <Field label="ملاحظات حول الآلية" value={machineDraft.notes} onChange={(value) => setMachineDraft((draft) => ({ ...draft, notes: value }))} placeholder="معلومات إضافية عن الآلية" multiline />
             <SaveButton label="حفظ المركبة أو الآلية" saving={saving} onPress={() => void saveMachinery()} />
           </View>
         ) : null}
@@ -332,14 +336,17 @@ export default function MachinerySection() {
           {machinery.map((machine) => {
             const active = selectedMachineId === machine.id;
             return (
-              <Pressable key={machine.id} onPress={() => setSelectedMachineId(active ? null : machine.id)} style={[styles.machineCard, active && styles.machineCardActive]}>
-                <View style={styles.machineIcon}><Truck size={18} color={active ? colors.blue : colors.muted} /></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.machineName}>{machine.name}</Text>
-                  <Text style={styles.machineMeta}>{machine.code}{machine.category ? ` · ${machine.category}` : ""}</Text>
-                  <Text style={styles.machineMeta}>{machine.repair_count} سجل · {formatDzd(numberValue(machine.total_expenses))}</Text>
-                </View>
-              </Pressable>
+              <View key={machine.id} style={[styles.machineCard, active && styles.machineCardActive]}>
+                <Pressable onPress={() => setSelectedMachineId(active ? null : machine.id)} style={styles.machinePress}>
+                  <View style={styles.machineIcon}><Truck size={18} color={active ? colors.blue : colors.muted} /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.machineName}>{machine.name}</Text>
+                    <Text style={styles.machineMeta}>{machine.code}{machine.category ? ` · ${machine.category}` : ""}</Text>
+                    <Text style={styles.machineMeta}>{machine.repair_count} سجل · {formatDzd(numberValue(machine.total_expenses))}</Text>
+                  </View>
+                </Pressable>
+                <RecordNotes entity="machinery" recordId={machine.id} initialNotes={machine.notes} editable={canManage} />
+              </View>
             );
           })}
           {!loading && machinery.length === 0 ? (
@@ -438,7 +445,7 @@ export default function MachinerySection() {
               <Text style={styles.costLabel}>تكلفة الشراء والإصلاح</Text>
               <Text style={styles.costValue}>{formatDzd(part.quantity * numberValue(part.buy_price) + numberValue(part.repair_expense))}</Text>
             </View>
-            {part.notes ? <Text style={styles.notes}>ملاحظات: {part.notes}</Text> : null}
+            <RecordNotes entity="machinerySparePart" recordId={part.id} initialNotes={part.notes} editable={canManage} />
             <Text style={styles.recordedBy}>سجلها: {part.recorded_by_name}</Text>
             {part.attachments?.length ? (
               <View style={styles.attachmentBlock}>
@@ -536,8 +543,9 @@ const styles = {
   machineChipActive: { backgroundColor: colors.blue, borderColor: colors.blue },
   machineChipTitle: { color: colors.muted, fontSize: 11, fontWeight: "800" as const },
   machineChipTitleActive: { color: "#FFFFFF" },
-  machineCard: { flexDirection: "row" as const, alignItems: "center" as const, gap: 9, padding: 10, minWidth: 205, flexGrow: 1, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
+  machineCard: { flexDirection: "column" as const, gap: 8, padding: 10, minWidth: 205, flexGrow: 1, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
   machineCardActive: { borderColor: colors.blue, backgroundColor: "#F2F7FD" },
+  machinePress: { flexDirection: "row" as const, alignItems: "center" as const, gap: 9 },
   machineIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: "#EDF4FC", alignItems: "center" as const, justifyContent: "center" as const },
   machineName: { color: colors.ink, fontSize: 12, fontWeight: "900" as const, textAlign: "right" as const },
   machineMeta: { color: colors.muted, fontSize: 10, textAlign: "right" as const, marginTop: 3 },

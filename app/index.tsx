@@ -28,6 +28,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { AppHeader, HeaderAction } from "./components/AppHeader";
+import RecordNotes from "./components/RecordNotes";
 import { CompanyLogo } from "./components/CompanyLogo";
 import { apiRequest, type DashboardData, type Member } from "../lib/api";
 import { colors, formatDzd } from "../lib/theme";
@@ -223,20 +224,24 @@ export default function HomeScreen() {
               <View style={styles.panel}>
                 <SectionHeading title="آخر العمليات" action="عرض الكل" onAction={() => goToSection("finance")} />
                 {dashboard.recentOperations.length ? dashboard.recentOperations.map((item) => (
-                  <View key={item.id} style={styles.activityRow}>
-                    <View style={[styles.activityIcon, { backgroundColor: item.type === "income" ? colors.greenSoft : colors.redSoft }]}>
-                      {item.type === "income" ? <ArrowDownLeft size={18} color={colors.green} /> : <ArrowUpRight size={18} color={colors.red} />}
+                  <View key={item.id} style={{ gap: 8 }}>
+                    <View style={styles.activityRow}>
+                      <View style={[styles.activityIcon, { backgroundColor: item.type === "income" ? colors.greenSoft : colors.redSoft }]}>
+                        {item.type === "income" ? <ArrowDownLeft size={18} color={colors.green} /> : <ArrowUpRight size={18} color={colors.red} />}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.activityTitle}>{item.party}</Text>
+                        <Text style={styles.activityDetail} numberOfLines={1}>{item.reason || "عملية مالية"} · {item.recorded_by}</Text>
+                      </View>
+                      <View style={{ alignItems: "flex-start" }}>
+                        <Text style={[styles.activityAmount, { color: item.type === "income" ? colors.green : colors.red }]}>
+                          {item.type === "income" ? "+" : "−"}{formatDzd(Number(item.amount))}
+                        </Text>
+                        <Text style={styles.activityDate}>{formatDate(item.date)}</Text>
+                      </View>
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.activityTitle}>{item.party}</Text>
-                      <Text style={styles.activityDetail} numberOfLines={1}>{item.reason || "عملية مالية"} · {item.recorded_by}</Text>
-                    </View>
-                    <View style={{ alignItems: "flex-start" }}>
-                      <Text style={[styles.activityAmount, { color: item.type === "income" ? colors.green : colors.red }]}>
-                        {item.type === "income" ? "+" : "−"}{formatDzd(Number(item.amount))}
-                      </Text>
-                      <Text style={styles.activityDate}>{formatDate(item.date)}</Text>
-                    </View>
+                    <RecordNotes entity="transaction" recordId={item.id} initialNotes={item.notes}
+                      editable={member?.role === "admin" || (permitted.has("finance") && member?.role === "finance")} />
                   </View>
                 )) : <EmptyState message="لا توجد عمليات مالية مسجلة بعد." />}
               </View>
@@ -246,20 +251,25 @@ export default function HomeScreen() {
               <View style={styles.panel}>
                 <SectionHeading title="آخر مصاريف الميدان" action="فتح السجل" onAction={() => goToSection("field")} />
                 {dashboard.fieldExpenses.length ? dashboard.fieldExpenses.map((item) => (
-                  <View key={item.id} style={styles.activityRow}>
-                    <View style={[styles.activityIcon, { backgroundColor: colors.amberSoft }]}><HardHat size={18} color={colors.amber} /></View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.activityTitle}>{item.category}</Text>
-                      <Text style={styles.activityDetail} numberOfLines={1}>
-                        {item.site_name} · {item.created_by_name}
-                        {item.fuel_liters ? ` · ${item.fuel_liters} لتر` : ""}
-                        {item.review_status === "pending" ? " · بانتظار المراجعة" : ""}
-                      </Text>
+                  <View key={item.id} style={{ gap: 8 }}>
+                    <View style={styles.activityRow}>
+                      <View style={[styles.activityIcon, { backgroundColor: colors.amberSoft }]}><HardHat size={18} color={colors.amber} /></View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.activityTitle}>{item.category}</Text>
+                        <Text style={styles.activityDetail} numberOfLines={1}>
+                          {item.site_name} · {item.created_by_name}
+                          {item.fuel_liters ? ` · ${item.fuel_liters} لتر` : ""}
+                          {item.review_status === "pending" ? " · بانتظار المراجعة" : ""}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: "flex-start" }}>
+                        <Text style={styles.activityAmount}>{formatDzd(Number(item.amount))}</Text>
+                        <Text style={styles.activityDate}>{formatDate(item.created_at)}</Text>
+                      </View>
                     </View>
-                    <View style={{ alignItems: "flex-start" }}>
-                      <Text style={styles.activityAmount}>{formatDzd(Number(item.amount))}</Text>
-                      <Text style={styles.activityDate}>{formatDate(item.created_at)}</Text>
-                    </View>
+                    <RecordNotes entity="fieldExpense" recordId={item.id} initialNotes={item.notes}
+                      editable={member?.role === "admin" ||
+                        (["field", "supervisor"].includes(member?.role ?? "") && item.created_by_id === member?.clerk_user_id)} />
                   </View>
                 )) : <EmptyState message="لا توجد مصاريف ميدانية مسجلة بعد." />}
               </View>

@@ -362,8 +362,10 @@ function ensureMachinerySchema() {
         category TEXT NOT NULL DEFAULT '',
         status TEXT NOT NULL DEFAULT 'working',
         hours_worked INTEGER NOT NULL DEFAULT 0,
+        notes TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE machinery ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
       CREATE TABLE IF NOT EXISTS machinery_spare_parts (
         id BIGSERIAL PRIMARY KEY,
         machinery_id BIGINT NOT NULL REFERENCES machinery(id) ON DELETE RESTRICT,
@@ -407,6 +409,36 @@ async function requireMachinerySchema(_req: Request, res: Response, next: NextFu
   } catch (error) {
     console.error("Machinery database setup failed:", error);
     fail(res, 503, "قاعدة بيانات المركبات والآليات غير جاهزة. يرجى المحاولة لاحقاً.");
+  }
+}
+
+let recordNotesSchemaPromise: Promise<void> | null = null;
+
+function ensureRecordNotesSchema() {
+  if (!recordNotesSchemaPromise) {
+    recordNotesSchemaPromise = Promise.all([
+      ensureMachinerySchema(),
+      pool.query("ALTER TABLE members ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''"),
+      pool.query(`
+        CREATE TABLE IF NOT EXISTS audit_log_notes (
+          audit_log_id BIGINT PRIMARY KEY REFERENCES audit_logs(id) ON DELETE CASCADE,
+          notes TEXT NOT NULL DEFAULT '',
+          updated_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+          updated_by_name TEXT NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`),
+    ]).then(() => undefined);
+  }
+  return recordNotesSchemaPromise;
+}
+
+async function requireRecordNotesSchema(_req: Request, res: Response, next: NextFunction) {
+  try {
+    await ensureRecordNotesSchema();
+    next();
+  } catch (error) {
+    console.error("Record notes database setup failed:", error);
+    fail(res, 503, "قاعدة بيانات الملاحظات غير جاهزة. يرجى المحاولة لاحقاً.");
   }
 }
 
@@ -570,7 +602,7 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), requireFiel
     const canSeeAllField = member.role === "admin" || member.role === "finance";
     const fieldQuery = canSeeField
       ? pool.query(
-        `SELECT id, category, amount, site_name, details, created_by_name, created_at, fuel_liters, review_status
+         `SELECT id, category, amount, site_name, details, created_by_id, created_by_name, created_at, fuel_liters, review_status, notes
          FROM field_expenses ${canSeeAllField ? "" : "WHERE created_by_id = $1"}
          ORDER BY created_at DESC LIMIT 5`,
         canSeeAllField ? [] : [member.clerk_user_id],
@@ -595,7 +627,7 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), requireFiel
       `),
       pool.query("SELECT COALESCE(SUM(GREATEST(total_amount - paid_amount, 0)), 0) AS remaining FROM rentals"),
       pool.query(`
-        SELECT id, type, amount, party, reason, transaction_date AS date, recorded_by_name AS recorded_by
+        SELECT id, type, amount, party, reason, notes, transaction_date AS date, recorded_by_name AS recorded_by
         FROM transactions ORDER BY transaction_date DESC, created_at DESC LIMIT 6
       `),
       fieldQuery,
@@ -1345,10 +1377,107 @@ const machinerySparePartSelect = `
   FROM machinery_spare_parts p
   JOIN machinery m ON m.id = p.machinery_id`;
 
+const recordNoteTargets = {
+  transaction: { section: "finance", table: "transactions", label: "العملية المالية", memberId: false },
+  inventory: { section: "inventory", table: "inventory_items", label: "سلعة المخزون", memberId: false },
+  inventoryMovement: { section: "inventory", table: "inventory_movements", label: "حركة المخزون", memberId: false },
+  cheque: { section: "cheques", table: "cheques", label: "الشيك", memberId: false },
+  rental: { section: "rentals", table: "rentals", label: "عقد الكراء", memberId: false },
+  fieldExpense: { section: "field", table: "field_expenses", label: "مصروف الميدان", memberId: false },
+  machinery: { section: "machinery", table: "machinery", label: "المركبة أو الآلية", memberId: false },
+  machinerySparePart: { section: "machinery", table: "machinery_spare_parts", label: "قطعة الغيار", memberId: false },
+  member: { section: "users", table: "members", label: "العضو", memberId: true },
+  auditNote: { section: "audit", table: "audit_log_notes", label: "ملاحظة سجل التدقيق", memberId: false },
+} as const;
+
+app.patch("/api/record-notes/:entity/:id", requireRecordNotesSchema, authenticate, async (req: AuthenticatedRequest, res) => {
+  const entity = req.params.entity as keyof typeof recordNoteTargets;
+  const target = recordNoteTargets[entity];
+  const rawId = decodeURIComponent(req.params.id);
+  const member = req.member!;
+  const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() : null;
+  if (!target) return fail(res, 404, "نوع السجل غير مدعوم.");
+  if (notes === null || notes.length > 5000) return fail(res, 400, "الملاحظة غير صالحة أو تتجاوز 5000 حرف.");
+
+  if (target.memberId) {
+    if (member.role !== "admin") return fail(res, 403, "ملاحظات الأعضاء متاحة للمدير فقط.");
+    if (!/^user_[A-Za-z0-9_-]{1,120}$/.test(rawId)) return fail(res, 400, "معرّف العضو غير صالح.");
+  } else {
+    const id = Number(rawId);
+    if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم السجل غير صالح.");
+    if (target.section === "audit" && member.role !== "admin") {
+      return fail(res, 403, "ملاحظات سجل التدقيق متاحة للمدير فقط.");
+    }
+    if (member.role !== "admin" && !member.allowed_sections.includes(target.section)) {
+      return fail(res, 403, "ليس لديك صلاحية الوصول إلى هذا القسم.");
+    }
+    if (target.section !== "field" && member.role !== "admin" && member.role !== "finance") {
+      return fail(res, 403, "دور الحساب لا يسمح بتعديل ملاحظات هذا السجل.");
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    let result;
+    if (target.memberId) {
+      result = await client.query(
+        "UPDATE members SET notes = $1, updated_at = NOW() WHERE clerk_user_id = $2 RETURNING notes",
+        [notes, rawId],
+      );
+    } else if (entity === "auditNote") {
+      const auditLog = await client.query("SELECT id FROM audit_logs WHERE id = $1", [Number(rawId)]);
+      if (!auditLog.rowCount) {
+        await client.query("ROLLBACK");
+        return fail(res, 404, "سجل التدقيق غير موجود.");
+      }
+      result = await client.query(
+        `INSERT INTO audit_log_notes (audit_log_id, notes, updated_by_id, updated_by_name)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (audit_log_id) DO UPDATE
+           SET notes = EXCLUDED.notes, updated_by_id = EXCLUDED.updated_by_id,
+               updated_by_name = EXCLUDED.updated_by_name, updated_at = NOW()
+         RETURNING notes`,
+        [Number(rawId), notes, member.clerk_user_id, member.name],
+      );
+    } else if (entity === "fieldExpense" && member.role !== "admin") {
+      if (!["field", "supervisor"].includes(member.role)) {
+        await client.query("ROLLBACK");
+        return fail(res, 403, "دور الحساب لا يسمح بتعديل ملاحظات مصاريف الميدان.");
+      }
+      result = await client.query(
+        "UPDATE field_expenses SET notes = $1 WHERE id = $2 AND created_by_id = $3 RETURNING notes",
+        [notes, Number(rawId), member.clerk_user_id],
+      );
+    } else {
+      result = await client.query(
+        `UPDATE ${target.table} SET notes = $1 WHERE id = $2 RETURNING notes`,
+        [notes, Number(rawId)],
+      );
+    }
+    if (!result.rowCount) {
+      await client.query("ROLLBACK");
+      if (entity === "fieldExpense" && member.role !== "admin") {
+        return fail(res, 403, "يمكنك تعديل ملاحظات المصاريف التي سجلتها فقط.");
+      }
+      return fail(res, 404, "السجل غير موجود.");
+    }
+    await writeAuditWithClient(client, member, "تعديل ملاحظات سجل", `${target.label} رقم ${rawId}.`);
+    await client.query("COMMIT");
+    res.json({ notes: result.rows[0].notes });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Record note update failed:", error);
+    fail(res, 500, "تعذر حفظ الملاحظة.");
+  } finally {
+    client.release();
+  }
+});
+
 app.get("/api/machinery", requireMachinerySchema, authenticate, requireSection("machinery"), async (_req, res) => {
   try {
     const result = await pool.query(`
-      SELECT m.id, m.code, m.name, m.category, m.status, m.hours_worked,
+      SELECT m.id, m.code, m.name, m.category, m.status, m.hours_worked, m.notes,
         COUNT(p.id)::int AS repair_count,
         COALESCE(SUM(p.quantity * p.buy_price + p.repair_expense), 0) AS total_expenses
       FROM machinery m
@@ -1365,14 +1494,15 @@ app.post("/api/machinery", requireMachinerySchema, authenticate, requireSection(
   const code = typeof req.body?.code === "string" ? req.body.code.trim() : "";
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
   const category = typeof req.body?.category === "string" ? req.body.category.trim() : "";
-  if (!code || code.length > 80 || !name || name.length > 200 || category.length > 120) {
+  const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() : "";
+  if (!code || code.length > 80 || !name || name.length > 200 || category.length > 120 || notes.length > 5000) {
     return fail(res, 400, "أدخل رقماً تعريفياً واسماً صالحين للمركبة أو الآلية.");
   }
   try {
     const result = await pool.query(
-      `INSERT INTO machinery (code, name, category) VALUES ($1, $2, $3)
-       RETURNING id, code, name, category, status, hours_worked`,
-      [code, name, category],
+      `INSERT INTO machinery (code, name, category, notes) VALUES ($1, $2, $3, $4)
+       RETURNING id, code, name, category, status, hours_worked, notes`,
+      [code, name, category, notes],
     );
     await writeAudit(req.member!, "تسجيل مركبة أو آلية", `${name} — ${code}.`);
     res.status(201).json({ item: result.rows[0] });
@@ -1539,8 +1669,11 @@ app.get("/api/sections/:section", authenticate, async (req: AuthenticatedRequest
         FROM rentals ORDER BY end_date ASC LIMIT 100`,
       field: `SELECT id, category, amount, site_name, details, created_by_name, created_at, fuel_liters
         FROM field_expenses ORDER BY created_at DESC LIMIT 100`,
-      machinery: "SELECT id, code, name, category, status, hours_worked FROM machinery ORDER BY code LIMIT 100",
-      audit: `SELECT id, action, details, performed_by_name, created_at FROM audit_logs ORDER BY created_at DESC LIMIT 100`,
+      machinery: "SELECT id, code, name, category, status, hours_worked, notes FROM machinery ORDER BY code LIMIT 100",
+      audit: `SELECT a.id, a.action, a.details, a.performed_by_name, a.created_at,
+          COALESCE(n.notes, '') AS notes
+        FROM audit_logs a LEFT JOIN audit_log_notes n ON n.audit_log_id = a.id
+        ORDER BY a.created_at DESC LIMIT 100`,
     };
     const query = queries[section];
     if (!query) return res.json({ items: [] });
@@ -1963,9 +2096,9 @@ app.get("/api/field-expense-attachments/:id", requireFieldExpenseSchema, authent
   }
 });
 
-app.get("/api/members", authenticate, requireAdmin, async (_req, res) => {
+app.get("/api/members", requireRecordNotesSchema, authenticate, requireAdmin, async (_req, res) => {
   const result = await pool.query(
-    "SELECT clerk_user_id, email, name, role, active, allowed_sections, created_at FROM members ORDER BY created_at",
+    "SELECT clerk_user_id, email, name, role, active, allowed_sections, notes, created_at FROM members ORDER BY created_at",
   );
   res.json({ members: result.rows });
 });

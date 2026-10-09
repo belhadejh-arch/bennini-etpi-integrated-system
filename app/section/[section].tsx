@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import RecordNotes from "../components/RecordNotes";
 import InventorySection from "./InventorySection";
 import ChequesSection from "./ChequesSection";
 import RentalsSection from "./RentalsSection";
@@ -165,7 +166,7 @@ export default function SectionScreen() {
             <Text style={styles.empty}>لا توجد بيانات مسجلة في هذا القسم بعد.</Text>
             {canAdd ? <Text style={styles.emptyHint}>استخدم زر الإضافة لتسجيل أول عملية.</Text> : null}
           </View>
-        ) : items.map((item) => <DataCard key={String(item.id)} item={item} section={section} />)}
+        ) : items.map((item) => <DataCard key={String(item.id)} item={item} section={section} editable={isAdmin} />)}
       </ScrollView>
       <View style={styles.footer}>
         <Text style={styles.footerText}>الحساب: {member?.name || user?.firstName || ""}</Text>
@@ -175,7 +176,7 @@ export default function SectionScreen() {
   );
 }
 
-function DataCard({ item, section }: { item: Record<string, unknown>; section: SectionId }) {
+function DataCard({ item, section, editable }: { item: Record<string, unknown>; section: SectionId; editable: boolean }) {
   let title = "";
   let subtitle = "";
   let amount: string | null = null;
@@ -213,6 +214,11 @@ function DataCard({ item, section }: { item: Record<string, unknown>; section: S
       <View style={{ flex: 1 }}>
         <Text style={styles.cardTitle}>{title}</Text>
         <Text style={styles.cardSubtitle}>{subtitle}</Text>
+        {section === "audit" ? (
+          <View style={{ marginTop: 8 }}>
+            <RecordNotes entity="auditNote" recordId={String(item.id)} initialNotes={String(item.notes ?? "")} editable={editable} />
+          </View>
+        ) : null}
       </View>
       {amount ? <Text style={styles.cardAmount}>{amount}</Text> : null}
     </View>
