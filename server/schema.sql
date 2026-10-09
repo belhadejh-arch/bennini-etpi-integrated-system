@@ -333,13 +333,6 @@ CREATE TABLE IF NOT EXISTS audit_log_notes (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS login_attempts (
-  bucket_key TEXT PRIMARY KEY,
-  failures INTEGER NOT NULL DEFAULT 0,
-  window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  locked_until TIMESTAMPTZ
-);
-
 CREATE INDEX IF NOT EXISTS transactions_date_idx ON transactions (transaction_date DESC);
 CREATE INDEX IF NOT EXISTS transactions_party_idx ON transactions (party);
 CREATE INDEX IF NOT EXISTS transaction_attachments_transaction_idx ON transaction_attachments (transaction_id, created_at);

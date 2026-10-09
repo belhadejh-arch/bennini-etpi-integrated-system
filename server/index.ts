@@ -109,43 +109,6 @@ function sessionMemberId(req: Request) {
   }
 }
 
-function getClientIp(req: Request) {
-  return req.ip || req.socket.remoteAddress || "unknown";
-}
-
-function loginBucket(value: string) {
-  return createHmac("sha256", sessionSecret!).update(`login:${value}`).digest("hex");
-}
-
-async function isLoginLocked(keys: string[]) {
-  const result = await pool.query(
-    "SELECT 1 FROM login_attempts WHERE bucket_key = ANY($1::text[]) AND locked_until > NOW() LIMIT 1",
-    [keys],
-  );
-  return result.rowCount !== 0;
-}
-
-async function recordLoginFailure(keys: string[]) {
-  await pool.query(
-    `INSERT INTO login_attempts (bucket_key, failures, window_started_at, locked_until)
-     SELECT bucket_key, 1, NOW(), NULL FROM unnest($1::text[]) AS bucket(bucket_key)
-     ON CONFLICT (bucket_key) DO UPDATE SET
-       failures = CASE WHEN login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
-         THEN 1 ELSE login_attempts.failures + 1 END,
-       window_started_at = CASE WHEN login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
-         THEN NOW() ELSE login_attempts.window_started_at END,
-       locked_until = CASE WHEN login_attempts.window_started_at < NOW() - INTERVAL '15 minutes'
-         THEN NULL
-         WHEN login_attempts.failures + 1 >= 5 THEN NOW() + INTERVAL '30 minutes'
-         ELSE login_attempts.locked_until END`,
-    [keys],
-  );
-}
-
-async function clearLoginFailures(key: string) {
-  await pool.query("DELETE FROM login_attempts WHERE bucket_key = $1", [key]);
-}
-
 function constantTimeTextMatch(supplied: string, expected: string) {
   const left = Buffer.from(supplied);
   const right = Buffer.from(expected);
@@ -917,11 +880,7 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
 
 app.post("/api/auth/login", async (req: Request, res: Response) => {
   const serial = typeof req.body?.serial === "string" ? req.body.serial : "";
-  const ipKey = loginBucket(getClientIp(req));
-  const serialKey = loginBucket(`serial:${serial}`);
-  const buckets = [ipKey, serialKey];
   try {
-    if (await isLoginLocked(buckets)) return fail(res, 429, "محاولات كثيرة. انتظر قليلاً قبل المحاولة مجدداً.");
     const validFormat = /^\d{6}$/.test(serial);
     const result = validFormat
       ? await pool.query<Member & { serial_hash: string }>(
@@ -933,11 +892,9 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
     const candidate = result.rows[0];
     const validCode = candidate ? await verifySerial(serial, candidate.serial_hash) : false;
     if (!candidate || !validCode || !candidate.active) {
-      await recordLoginFailure(buckets);
       return fail(res, 401, "رقم الدخول غير صحيح أو الحساب موقوف.");
     }
 
-    await Promise.all(buckets.map(clearLoginFailures));
     const token = issueSession(candidate.clerk_user_id);
     const { serial_hash: _serialHash, ...publicMember } = candidate;
     const nativeClient = req.header("x-app-client") === "native";

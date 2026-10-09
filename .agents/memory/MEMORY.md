@@ -4,3 +4,4 @@
 - [Relational records](relational-records.md) — keep operational data in shared PostgreSQL with foreign-key links and authenticated actor identity, not local/mock storage.
 - [Business visibility principle](business-visibility-principle.md) — make real financial and operational answers easy to find, traceable, and clear to the owner.
 - [Neon pooled connections](neon-pooler.md) — initialize schema search paths with an awaited PostgreSQL pool connection hook, not unsupported startup options.
+- [Serial sign-in policy](serial-sign-in-policy.md) — keep serial-code sign-in free of attempt throttling and temporary lockouts, as explicitly requested.
