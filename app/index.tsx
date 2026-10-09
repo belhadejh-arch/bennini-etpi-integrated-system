@@ -31,7 +31,6 @@ import { apiRequest, type DashboardData, type Member } from "../lib/api";
 import { colors, formatDzd } from "../lib/theme";
 import { sections, type SectionId } from "../shared/sections";
 import { hasPermission } from "../shared/access";
-import { useSidebarAction } from "./components/AppSidebar";
 
 type ApiError = Error & { status?: number; body?: { pending?: boolean; error?: string } };
 
@@ -52,7 +51,6 @@ export default function HomeScreen() {
   const { width: viewportWidth } = useWindowDimensions();
   const { isLoaded: authLoaded, isSignedIn, getToken, signOut } = useAuth();
   const { user } = useUser();
-  const sidebarAction = useSidebarAction();
   const [member, setMember] = useState<Member | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -280,16 +278,6 @@ export default function HomeScreen() {
         ) : null}
       </ScrollView>
 
-      {sidebarAction?.visible ? (
-        <View style={styles.bottomBar}>
-          <BottomAction label="الرئيسية" icon={LayoutDashboard} selected onPress={() => router.replace("/")} />
-          {(["finance", "inventory", "field"] as SectionId[]).filter((id) => permitted.has(id)).slice(0, 3).map((id) => {
-            const section = sections.find((entry) => entry.id === id)!;
-            const Icon = icons[id];
-            return <BottomAction key={id} label={section.shortLabel} icon={Icon} onPress={() => goToSection(id)} />;
-          })}
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -335,15 +323,6 @@ function SectionHeading({ title, description, action, onAction }: { title: strin
       </View>
       {action && onAction ? <Pressable onPress={onAction}><Text style={styles.sectionAction}>{action}</Text></Pressable> : null}
     </View>
-  );
-}
-
-function BottomAction({ label, icon: Icon, selected, onPress }: { label: string; icon: typeof Wallet; selected?: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={onPress} style={styles.bottomAction}>
-      <Icon size={19} color={selected ? colors.yellow : "#D7E1EF"} />
-      <Text style={[styles.bottomLabel, selected && { color: colors.yellow }]}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -411,9 +390,6 @@ const styles = {
   emptyState: { borderTopWidth: 1, borderTopColor: "#EEF1F5", paddingVertical: 18, alignItems: "center" as const },
   emptyText: { color: colors.muted, fontSize: 12, textAlign: "center" as const },
   footerNote: { color: colors.muted, textAlign: "center" as const, fontSize: 10 },
-  bottomBar: { minHeight: 62, backgroundColor: colors.blue, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-around" as const, paddingHorizontal: 8, paddingBottom: 4 },
-  bottomAction: { flex: 1, alignItems: "center" as const, justifyContent: "center" as const, gap: 4, minHeight: 55 },
-  bottomLabel: { color: colors.lightBlue, fontSize: 9, fontWeight: "600" as const },
   menuPanel: { backgroundColor: "#FFFFFF", padding: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
   menuTop: { flexDirection: "row" as const, justifyContent: "space-between" as const, alignItems: "center" as const, marginBottom: 10 },
   menuTitle: { color: colors.navy, fontWeight: "800" as const },

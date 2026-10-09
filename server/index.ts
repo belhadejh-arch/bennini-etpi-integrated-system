@@ -538,7 +538,10 @@ function ensureFieldExpenseSchema() {
       );
       CREATE INDEX IF NOT EXISTS field_expenses_review_created_idx ON field_expenses (review_status, created_at DESC);
       CREATE INDEX IF NOT EXISTS field_expense_attachments_expense_idx ON field_expense_attachments (field_expense_id, created_at);
-    `).then(() => undefined);
+    `).then(() => undefined).catch((error) => {
+      fieldExpenseSchemaPromise = null;
+      throw error;
+    });
   }
   return fieldExpenseSchemaPromise;
 }
@@ -1187,7 +1190,7 @@ app.post("/api/notifications/read", authenticate, async (req: AuthenticatedReque
   }
 });
 
-app.get("/api/dashboard", authenticate, requireSection("dashboard"), requireFieldExpenseSchema, async (req: AuthenticatedRequest, res) => {
+app.get("/api/dashboard", authenticate, requireSection("dashboard"), async (req: AuthenticatedRequest, res) => {
   try {
     const member = req.member!;
     const canSeeFinance = hasPermission(member, "finance", "view");
@@ -1196,6 +1199,10 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), requireFiel
     const canSeeRentals = hasPermission(member, "rentals", "view");
     const canSeeField = hasPermission(member, "field", "view");
     const canSeeAllField = member.role === "admin" || member.role === "finance";
+    if (canSeeField || canSeeFinance) await ensureFieldExpenseSchema();
+    const fieldExpenseTotal = canSeeFinance
+      ? " + COALESCE((SELECT SUM(amount) FROM field_expenses), 0)"
+      : "";
     const fieldQuery = canSeeField
       ? pool.query(
          `SELECT id, category, amount, site_name, details, created_by_id, created_by_name, created_at, fuel_liters, review_status, notes
@@ -1209,7 +1216,7 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), requireFiel
         SELECT
           COALESCE((SELECT SUM(amount) FROM transactions WHERE type = 'income'), 0) AS income,
           COALESCE((SELECT SUM(amount) FROM transactions WHERE type = 'expense'), 0)
-            + COALESCE((SELECT SUM(amount) FROM field_expenses), 0) AS outgoing
+            ${fieldExpenseTotal} AS outgoing
       `),
       pool.query("SELECT COALESCE(SUM(total_cost), 0) AS total FROM inventory_items"),
       pool.query("SELECT COALESCE(SUM(remaining_quantity * buy_price), 0) AS total FROM inventory_items"),

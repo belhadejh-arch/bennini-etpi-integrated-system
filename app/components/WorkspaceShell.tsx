@@ -5,6 +5,7 @@ import { Platform, View, useWindowDimensions } from "react-native";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors } from "../../lib/theme";
 import { AppSidebar, SidebarBackdrop, SidebarProvider, type SidebarEntry } from "./AppSidebar";
+import { BottomNavigation } from "./BottomNavigation";
 import { NotificationProvider } from "./NotificationContext";
 
 export function WorkspaceShell({ children }: { children: React.ReactNode }) {
@@ -88,6 +89,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
             </>
           ) : null}
         </View>
+        {canShowSidebar && compact ? <BottomNavigation member={visibleMember!} activeId={activeId} /> : null}
       </SidebarProvider>
     </NotificationProvider>
   );
