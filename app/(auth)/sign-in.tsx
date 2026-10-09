@@ -1,4 +1,4 @@
-import { Link, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import { StatusBar } from "expo-status-bar";
@@ -14,7 +14,6 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { CompanyLogo } from "../components/CompanyLogo";
-import { apiRequest } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { colors } from "../../lib/theme";
 
@@ -25,19 +24,10 @@ export default function SignInScreen() {
   const [serial, setSerial] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [canBootstrap, setCanBootstrap] = useState(false);
 
   useEffect(() => {
     if (isLoaded && isSignedIn) router.replace("/");
   }, [isLoaded, isSignedIn, router]);
-
-  useEffect(() => {
-    void apiRequest<{ administratorConfigured: boolean; bootstrapAvailable: boolean }>(
-      "/auth/status",
-      async () => null,
-    ).then((status) => setCanBootstrap(!status.administratorConfigured && status.bootstrapAvailable))
-      .catch(() => setCanBootstrap(false));
-  }, []);
 
   const submit = async () => {
     setMessage("");
@@ -108,13 +98,6 @@ export default function SignInScreen() {
                 {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={{ color: "#FFFFFF", fontWeight: "800", fontSize: 15 }}>دخول</Text>}
               </Pressable>
               {message ? <Text style={{ color: colors.red, fontSize: 13, textAlign: "right", marginTop: 14, lineHeight: 20 }}>{message}</Text> : null}
-              {canBootstrap ? (
-                <View style={{ alignItems: "center", marginTop: 18 }}>
-                  <Link href="/(auth)/setup" asChild>
-                    <Pressable><Text style={{ color: colors.blue, fontWeight: "700" }}>تهيئة دخول المدير الأول</Text></Pressable>
-                  </Link>
-                </View>
-              ) : null}
               <View style={{ marginTop: 22, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border }}>
                 <Text style={{ textAlign: "center", color: colors.muted, fontSize: 12, lineHeight: 18 }}>
                   ينشئ المدير حسابات الأعضاء من لوحة التحكم ويمنحهم صلاحيات الأقسام.

@@ -112,7 +112,7 @@ export default function MembersScreen() {
   const selfId = user?.id;
   const visibleMembers = members.filter((item) =>
     (activeFilter === "all" || item.active === (activeFilter === "active")) &&
-    `${item.name} ${item.email} ${item.role_name ?? roleLabel(item.role)}`
+    `${item.name} ${item.role_name ?? roleLabel(item.role)}`
       .toLocaleLowerCase()
       .includes(search.trim().toLocaleLowerCase()),
   );
@@ -230,7 +230,7 @@ export default function MembersScreen() {
             <View style={styles.empty}>
               <Users size={23} color={colors.muted} />
               <Text style={styles.emptyTitle}>{members.length ? "لا يوجد عضو مطابق للبحث" : "لا توجد حسابات أعضاء بعد"}</Text>
-              <Text style={styles.emptyText}>{members.length ? "جرّب البحث باسم مختلف أو بالبريد الإلكتروني." : "ستظهر هنا الحسابات بعد إنشائها."}</Text>
+              <Text style={styles.emptyText}>{members.length ? "جرّب البحث باسم مختلف أو بالمسمى الوظيفي." : "ستظهر هنا الحسابات بعد إنشائها."}</Text>
             </View>
           ) : visibleMembers.map((item) => {
             const isSelf = item.clerk_user_id === selfId;
