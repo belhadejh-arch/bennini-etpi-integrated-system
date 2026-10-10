@@ -1,7 +1,17 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import path from "node:path";
 import { existsSync, readFileSync } from "node:fs";
-import { createHmac, randomBytes, randomInt, scrypt as scryptCallback, timingSafeEqual, randomUUID } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  randomInt,
+  scrypt as scryptCallback,
+  timingSafeEqual,
+  randomUUID,
+} from "node:crypto";
 import { promisify } from "node:util";
 import multer from "multer";
 import cors from "cors";
@@ -97,6 +107,30 @@ function cacheSchemaSetup(
 
 function serialLookup(serial: string) {
   return createHmac("sha256", sessionSecret!).update(`serial:${serial}`).digest("hex");
+}
+
+function serialEncryptionKey() {
+  return createHash("sha256").update("bennini:member-serial:v1:").update(sessionSecret!).digest();
+}
+
+function encryptSerial(serial: string) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", serialEncryptionKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(serial, "utf8"), cipher.final()]);
+  return `v1:${iv.toString("base64url")}:${cipher.getAuthTag().toString("base64url")}:${encrypted.toString("base64url")}`;
+}
+
+function decryptSerial(encoded: string) {
+  const [version, ivValue, tagValue, encryptedValue] = encoded.split(":");
+  if (version !== "v1" || !ivValue || !tagValue || !encryptedValue) {
+    throw new Error("Unsupported member serial encryption format.");
+  }
+  const decipher = createDecipheriv("aes-256-gcm", serialEncryptionKey(), Buffer.from(ivValue, "base64url"));
+  decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedValue, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
 }
 
 async function hashSerial(serial: string) {
@@ -217,6 +251,8 @@ function ensureMemberSchema() {
       ALTER TABLE members ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{}'::jsonb;
       ALTER TABLE members ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL
         DEFAULT '{"uploadFiles":true,"viewFinancialData":true,"manageOperations":true}'::jsonb;
+      ALTER TABLE members ADD COLUMN IF NOT EXISTS serial_encrypted TEXT;
+      ALTER TABLE members ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
     `),
   );
 }
@@ -278,7 +314,7 @@ async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Mem
   }
 
   const result = await pool.query<Member>(
-    "SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities FROM members WHERE clerk_user_id = $1",
+    "SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities FROM members WHERE clerk_user_id = $1 AND deleted_at IS NULL",
     [memberId],
   );
 
@@ -1255,40 +1291,60 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), async (req:
     const canSeeRentals = hasPermission(member, "rentals", "view");
     const canSeeField = hasPermission(member, "field", "view");
     const canSeeAllField = member.role === "admin" || member.role === "finance";
-    if (canSeeField || canSeeFinance) await ensureFieldExpenseSchema();
+    const fieldSchemaReady = canSeeField || canSeeFinance
+      ? ensureFieldExpenseSchema()
+      : Promise.resolve();
     const fieldExpenseTotal = canSeeFinance
       ? " + COALESCE((SELECT SUM(amount) FROM field_expenses), 0)"
       : "";
     const fieldQuery = canSeeField
-      ? pool.query(
+      ? fieldSchemaReady.then(() => pool.query(
          `SELECT id, category, amount, site_name, details, created_by_id, created_by_name, created_at, fuel_liters, review_status, notes
          FROM field_expenses ${canSeeAllField ? "" : "WHERE created_by_id = $1"}
          ORDER BY created_at DESC LIMIT 5`,
         canSeeAllField ? [] : [member.clerk_user_id],
-      )
+      ))
       : Promise.resolve({ rows: [] });
-    const [cash, purchases, inventory, cheques, rentals, recent, field] = await Promise.all([
-      pool.query(`
+    const cashQuery = canSeeFinance
+      ? fieldSchemaReady.then(() => pool.query(`
         SELECT
           COALESCE((SELECT SUM(amount) FROM transactions WHERE type = 'income'), 0) AS income,
           COALESCE((SELECT SUM(amount) FROM transactions WHERE type = 'expense'), 0)
             ${fieldExpenseTotal} AS outgoing
-      `),
-      pool.query("SELECT COALESCE(SUM(total_cost), 0) AS total FROM inventory_items"),
-      pool.query("SELECT COALESCE(SUM(remaining_quantity * buy_price), 0) AS total FROM inventory_items"),
-      pool.query(`
+      `))
+      : Promise.resolve({ rows: [{ income: 0, outgoing: 0 }] });
+    const purchasesQuery = canSeeFinance && canSeeInventory
+      ? pool.query("SELECT COALESCE(SUM(total_cost), 0) AS total FROM inventory_items")
+      : Promise.resolve({ rows: [{ total: 0 }] });
+    const inventoryQuery = canSeeFinance && canSeeInventory
+      ? pool.query("SELECT COALESCE(SUM(remaining_quantity * buy_price), 0) AS total FROM inventory_items")
+      : Promise.resolve({ rows: [{ total: 0 }] });
+    const chequesQuery = canSeeCheques
+      ? pool.query(`
         SELECT
           COUNT(*) FILTER (WHERE status = 'pending')::int AS pending_count,
           COALESCE(SUM(amount) FILTER (WHERE status = 'pending'), 0) AS pending_amount,
           COUNT(*) FILTER (WHERE status = 'pending' AND due_date <= CURRENT_DATE)::int AS due_count,
           COALESCE(SUM(amount) FILTER (WHERE status = 'pending' AND due_date <= CURRENT_DATE), 0) AS due_amount
         FROM cheques
-      `),
-      pool.query("SELECT COALESCE(SUM(GREATEST(total_amount - paid_amount, 0)), 0) AS remaining FROM rentals"),
-      pool.query(`
+      `)
+      : Promise.resolve({ rows: [{ pending_count: 0, pending_amount: 0, due_count: 0, due_amount: 0 }] });
+    const rentalsQuery = canSeeFinance && canSeeRentals
+      ? pool.query("SELECT COALESCE(SUM(GREATEST(total_amount - paid_amount, 0)), 0) AS remaining FROM rentals")
+      : Promise.resolve({ rows: [{ remaining: 0 }] });
+    const recentQuery = canSeeFinance
+      ? pool.query(`
         SELECT id, type, amount, party, reason, notes, transaction_date AS date, recorded_by_name AS recorded_by
         FROM transactions ORDER BY transaction_date DESC, created_at DESC LIMIT 6
-      `),
+      `)
+      : Promise.resolve({ rows: [] });
+    const [cash, purchases, inventory, cheques, rentals, recent, field] = await Promise.all([
+      cashQuery,
+      purchasesQuery,
+      inventoryQuery,
+      chequesQuery,
+      rentalsQuery,
+      recentQuery,
       fieldQuery,
     ]);
 
@@ -3012,7 +3068,7 @@ app.get("/api/field-expense-attachments/:id", requireFieldExpenseSchema, authent
 
 app.get("/api/members", requireRecordNotesSchema, authenticate, requireSection("users"), async (req: AuthenticatedRequest, res) => {
   const result = await pool.query(
-    "SELECT clerk_user_id, COALESCE(email, '') AS email, name, role, role_name, active, allowed_sections, permissions, capabilities, notes, created_at, (serial_hash IS NOT NULL) AS has_serial FROM members ORDER BY created_at",
+    "SELECT clerk_user_id, COALESCE(email, '') AS email, name, role, role_name, active, allowed_sections, permissions, capabilities, notes, created_at, (serial_hash IS NOT NULL) AS has_serial, (serial_encrypted IS NOT NULL) AS serial_recoverable FROM members WHERE deleted_at IS NULL ORDER BY created_at",
   );
   const isAdmin = req.member?.role === "admin";
   res.json({
@@ -3024,6 +3080,7 @@ app.get("/api/members", requireRecordNotesSchema, authenticate, requireSection("
       role_name: item.role_name,
       active: item.active,
       has_serial: item.has_serial,
+      serial_recoverable: item.serial_recoverable,
       created_at: item.created_at,
       ...(isAdmin ? {
         allowed_sections: item.allowed_sections,
@@ -3062,11 +3119,11 @@ app.post("/api/members", authenticate, requireAdmin, async (req: AuthenticatedRe
       serial = String(randomInt(0, 1_000_000)).padStart(6, "0");
       const result = await client.query<Member>(
         `INSERT INTO members
-           (clerk_user_id, email, serial_lookup, serial_hash, name, role, active, allowed_sections, role_name, permissions)
-         VALUES ($1, NULL, $2, $3, $4, $5, TRUE, ARRAY['dashboard']::text[], $6, '{}'::jsonb)
+           (clerk_user_id, email, serial_lookup, serial_hash, serial_encrypted, name, role, active, allowed_sections, role_name, permissions)
+         VALUES ($1, NULL, $2, $3, $4, $5, $6, TRUE, ARRAY['dashboard']::text[], $7, '{}'::jsonb)
          ON CONFLICT (serial_lookup) DO NOTHING
          RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
-        [randomUUID(), serialLookup(serial), await hashSerial(serial), name, role, safeRoleName],
+        [randomUUID(), serialLookup(serial), await hashSerial(serial), encryptSerial(serial), name, role, safeRoleName],
       );
       if (result.rowCount) {
         created = result.rows[0];
@@ -3087,6 +3144,107 @@ app.post("/api/members", authenticate, requireAdmin, async (req: AuthenticatedRe
     fail(res, 500, "تعذر إنشاء حساب العضو.");
   } finally {
     client.release();
+  }
+});
+
+app.get("/api/members/:id/serial", authenticate, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  try {
+    const result = await pool.query<{ name: string; serial_encrypted: string | null }>(
+      "SELECT name, serial_encrypted FROM members WHERE clerk_user_id = $1 AND deleted_at IS NULL",
+      [req.params.id],
+    );
+    if (!result.rowCount) return fail(res, 404, "العضو غير موجود.");
+    if (!result.rows[0].serial_encrypted) {
+      return fail(res, 409, "رقم هذا الحساب القديم غير قابل للاسترجاع؛ أصدر له رقماً جديداً.");
+    }
+    const serial = decryptSerial(result.rows[0].serial_encrypted);
+    await writeAudit(req.member!, "عرض رقم دخول عضو", `عرض المدير رقم دخول العضو ${result.rows[0].name}.`,
+      { section: "users", eventType: "other", entityId: req.params.id });
+    res.set("Cache-Control", "no-store").json({ serial });
+  } catch (error) {
+    console.error("Member serial reveal failed:", error);
+    fail(res, 500, "تعذر عرض رقم دخول العضو.");
+  }
+});
+
+app.post("/api/members/:id/serial/reset", authenticate, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const target = await client.query<{ name: string }>(
+      "SELECT name FROM members WHERE clerk_user_id = $1 AND deleted_at IS NULL FOR UPDATE",
+      [req.params.id],
+    );
+    if (!target.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "العضو غير موجود.");
+    }
+
+    let serial = "";
+    let changed = false;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      serial = String(randomInt(0, 1_000_000)).padStart(6, "0");
+      await client.query("SAVEPOINT serial_candidate");
+      try {
+        const result = await client.query(
+          `UPDATE members SET serial_lookup = $1, serial_hash = $2, serial_encrypted = $3, updated_at = NOW()
+           WHERE clerk_user_id = $4 AND deleted_at IS NULL`,
+          [serialLookup(serial), await hashSerial(serial), encryptSerial(serial), req.params.id],
+        );
+        await client.query("RELEASE SAVEPOINT serial_candidate");
+        if (result.rowCount) {
+          changed = true;
+          break;
+        }
+      } catch (error) {
+        await client.query("ROLLBACK TO SAVEPOINT serial_candidate");
+        await client.query("RELEASE SAVEPOINT serial_candidate");
+        if (!(typeof error === "object" && error !== null && "code" in error && error.code === "23505")) {
+          throw error;
+        }
+      }
+    }
+    if (!changed) {
+      await client.query("ROLLBACK");
+      return fail(res, 503, "تعذر توليد رقم دخول فريد. أعد المحاولة.");
+    }
+
+    await writeAuditWithClient(client, req.member!, "إصدار رقم دخول جديد لعضو",
+      `أصدر المدير رقم دخول جديداً للعضو ${target.rows[0].name}.`,
+      { section: "users", eventType: "update", entityId: req.params.id });
+    await client.query("COMMIT");
+    res.set("Cache-Control", "no-store").json({ serial });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Member serial reset failed:", error);
+    fail(res, 500, "تعذر إصدار رقم دخول جديد.");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/members/:id/activity", authenticate, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  try {
+    await ensureAuditLogSchema();
+    const page = Math.max(1, Math.min(100000, Number.parseInt(String(req.query.page ?? "1"), 10) || 1));
+    const pageSize = 30;
+    const offset = (page - 1) * pageSize;
+    const [items, count] = await Promise.all([
+      pool.query(
+        `SELECT id, action, details, section, event_type, entity_id, created_at
+         FROM audit_logs WHERE performed_by_id = $1
+         ORDER BY created_at DESC, id DESC LIMIT ${pageSize} OFFSET ${offset}`,
+        [req.params.id],
+      ),
+      pool.query(
+        "SELECT COUNT(*)::int AS total FROM audit_logs WHERE performed_by_id = $1",
+        [req.params.id],
+      ),
+    ]);
+    res.json({ items: items.rows, total: count.rows[0].total, page, pageSize });
+  } catch (error) {
+    console.error("Member activity read failed:", error);
+    fail(res, 500, "تعذر تحميل سجل عمليات العضو.");
   }
 });
 
@@ -3148,7 +3306,7 @@ app.patch("/api/members/:id", authenticate, requireAdmin, async (req: Authentica
     const result = await client.query(
       `UPDATE members SET active = $1, allowed_sections = $2, role_name = $3,
         permissions = $4::jsonb, capabilities = $5::jsonb, updated_at = NOW()
-       WHERE clerk_user_id = $6
+       WHERE clerk_user_id = $6 AND deleted_at IS NULL
        RETURNING clerk_user_id, email, name, role, role_name, active, allowed_sections, permissions, capabilities, created_at`,
       [active, sections, safeRoleName, JSON.stringify(cleanPermissions), JSON.stringify(cleanCapabilities), targetId],
     );
@@ -3164,6 +3322,54 @@ app.patch("/api/members/:id", authenticate, requireAdmin, async (req: Authentica
     await client.query("ROLLBACK");
     console.error("Member permission update failed:", error);
     fail(res, 500, "تعذر تحديث صلاحيات العضو.");
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/members/:id", authenticate, requireAdmin, async (req: AuthenticatedRequest, res) => {
+  const targetId = req.params.id;
+  if (targetId === req.member?.clerk_user_id) {
+    return fail(res, 400, "لا يمكن حذف حساب المدير الحالي.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const target = await client.query<{ name: string; role: string; active: boolean }>(
+      "SELECT name, role, active FROM members WHERE clerk_user_id = $1 AND deleted_at IS NULL FOR UPDATE",
+      [targetId],
+    );
+    if (!target.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "العضو غير موجود.");
+    }
+    if (target.rows[0].role === "admin" && target.rows[0].active) {
+      const activeAdmins = await client.query(
+        "SELECT clerk_user_id FROM members WHERE role = 'admin' AND active = TRUE AND deleted_at IS NULL FOR UPDATE",
+      );
+      if (activeAdmins.rowCount !== null && activeAdmins.rowCount <= 1) {
+        await client.query("ROLLBACK");
+        return fail(res, 400, "لا يمكن حذف آخر مدير مفعّل.");
+      }
+    }
+
+    await client.query(
+      `UPDATE members
+       SET active = FALSE, serial_lookup = NULL, serial_hash = NULL, serial_encrypted = NULL,
+         deleted_at = NOW(), updated_at = NOW()
+       WHERE clerk_user_id = $1`,
+      [targetId],
+    );
+    await writeAuditWithClient(client, req.member!, "حذف حساب عضو",
+      `عطّل المدير حساب العضو ${target.rows[0].name} وأرشفه؛ حُفظت العمليات السابقة.`,
+      { section: "users", eventType: "delete", entityId: targetId });
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Member archive failed:", error);
+    fail(res, 500, "تعذر حذف حساب العضو.");
   } finally {
     client.release();
   }

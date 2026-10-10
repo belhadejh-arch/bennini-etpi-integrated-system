@@ -1,8 +1,8 @@
 import { useAuth, useUser } from "../lib/auth";
 import { useRouter } from "expo-router";
-import { ArrowRight, Check, Plus, Search, ShieldCheck, Users, X } from "lucide-react-native";
+import { ArrowRight, Check, Clock3, Eye, KeyRound, Plus, Search, ShieldCheck, Trash2, Users, X } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Switch, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "./components/AppHeader";
 import RecordNotes from "./components/RecordNotes";
 import { apiRequest, type Member } from "../lib/api";
@@ -11,6 +11,15 @@ import { sections, type SectionId } from "../shared/sections";
 import { hasPermission, permissionActions, type MemberCapabilities, type MemberPermissions, type PermissionAction } from "../shared/access";
 
 type TeamMember = Member & { created_at?: string };
+type MemberActivityItem = {
+  id: number;
+  action: string;
+  details: string;
+  section: string;
+  event_type: string;
+  created_at: string;
+};
+type MemberActivityResponse = { items: MemberActivityItem[]; total: number; page: number; pageSize: number };
 
 export default function MembersScreen() {
   const router = useRouter();
@@ -28,7 +37,14 @@ export default function MembersScreen() {
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] = useState("viewer");
   const [newRoleName, setNewRoleName] = useState("");
-  const [createdSerial, setCreatedSerial] = useState("");
+  const [serialReveal, setSerialReveal] = useState<{ memberId: string; serial: string } | null>(null);
+  const [serialLoadingId, setSerialLoadingId] = useState("");
+  const [activityMemberId, setActivityMemberId] = useState("");
+  const [activityItems, setActivityItems] = useState<MemberActivityItem[]>([]);
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityPage, setActivityPage] = useState(0);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState("");
   const [creating, setCreating] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -93,13 +109,13 @@ export default function MembersScreen() {
   const createMember = async () => {
     setCreating(true);
     setError("");
-    setCreatedSerial("");
+    setSerialReveal(null);
     try {
       const result = await apiRequest<{ member: TeamMember; serial: string }>("/members", () => getToken(), {
         method: "POST",
         body: JSON.stringify({ name: newName, role: newRole, roleName: newRoleName }),
       });
-      setCreatedSerial(result.serial);
+      setSerialReveal({ memberId: result.member.clerk_user_id, serial: result.serial });
       setNewName("");
       setNewRoleName("");
       setNewRole("viewer");
@@ -110,6 +126,102 @@ export default function MembersScreen() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const showMemberSerial = async (target: TeamMember) => {
+    setSerialLoadingId(target.clerk_user_id);
+    setError("");
+    try {
+      const canReveal = target.serial_recoverable === true;
+      const result = await apiRequest<{ serial: string }>(
+        `/members/${encodeURIComponent(target.clerk_user_id)}/serial${canReveal ? "" : "/reset"}`,
+        () => getToken(),
+        canReveal ? {} : { method: "POST" },
+      );
+      setSerialReveal({ memberId: target.clerk_user_id, serial: result.serial });
+      if (!canReveal) {
+        setMembers((current) => current.map((item) => item.clerk_user_id === target.clerk_user_id
+          ? { ...item, has_serial: true, serial_recoverable: true }
+          : item));
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "تعذر عرض رقم الدخول.");
+    } finally {
+      setSerialLoadingId("");
+    }
+  };
+
+  const confirmSerialReset = (target: TeamMember) => {
+    const reset = () => void showMemberSerial(target);
+    const message = "تعذر استرجاع الرقم القديم. سيصدر رقم جديد ويلغي الرقم السابق.";
+    if (Platform.OS === "web") {
+      if (window.confirm(message)) reset();
+      return;
+    }
+    Alert.alert("إصدار رقم دخول جديد", message, [
+      { text: "إلغاء", style: "cancel" },
+      { text: "إصدار رقم جديد", style: "destructive", onPress: reset },
+    ]);
+  };
+
+  const loadMemberActivity = async (targetId: string, page: number, append = false) => {
+    setActivityLoading(true);
+    setActivityError("");
+    try {
+      const result = await apiRequest<MemberActivityResponse>(
+        `/members/${encodeURIComponent(targetId)}/activity?page=${page}`,
+        () => getToken(),
+      );
+      setActivityItems((current) => append ? [...current, ...result.items] : result.items);
+      setActivityTotal(result.total);
+      setActivityPage(result.page);
+    } catch (caught) {
+      setActivityError(caught instanceof Error ? caught.message : "تعذر تحميل سجل عمليات العضو.");
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
+  const toggleMemberActivity = (targetId: string) => {
+    if (activityMemberId === targetId) {
+      setActivityMemberId("");
+      return;
+    }
+    setActivityMemberId(targetId);
+    setActivityItems([]);
+    setActivityPage(0);
+    setActivityTotal(0);
+    void loadMemberActivity(targetId, 1);
+  };
+
+  const deleteMember = async (target: TeamMember) => {
+    setSavingId(target.clerk_user_id);
+    setError("");
+    try {
+      await apiRequest<{ ok: true }>(`/members/${encodeURIComponent(target.clerk_user_id)}`, () => getToken(), {
+        method: "DELETE",
+      });
+      setMembers((current) => current.filter((item) => item.clerk_user_id !== target.clerk_user_id));
+      if (serialReveal?.memberId === target.clerk_user_id) setSerialReveal(null);
+      if (activityMemberId === target.clerk_user_id) setActivityMemberId("");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "تعذر حذف حساب العضو.");
+    } finally {
+      setSavingId("");
+    }
+  };
+
+  const confirmDeleteMember = (target: TeamMember) => {
+    const remove = () => void deleteMember(target);
+    const message = `سيُوقف دخول ${target.name} ويُخفى حسابه من القائمة. ستبقى العمليات السابقة وسجلاتها محفوظة.`;
+    if (Platform.OS === "web") {
+      if (window.confirm(message)) remove();
+      return;
+    }
+    Alert.alert("حذف حساب العضو", message, [
+      { text: "إلغاء", style: "cancel" },
+      { text: "حذف الحساب", style: "destructive", onPress: remove },
+    ]);
   };
 
   const admin = member?.role === "admin";

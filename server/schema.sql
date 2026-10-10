@@ -3,9 +3,11 @@ CREATE TABLE IF NOT EXISTS members (
   email TEXT UNIQUE,
   serial_lookup TEXT UNIQUE,
   serial_hash TEXT,
+  serial_encrypted TEXT,
   name TEXT NOT NULL DEFAULT '',
   role TEXT NOT NULL DEFAULT 'pending',
   active BOOLEAN NOT NULL DEFAULT FALSE,
+  deleted_at TIMESTAMPTZ,
   allowed_sections TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
   notes TEXT NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -15,6 +17,8 @@ CREATE TABLE IF NOT EXISTS members (
 ALTER TABLE members ALTER COLUMN email DROP NOT NULL;
 ALTER TABLE members ADD COLUMN IF NOT EXISTS serial_lookup TEXT UNIQUE;
 ALTER TABLE members ADD COLUMN IF NOT EXISTS serial_hash TEXT;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS serial_encrypted TEXT;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 ALTER TABLE members ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
 ALTER TABLE members ADD COLUMN IF NOT EXISTS role_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE members ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{}'::jsonb;
@@ -362,5 +366,6 @@ CREATE INDEX IF NOT EXISTS field_expenses_created_idx ON field_expenses (created
 CREATE INDEX IF NOT EXISTS field_expenses_review_created_idx ON field_expenses (review_status, created_at DESC);
 CREATE INDEX IF NOT EXISTS field_expense_attachments_expense_idx ON field_expense_attachments (field_expense_id, created_at);
 CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS audit_logs_performed_by_created_idx ON audit_logs (performed_by_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_section_created_idx ON audit_logs (section, created_at DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_type_created_idx ON audit_logs (event_type, created_at DESC);
