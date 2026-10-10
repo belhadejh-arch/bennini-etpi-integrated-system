@@ -70,6 +70,31 @@ let memberSchemaPromise: Promise<void> | null = null;
 let auditLogSchemaPromise: Promise<void> | null = null;
 let notificationSchemaPromise: Promise<void> | null = null;
 
+function cacheSchemaSetup(
+  getCurrent: () => Promise<void> | null,
+  setCurrent: (value: Promise<void> | null) => void,
+  setup: () => Promise<unknown>,
+) {
+  const current = getCurrent();
+  if (current) return current;
+
+  const attempt = Promise.resolve().then(async () => {
+    try {
+      await setup();
+    } catch {
+      await new Promise<void>((resolve) => setTimeout(resolve, 300));
+      await setup();
+    }
+  }).then(() => undefined);
+  setCurrent(attempt);
+  void attempt.catch(() => {
+    setTimeout(() => {
+      if (getCurrent() === attempt) setCurrent(null);
+    }, 3000);
+  });
+  return attempt;
+}
+
 function serialLookup(serial: string) {
   return createHmac("sha256", sessionSecret!).update(`serial:${serial}`).digest("hex");
 }
@@ -127,22 +152,25 @@ function constantTimeTextMatch(supplied: string, expected: string) {
 }
 
 function ensureNotificationSchema() {
-  if (!notificationSchemaPromise) {
-    notificationSchemaPromise = pool.query(`
+  return cacheSchemaSetup(
+    () => notificationSchemaPromise,
+    (value) => { notificationSchemaPromise = value; },
+    () => pool.query(`
       CREATE TABLE IF NOT EXISTS notification_reads (
         member_id TEXT NOT NULL REFERENCES members(clerk_user_id) ON DELETE CASCADE,
         notification_id TEXT NOT NULL,
         read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (member_id, notification_id)
       );
-    `).then(() => undefined);
-  }
-  return notificationSchemaPromise;
+    `),
+  );
 }
 
 function ensureAuditLogSchema() {
-  if (!auditLogSchemaPromise) {
-    auditLogSchemaPromise = pool.query(`
+  return cacheSchemaSetup(
+    () => auditLogSchemaPromise,
+    (value) => { auditLogSchemaPromise = value; },
+    () => pool.query(`
       ALTER TABLE audit_logs
         ADD COLUMN IF NOT EXISTS section TEXT NOT NULL DEFAULT 'system',
         ADD COLUMN IF NOT EXISTS event_type TEXT NOT NULL DEFAULT 'other',
@@ -176,21 +204,21 @@ function ensureAuditLogSchema() {
       );
       CREATE INDEX IF NOT EXISTS audit_logs_section_created_idx ON audit_logs (section, created_at DESC);
       CREATE INDEX IF NOT EXISTS audit_logs_type_created_idx ON audit_logs (event_type, created_at DESC);
-    `).then(() => undefined);
-  }
-  return auditLogSchemaPromise;
+    `),
+  );
 }
 
 function ensureMemberSchema() {
-  if (!memberSchemaPromise) {
-    memberSchemaPromise = pool.query(`
+  return cacheSchemaSetup(
+    () => memberSchemaPromise,
+    (value) => { memberSchemaPromise = value; },
+    () => pool.query(`
       ALTER TABLE members ADD COLUMN IF NOT EXISTS role_name TEXT NOT NULL DEFAULT '';
       ALTER TABLE members ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{}'::jsonb;
       ALTER TABLE members ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL
         DEFAULT '{"uploadFiles":true,"viewFinancialData":true,"manageOperations":true}'::jsonb;
-    `).then(() => undefined);
-  }
-  return memberSchemaPromise;
+    `),
+  );
 }
 
 const paymentMethods = ["نقداً", "شيك", "تحويل بنكي"] as const;
@@ -419,8 +447,10 @@ function validRental(body: Record<string, unknown>, existing?: Partial<RentalInp
 let rentalSchemaPromise: Promise<void> | null = null;
 
 function ensureRentalSchema() {
-  if (!rentalSchemaPromise) {
-    rentalSchemaPromise = pool.query(`
+  return cacheSchemaSetup(
+    () => rentalSchemaPromise,
+    (value) => { rentalSchemaPromise = value; },
+    () => pool.query(`
     CREATE TABLE IF NOT EXISTS rentals (
       id BIGSERIAL PRIMARY KEY,
       equipment TEXT NOT NULL,
@@ -454,9 +484,8 @@ function ensureRentalSchema() {
     );
     CREATE INDEX IF NOT EXISTS rentals_end_date_idx ON rentals (end_date);
     CREATE INDEX IF NOT EXISTS rental_attachments_rental_idx ON rental_attachments (rental_id, created_at);
-  `).then(() => undefined);
-  }
-  return rentalSchemaPromise;
+    `),
+  );
 }
 
 async function requireRentalSchema(_req: Request, res: Response, next: NextFunction) {
@@ -472,8 +501,10 @@ async function requireRentalSchema(_req: Request, res: Response, next: NextFunct
 let fieldExpenseSchemaPromise: Promise<void> | null = null;
 
 function ensureFieldExpenseSchema() {
-  if (!fieldExpenseSchemaPromise) {
-    fieldExpenseSchemaPromise = pool.query(`
+  return cacheSchemaSetup(
+    () => fieldExpenseSchemaPromise,
+    (value) => { fieldExpenseSchemaPromise = value; },
+    () => pool.query(`
       CREATE TABLE IF NOT EXISTS field_expenses (
         id BIGSERIAL PRIMARY KEY,
         category TEXT NOT NULL,
@@ -511,12 +542,8 @@ function ensureFieldExpenseSchema() {
       );
       CREATE INDEX IF NOT EXISTS field_expenses_review_created_idx ON field_expenses (review_status, created_at DESC);
       CREATE INDEX IF NOT EXISTS field_expense_attachments_expense_idx ON field_expense_attachments (field_expense_id, created_at);
-    `).then(() => undefined).catch((error) => {
-      fieldExpenseSchemaPromise = null;
-      throw error;
-    });
-  }
-  return fieldExpenseSchemaPromise;
+    `),
+  );
 }
 
 async function requireFieldExpenseSchema(_req: Request, res: Response, next: NextFunction) {
@@ -532,8 +559,10 @@ async function requireFieldExpenseSchema(_req: Request, res: Response, next: Nex
 let machinerySchemaPromise: Promise<void> | null = null;
 
 function ensureMachinerySchema() {
-  if (!machinerySchemaPromise) {
-    machinerySchemaPromise = pool.query(`
+  return cacheSchemaSetup(
+    () => machinerySchemaPromise,
+    (value) => { machinerySchemaPromise = value; },
+    () => pool.query(`
       CREATE TABLE IF NOT EXISTS machinery (
         id BIGSERIAL PRIMARY KEY,
         code TEXT NOT NULL UNIQUE,
@@ -576,9 +605,8 @@ function ensureMachinerySchema() {
         ON machinery_spare_parts (machinery_id, installation_date DESC, created_at DESC);
       CREATE INDEX IF NOT EXISTS machinery_spare_part_attachments_part_idx
         ON machinery_spare_part_attachments (spare_part_id, created_at);
-    `).then(() => undefined);
-  }
-  return machinerySchemaPromise;
+    `),
+  );
 }
 
 async function requireMachinerySchema(_req: Request, res: Response, next: NextFunction) {
@@ -594,8 +622,10 @@ async function requireMachinerySchema(_req: Request, res: Response, next: NextFu
 let recordNotesSchemaPromise: Promise<void> | null = null;
 
 function ensureRecordNotesSchema() {
-  if (!recordNotesSchemaPromise) {
-    recordNotesSchemaPromise = Promise.all([
+  return cacheSchemaSetup(
+    () => recordNotesSchemaPromise,
+    (value) => { recordNotesSchemaPromise = value; },
+    () => Promise.all([
       ensureMachinerySchema(),
       pool.query("ALTER TABLE members ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT ''"),
       pool.query(`
@@ -606,9 +636,8 @@ function ensureRecordNotesSchema() {
           updated_by_name TEXT NOT NULL,
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )`),
-    ]).then(() => undefined);
-  }
-  return recordNotesSchemaPromise;
+    ]),
+  );
 }
 
 async function requireRecordNotesSchema(_req: Request, res: Response, next: NextFunction) {
