@@ -1,5 +1,6 @@
 module.exports = ({ config }) => {
-  const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "");
+  const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL?.trim().replace(/\/+$/, "") ||
+    (process.env.VERCEL ? "https://bennini-etpi.onrender.com" : undefined);
 
   if (process.env.VERCEL && !configuredApiUrl) {
     throw new Error("Set EXPO_PUBLIC_API_URL to the deployed Render API URL in Vercel.");
