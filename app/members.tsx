@@ -37,9 +37,11 @@ export default function MembersScreen() {
     setError("");
     try {
       const token = () => getToken();
-      const me = await apiRequest<{ member: Member }>("/me", token);
+      const memberRequest = apiRequest<{ member: Member }>("/me", token);
+      const membersRequest = apiRequest<{ members: TeamMember[] }>("/members", token);
+      const me = await memberRequest;
       setMember(me.member);
-      const result = await apiRequest<{ members: TeamMember[] }>("/members", token);
+      const result = await membersRequest;
       setMembers(result.members);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "تعذر تحميل الأعضاء.");

@@ -27,7 +27,7 @@ import {
 import { AppHeader, HeaderAction } from "./components/AppHeader";
 import RecordNotes from "./components/RecordNotes";
 import { CompanyLogo } from "./components/CompanyLogo";
-import { apiRequest, type DashboardData, type Member } from "../lib/api";
+import { apiRequest, type DashboardData } from "../lib/api";
 import { colors, formatDzd } from "../lib/theme";
 import { sections, type SectionId } from "../shared/sections";
 import { hasPermission } from "../shared/access";
@@ -49,9 +49,8 @@ const icons: Record<string, typeof Wallet> = {
 export default function HomeScreen() {
   const router = useRouter();
   const { width: viewportWidth } = useWindowDimensions();
-  const { isLoaded: authLoaded, isSignedIn, getToken, signOut } = useAuth();
+  const { isLoaded: authLoaded, isSignedIn, getToken, signOut, member } = useAuth();
   const { user } = useUser();
-  const [member, setMember] = useState<Member | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
@@ -62,17 +61,12 @@ export default function HomeScreen() {
     setLoading(true);
     setError("");
     try {
-      const token = () => getToken();
-      const me = await apiRequest<{ member: Member }>("/me", token);
-      setMember(me.member);
-      setPending(false);
-      const data = await apiRequest<DashboardData>("/dashboard", token);
+      const data = await apiRequest<DashboardData>("/dashboard", () => getToken());
       setDashboard(data);
     } catch (caught) {
       const issue = caught as ApiError;
       if (issue.status === 403 && issue.body?.pending) {
         setPending(true);
-        setMember((issue.body as { member?: Member }).member ?? null);
       } else {
         setError(issue.message || "تعذر تحميل لوحة القيادة.");
       }

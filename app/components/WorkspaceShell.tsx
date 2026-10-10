@@ -2,7 +2,6 @@ import { useAuth, useUser } from "../../lib/auth";
 import { useGlobalSearchParams, usePathname, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform, View, useWindowDimensions } from "react-native";
-import { apiRequest, type Member } from "../../lib/api";
 import { colors } from "../../lib/theme";
 import { AppSidebar, SidebarBackdrop, SidebarProvider, type SidebarEntry } from "./AppSidebar";
 import { BottomNavigation } from "./BottomNavigation";
@@ -12,9 +11,8 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useGlobalSearchParams<{ view?: string | string[] }>();
-  const { isLoaded, isSignedIn, getToken, signOut } = useAuth();
+  const { isLoaded, isSignedIn, member, signOut } = useAuth();
   const { width } = useWindowDimensions();
-  const [member, setMember] = useState<Member | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const compact = Platform.OS !== "web" || width < 960;
@@ -30,23 +28,6 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
       });
     }
   }, [router]);
-
-  useEffect(() => {
-    let alive = true;
-    if (!isLoaded || !isSignedIn) {
-      setMember(null);
-      setDrawerOpen(false);
-      return () => { alive = false; };
-    }
-    void apiRequest<{ member: Member }>("/me", () => getToken())
-      .then(({ member: currentMember }) => {
-        if (alive) setMember(currentMember);
-      })
-      .catch(() => {
-        if (alive) setMember(null);
-      });
-    return () => { alive = false; };
-  }, [getToken, isLoaded, isSignedIn]);
 
   useEffect(() => {
     setDrawerOpen(false);

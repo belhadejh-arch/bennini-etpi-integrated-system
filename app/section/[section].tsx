@@ -52,9 +52,11 @@ export default function SectionScreen() {
     setError("");
     try {
       const token = () => getToken();
-      const me = await apiRequest<{ member: Member }>("/me", token);
+      const memberRequest = apiRequest<{ member: Member }>("/me", token);
+      const sectionRequest = apiRequest<SectionResult>(`/sections/${section}${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token);
+      const me = await memberRequest;
       setMember(me.member);
-      const data = await apiRequest<SectionResult>(`/sections/${section}${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token);
+      const data = await sectionRequest;
       setItems(data.items);
     } catch (caught) {
       const issue = caught as ApiError;

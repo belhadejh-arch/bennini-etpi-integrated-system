@@ -104,9 +104,11 @@ export default function FinanceSection() {
     setError("");
     try {
       const token = () => getToken();
-      const me = await apiRequest<{ member: Member }>("/me", token);
+      const memberRequest = apiRequest<{ member: Member }>("/me", token);
+      const transactionsRequest = apiRequest<TransactionResult>(`/transactions?${queryString}`, token);
+      const me = await memberRequest;
       setMember(me.member);
-      const result = await apiRequest<TransactionResult>(`/transactions?${queryString}`, token);
+      const result = await transactionsRequest;
       setTransactions(result.items);
       setTotal(result.total);
       setCashBalance(result.cashBalance);

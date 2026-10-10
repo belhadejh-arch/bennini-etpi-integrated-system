@@ -166,9 +166,11 @@ export default function ChequesSection() {
     setError("");
     try {
       const token = () => getToken();
-      const me = await apiRequest<{ member: Member }>("/me", token);
+      const memberRequest = apiRequest<{ member: Member }>("/me", token);
+      const chequesRequest = apiRequest<ChequeResult>(`/cheques?${queryString}`, token);
+      const me = await memberRequest;
       setMember(me.member);
-      const result = await apiRequest<ChequeResult>(`/cheques?${queryString}`, token);
+      const result = await chequesRequest;
       setItems(result.items);
       setTotal(result.total);
       setDueAlerts(result.dueAlerts);

@@ -150,9 +150,11 @@ export default function InventorySection() {
     setError("");
     try {
       const token = () => getToken();
-      const me = await apiRequest<{ member: Member }>("/me", token);
+      const memberRequest = apiRequest<{ member: Member }>("/me", token);
+      const inventoryRequest = apiRequest<InventoryResult>(`/inventory?${queryString}`, token);
+      const me = await memberRequest;
       setMember(me.member);
-      const result = await apiRequest<InventoryResult>(`/inventory?${queryString}`, token);
+      const result = await inventoryRequest;
       setItems(result.items);
       setSummary(result.summary);
       setTotal(result.total);
