@@ -815,11 +815,11 @@ app.get("/api/auth/status", async (_req, res) => {
 });
 
 app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
-  if (!bootstrapToken || bootstrapToken.length < 32) return fail(res, 503, "إعداد المدير الأول غير متاح.");
+  if (!bootstrapToken || bootstrapToken.length < 32) return fail(res, 503, "الإعداد الأولي غير متاح.");
   const suppliedToken = typeof req.body?.bootstrapToken === "string" ? req.body.bootstrapToken : "";
   if (!constantTimeTextMatch(suppliedToken, bootstrapToken)) return fail(res, 401, "بيانات التهيئة غير صحيحة.");
   const requestedSerial = typeof req.body?.serial === "string" ? req.body.serial.trim() : "";
-  if (!/^\d{6}$/.test(requestedSerial)) return fail(res, 400, "أدخل رقم المدير المكوّن من ستة أرقام.");
+  if (!/^\d{6}$/.test(requestedSerial)) return fail(res, 400, "أدخل رقم الدخول المكوّن من ستة أرقام.");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -834,7 +834,7 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
     );
     if (alreadyConfigured.rowCount) {
       await client.query("ROLLBACK");
-      return fail(res, 409, "تم إعداد حساب المدير مسبقاً.");
+      return fail(res, 409, "تم إعداد الحساب الأول مسبقاً.");
     }
 
     const requestedLookup = serialLookup(requestedSerial);
@@ -871,7 +871,7 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
     }
     if (!saved) {
       await client.query("ROLLBACK");
-      return fail(res, 503, "تعذر إنشاء رقم المدير. أعد المحاولة.");
+      return fail(res, 503, "تعذر إنشاء رقم الدخول. أعد المحاولة.");
     }
     await writeAuditWithClient(client, saved, "تهيئة المدير الأول", "تم إنشاء رقم الدخول الأول للمدير.",
       { section: "system", eventType: "setup", entityId: saved.clerk_user_id });
@@ -880,14 +880,14 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Initial administrator setup failed:", error);
-    fail(res, 500, "تعذر تهيئة حساب المدير.");
+    fail(res, 500, "تعذر إعداد الحساب الأول.");
   } finally {
     client.release();
   }
 });
 
 app.post("/api/auth/admin-code/reset", async (req: Request, res: Response) => {
-  if (!bootstrapToken || bootstrapToken.length < 32) return fail(res, 503, "استعادة رمز المدير غير متاحة.");
+  if (!bootstrapToken || bootstrapToken.length < 32) return fail(res, 503, "استعادة رمز الدخول غير متاحة.");
   const suppliedToken = typeof req.body?.bootstrapToken === "string" ? req.body.bootstrapToken : "";
   if (!constantTimeTextMatch(suppliedToken, bootstrapToken)) return fail(res, 401, "بيانات الاستعادة غير صحيحة.");
 
@@ -902,8 +902,8 @@ app.post("/api/auth/admin-code/reset", async (req: Request, res: Response) => {
     if (admins.rowCount !== 1) {
       await client.query("ROLLBACK");
       return fail(res, 409, admins.rowCount === 0
-        ? "لم يتم إعداد حساب مدير يمكن استعادة رمزه."
-        : "توجد عدة حسابات مدير؛ لا يمكن تحديد الحساب بأمان.");
+        ? "لم يتم إعداد حساب يمكن استعادة رمزه."
+        : "توجد عدة حسابات يمكن استعادة رموزها؛ لا يمكن تحديد الحساب بأمان.");
     }
 
     let serial = "";
@@ -942,7 +942,7 @@ app.post("/api/auth/admin-code/reset", async (req: Request, res: Response) => {
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Administrator code reset failed:", error);
-    fail(res, 500, "تعذر إعادة تعيين رمز دخول المدير.");
+    fail(res, 500, "تعذر استعادة رمز الدخول.");
   } finally {
     client.release();
   }

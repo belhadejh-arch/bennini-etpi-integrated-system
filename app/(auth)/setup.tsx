@@ -1,4 +1,4 @@
-import { Link, useRouter } from "expo-router";
+import { Link, useLocalSearchParams, useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { useState } from "react";
 import { StatusBar } from "expo-status-bar";
@@ -9,12 +9,13 @@ import { colors } from "../../lib/theme";
 
 export default function InitialAdminSetupScreen() {
   const router = useRouter();
+  const { mode } = useLocalSearchParams<{ mode?: string }>();
   const { width } = useWindowDimensions();
   const [bootstrapToken, setBootstrapToken] = useState("");
   const [adminSerial, setAdminSerial] = useState("");
   const [serial, setSerial] = useState("");
   const [serialAction, setSerialAction] = useState<"created" | "reset" | null>(null);
-  const [resetMode, setResetMode] = useState(false);
+  const [resetMode, setResetMode] = useState(mode === "reset");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -31,7 +32,7 @@ export default function InitialAdminSetupScreen() {
       setSerialAction("created");
       setBootstrapToken("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "تعذر تهيئة حساب المدير.");
+      setMessage(error instanceof Error ? error.message : "تعذر إعداد الحساب الأول.");
     } finally {
       setBusy(false);
     }
@@ -50,7 +51,7 @@ export default function InitialAdminSetupScreen() {
       setSerialAction("reset");
       setBootstrapToken("");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "تعذر إعادة تعيين رمز دخول المدير.");
+      setMessage(error instanceof Error ? error.message : "تعذر استعادة رمز الدخول.");
     } finally {
       setBusy(false);
     }
@@ -65,19 +66,19 @@ export default function InitialAdminSetupScreen() {
             <CompanyLogo width={Math.min(width - 90, 220)} height={110} />
           </View>
             <Text style={{ color: colors.navy, fontSize: 22, fontWeight: "800", textAlign: "right" }}>
-              {resetMode ? "استعادة رمز دخول المدير" : "إعداد دخول المدير الأول"}
+              {resetMode ? "استعادة رمز الدخول" : "إعداد الحساب الأول"}
             </Text>
           <Text style={{ color: colors.muted, fontSize: 13, lineHeight: 21, textAlign: "right", marginTop: 8, marginBottom: 18 }}>
               {resetMode
-                ? "أدخل رمز التهيئة لإصدار رمز دخول جديد من ستة أرقام. سيتوقف الرمز السابق عن العمل، ولن يظهر الرمز الجديد مرة أخرى."
-                : "هذه الخطوة لمرة واحدة لإنشاء حساب المدير في قاعدة البيانات. أدخل رمز التهيئة ورقم الدخول المكوّن من ستة أرقام."}
+                ? "أدخل رمز التهيئة لإصدار رقم دخول جديد. سيتوقف الرقم السابق عن العمل، ولن يظهر الرقم الجديد مرة أخرى."
+                : "يُستخدم هذا الإعداد مرة واحدة فقط. أدخل رمز التهيئة ورقم الدخول المكوّن من ستة أرقام."}
           </Text>
           {serial ? (
             <View style={{ backgroundColor: "#F1F6FB", borderRadius: 14, padding: 18, alignItems: "center" }}>
                 <Text style={{ color: colors.ink, textAlign: "center", lineHeight: 23 }}>
                   {serialAction === "reset"
-                    ? "تم إصدار رمز دخول جديد للمدير. احفظه الآن؛ لن يظهر مرة أخرى."
-                    : "تم إنشاء رقم المدير. احفظه الآن؛ لن يظهر مرة أخرى."}
+                    ? "تم إصدار رقم دخول جديد. احفظه الآن؛ لن يظهر مرة أخرى."
+                    : "تم إنشاء رقم الدخول. احفظه الآن؛ لن يظهر مرة أخرى."}
                 </Text>
               <Text selectable style={{ color: colors.navy, fontSize: 32, fontWeight: "900", letterSpacing: 10, marginVertical: 12 }}>{serial}</Text>
               <Pressable onPress={() => router.replace("/(auth)/sign-in")} style={{ marginTop: 8, height: 48, borderRadius: 12, backgroundColor: colors.blue, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 }}>
@@ -99,7 +100,7 @@ export default function InitialAdminSetupScreen() {
               />
               {!resetMode ? (
                 <>
-                  <Text style={{ color: colors.ink, fontWeight: "700", textAlign: "right", marginTop: 16 }}>الرقم التسلسلي للمدير</Text>
+                  <Text style={{ color: colors.ink, fontWeight: "700", textAlign: "right", marginTop: 16 }}>رقم الدخول</Text>
                   <TextInput
                     value={adminSerial}
                     onChangeText={(value) => setAdminSerial(value.replace(/\D/g, "").slice(0, 6))}
@@ -119,7 +120,7 @@ export default function InitialAdminSetupScreen() {
               >
                 {busy
                   ? <ActivityIndicator color="#FFFFFF" />
-                  : <Text style={{ color: "#FFFFFF", fontWeight: "800" }}>{resetMode ? "إصدار رمز جديد" : "إنشاء رقم المدير"}</Text>}
+                  : <Text style={{ color: "#FFFFFF", fontWeight: "800" }}>{resetMode ? "إصدار رقم جديد" : "إنشاء رقم الدخول"}</Text>}
               </Pressable>
               {message ? <Text style={{ color: colors.red, fontSize: 13, textAlign: "right", marginTop: 14 }}>{message}</Text> : null}
               <Pressable
@@ -127,7 +128,7 @@ export default function InitialAdminSetupScreen() {
                 style={{ alignSelf: "center", paddingVertical: 12, paddingHorizontal: 8, marginTop: 6 }}
               >
                 <Text style={{ color: colors.blue, fontWeight: "700", textAlign: "center" }}>
-                  {resetMode ? "الانتقال إلى إعداد المدير لأول مرة" : "إعادة إصدار رمز دخول المدير"}
+                  {resetMode ? "الانتقال إلى الإعداد الأولي" : "استعادة رمز الدخول"}
                 </Text>
               </Pressable>
             </>

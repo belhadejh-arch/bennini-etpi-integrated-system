@@ -102,7 +102,10 @@ export default function SignInScreen() {
                 <Text style={{ textAlign: "center", color: colors.muted, fontSize: 12, lineHeight: 18 }}>
                   تُنشأ حسابات الأعضاء من لوحة التحكم وتُحدَّد لهم صلاحيات الأقسام.
                 </Text>
-                <Pressable onPress={() => router.push("/(auth)/setup")} style={{ alignSelf: "center", paddingTop: 12, paddingHorizontal: 8 }}>
+                <Pressable
+                  onPress={() => router.push({ pathname: "/(auth)/setup", params: { mode: "reset" } })}
+                  style={{ alignSelf: "center", paddingTop: 12, paddingHorizontal: 8 }}
+                >
                   <Text style={{ textAlign: "center", color: colors.blue, fontSize: 13, fontWeight: "700" }}>
                     استعادة رمز الدخول
                   </Text>
