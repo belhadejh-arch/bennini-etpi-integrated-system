@@ -16,3 +16,5 @@ services:
         generateValue: true
       - key: ADMIN_BOOTSTRAP_TOKEN
         sync: false
+      - key: CORS_ORIGINS
+        value: https://bennini-etpi.vercel.app

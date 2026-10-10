@@ -35,6 +35,19 @@ const allowedOrigins = (process.env.CORS_ORIGINS ?? "")
   .split(",")
   .map((origin) => origin.trim().replace(/\/+$/, ""))
   .filter(Boolean);
+if (process.env.NODE_ENV === "production" && allowedOrigins.length === 0) {
+  throw new Error("CORS_ORIGINS is required in production; set it to the Vercel site origin.");
+}
+if (allowedOrigins.some((origin) => {
+  try {
+    const parsed = new URL(origin);
+    return !["http:", "https:"].includes(parsed.protocol) || parsed.origin !== origin;
+  } catch {
+    return true;
+  }
+})) {
+  throw new Error("CORS_ORIGINS must contain exact origins without paths or trailing slashes.");
+}
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -66,7 +79,6 @@ type AuthenticatedRequest = Request & {
 };
 
 const adminSections = [...allSectionIds];
-let memberSchemaPromise: Promise<void> | null = null;
 let auditLogSchemaPromise: Promise<void> | null = null;
 let notificationSchemaPromise: Promise<void> | null = null;
 
@@ -181,18 +193,6 @@ function ensureAuditLogSchema() {
   return auditLogSchemaPromise;
 }
 
-function ensureMemberSchema() {
-  if (!memberSchemaPromise) {
-    memberSchemaPromise = pool.query(`
-      ALTER TABLE members ADD COLUMN IF NOT EXISTS role_name TEXT NOT NULL DEFAULT '';
-      ALTER TABLE members ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{}'::jsonb;
-      ALTER TABLE members ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL
-        DEFAULT '{"uploadFiles":true,"viewFinancialData":true,"manageOperations":true}'::jsonb;
-    `).then(() => undefined);
-  }
-  return memberSchemaPromise;
-}
-
 const paymentMethods = ["نقداً", "شيك", "تحويل بنكي"] as const;
 const rentalStatuses = ["active", "completed", "cancelled"] as const;
 const transactionUpload = multer({
@@ -242,7 +242,6 @@ function fail(res: Response, status: number, message: string) {
 }
 
 async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Member | null> {
-  await ensureMemberSchema();
   const memberId = sessionMemberId(req);
   if (!memberId) {
     fail(res, 401, "يلزم تسجيل الدخول.");
@@ -340,7 +339,6 @@ async function writeAudit(
   details: string,
   event: AuditEventOptions,
 ) {
-  await ensureAuditLogSchema();
   await pool.query(
     `INSERT INTO audit_logs
       (action, details, performed_by_id, performed_by_name, section, event_type, entity_id, data)
@@ -3142,7 +3140,6 @@ app.patch("/api/members/:id", authenticate, requireAdmin, async (req: Authentica
 
 app.get("/api/audit", authenticate, requireSection("audit"), async (req: AuthenticatedRequest, res) => {
   try {
-    await ensureAuditLogSchema();
     const search = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 120) : "";
     const section = typeof req.query.section === "string" ? req.query.section : "";
     const eventType = typeof req.query.type === "string" ? req.query.type : "";
@@ -3210,6 +3207,7 @@ async function startServer() {
     await pool.query("CREATE SCHEMA IF NOT EXISTS bennini");
     const schema = readFileSync(path.resolve(process.cwd(), "server/schema.sql"), "utf8");
     await pool.query(schema);
+    await ensureAuditLogSchema();
     await pool.query(`
       UPDATE members
       SET role_name = 'Superadmin', updated_at = NOW()
