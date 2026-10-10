@@ -65,7 +65,7 @@ export default function MembersScreen() {
     setError("");
     try {
       const token = () => getToken();
-      await apiRequest(`/members/${encodeURIComponent(target.clerk_user_id)}`, token, {
+      const result = await apiRequest<{ member: TeamMember }>(`/members/${encodeURIComponent(target.clerk_user_id)}`, token, {
         method: "PATCH",
         body: JSON.stringify({
           active: patch.active ?? target.active,
@@ -79,7 +79,10 @@ export default function MembersScreen() {
             || roleLabel(target.role),
         }),
       });
-      await refresh();
+      setMembers((current) => current.map((item) =>
+        item.clerk_user_id === target.clerk_user_id ? result.member : item,
+      ));
+      setRoleNameDrafts((current) => ({ ...current, [target.clerk_user_id]: result.member.role_name ?? "" }));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "تعذر حفظ الصلاحيات.");
     } finally {
@@ -250,10 +253,13 @@ export default function MembersScreen() {
                       value={item.active}
                       disabled={!admin || isSelf || savingId === item.clerk_user_id}
                       onValueChange={(active) => void patchMember(item, { active })}
+                      accessibilityLabel={`تفعيل حساب ${item.name || "العضو"}`}
                       trackColor={{ false: "#DCE3EB", true: "#A4D8BD" }}
                       thumbColor={item.active ? colors.green : "#FFFFFF"}
                     />
-                    <Text style={styles.switchLabel}>{item.active ? "مفعّل" : "موقوف"}</Text>
+                    <Text style={[styles.switchLabel, item.active ? styles.switchOn : styles.switchOff]}>
+                      {item.active ? "مفعّل" : "موقوف"}
+                    </Text>
                   </View>
                 </View>
                 {admin ? (
@@ -287,35 +293,49 @@ export default function MembersScreen() {
                     </Text>
                     {sections.filter((section) => section.id !== "dashboard").map((section) => (
                       <View key={section.id} style={styles.permissionRow}>
-                        <Text style={styles.permissionSection}>{section.shortLabel}</Text>
+                        <Text style={styles.permissionSectionTitle}>{section.shortLabel}</Text>
                         <View style={styles.permissionActions}>
                           {actionsForSection(section.id).map((action) => {
                             const checked = item.permissions?.[section.id]?.[action] === true;
                             return (
-                              <Pressable
+                              <View
                                 key={action}
-                                disabled={isSelf || savingId === item.clerk_user_id}
-                                onPress={() => {
-                                  const updated: MemberPermissions = {
-                                    ...item.permissions,
-                                    [section.id]: {
-                                      ...item.permissions?.[section.id],
-                                      [action]: !checked,
-                                    },
-                                  };
-                                  if (action !== "view" && !checked) {
-                                    updated[section.id] = { ...updated[section.id], view: true };
-                                  }
-                                  if (action === "view" && checked) {
-                                    updated[section.id] = { view: false, create: false, edit: false, delete: false };
-                                  }
-                                  void patchMember(item, { permissions: updated });
-                                }}
-                                style={[styles.permissionChip, checked && styles.chipActive, isSelf && { opacity: 0.65 }]}
+                                style={[
+                                  styles.permissionToggle,
+                                  checked && styles.permissionToggleOn,
+                                  (isSelf || savingId === item.clerk_user_id) && styles.disabledToggle,
+                                ]}
                               >
-                                {checked ? <Check size={12} color={colors.blue} /> : null}
-                                <Text style={[styles.chipText, checked && styles.chipTextActive]}>{actionLabel(action)}</Text>
-                              </Pressable>
+                                <Text style={[styles.permissionToggleLabel, checked && styles.permissionToggleLabelOn]}>
+                                  {actionLabel(action)}
+                                </Text>
+                                <Switch
+                                  value={checked}
+                                  disabled={isSelf || savingId === item.clerk_user_id}
+                                  accessibilityLabel={`${actionLabel(action)} في ${section.shortLabel}`}
+                                  onValueChange={(enabled) => {
+                                    const updated: MemberPermissions = {
+                                      ...item.permissions,
+                                      [section.id]: {
+                                        ...item.permissions?.[section.id],
+                                        [action]: enabled,
+                                      },
+                                    };
+                                    if (action !== "view" && enabled) {
+                                      updated[section.id] = { ...updated[section.id], view: true };
+                                    }
+                                    if (action === "view" && !enabled) {
+                                      updated[section.id] = { view: false, create: false, edit: false, delete: false };
+                                    }
+                                    void patchMember(item, { permissions: updated });
+                                  }}
+                                  trackColor={{ false: "#DCE3EB", true: "#A4D8BD" }}
+                                  thumbColor={checked ? colors.green : "#FFFFFF"}
+                                />
+                                <Text style={[styles.permissionToggleState, checked ? styles.switchOn : styles.switchOff]}>
+                                  {checked ? "مفعّل" : "موقوف"}
+                                </Text>
+                              </View>
                             );
                           })}
                         </View>
@@ -330,15 +350,21 @@ export default function MembersScreen() {
                           <Text style={styles.permissionSection}>{capability.label}</Text>
                           <Text style={styles.permissionLegend}>{capability.description}</Text>
                         </View>
-                        <Switch
-                          value={capability.value}
-                          disabled={isSelf || savingId === item.clerk_user_id}
-                          onValueChange={(value) => void patchMember(item, {
-                            capabilities: { ...capabilityValues(item.capabilities), [capability.key]: value },
-                          })}
-                          trackColor={{ false: "#DCE3EB", true: "#A4D8BD" }}
-                          thumbColor={capability.value ? colors.green : "#FFFFFF"}
-                        />
+                        <View style={styles.capabilityControl}>
+                          <Switch
+                            value={capability.value}
+                            disabled={isSelf || savingId === item.clerk_user_id}
+                            accessibilityLabel={capability.label}
+                            onValueChange={(value) => void patchMember(item, {
+                              capabilities: { ...capabilityValues(item.capabilities), [capability.key]: value },
+                            })}
+                            trackColor={{ false: "#DCE3EB", true: "#A4D8BD" }}
+                            thumbColor={capability.value ? colors.green : "#FFFFFF"}
+                          />
+                          <Text style={[styles.switchLabel, capability.value ? styles.switchOn : styles.switchOff]}>
+                            {capability.value ? "مفعّل" : "موقوف"}
+                          </Text>
+                        </View>
                       </View>
                     ))}
                   </>
@@ -413,15 +439,25 @@ const styles = {
   email: { color: colors.muted, textAlign: "right" as const, fontSize: 11, marginTop: 4 },
   role: { color: colors.blue, textAlign: "right" as const, fontSize: 10, fontWeight: "700" as const, marginTop: 5 },
   roleInput: { minHeight: 42, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, color: colors.ink, paddingHorizontal: 12, fontSize: 12 },
-  switchLabel: { color: colors.muted, fontSize: 9 },
+  switchLabel: { color: colors.muted, fontSize: 10, fontWeight: "700" as const },
+  switchOn: { color: colors.green },
+  switchOff: { color: colors.muted },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: 12 },
   sectionLabel: { color: colors.ink, textAlign: "right" as const, fontSize: 11, fontWeight: "700" as const, marginBottom: 9 },
   chips: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7, justifyContent: "flex-start" as const },
   permissionLegend: { color: colors.muted, textAlign: "right" as const, fontSize: 10, marginBottom: 8 },
-  permissionRow: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  permissionRow: { gap: 6, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
   capabilityRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: colors.border },
+  capabilityControl: { minWidth: 64, alignItems: "center" as const, gap: 2 },
   permissionSection: { color: colors.ink, fontWeight: "700" as const, textAlign: "right" as const, fontSize: 11, flex: 1 },
-  permissionActions: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 5, justifyContent: "flex-end" as const },
+  permissionSectionTitle: { color: colors.ink, fontWeight: "700" as const, textAlign: "right" as const, fontSize: 11 },
+  permissionActions: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7, justifyContent: "flex-end" as const },
+  permissionToggle: { width: "48%" as const, minWidth: 112, minHeight: 75, borderRadius: 12, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 10, paddingVertical: 5, alignItems: "center" as const, justifyContent: "center" as const, gap: 1 },
+  permissionToggleOn: { borderColor: "#B8D7C7", backgroundColor: "#F2FAF5" },
+  permissionToggleLabel: { color: colors.muted, fontSize: 11, fontWeight: "700" as const },
+  permissionToggleLabelOn: { color: colors.navy },
+  permissionToggleState: { fontSize: 9, fontWeight: "700" as const },
+  disabledToggle: { opacity: 0.6 },
   permissionChip: { minHeight: 34, borderRadius: 17, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 9, flexDirection: "row" as const, alignItems: "center" as const, gap: 4 },
   chip: { minHeight: 34, borderRadius: 18, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 10, flexDirection: "row" as const, alignItems: "center" as const, gap: 4 },
   chipActive: { backgroundColor: "#EAF1FB", borderColor: "#BCD0EB" },
