@@ -452,7 +452,7 @@ export default function FieldExpensesSection() {
           {dateFrom || dateTo ? <Pressable onPress={() => { setDateFrom(""); setDateTo(""); }} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 8 }}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>مسح التاريخ</Text></Pressable> : null}
         </View>
 
-        {loading ? (
+        {loading && items.length === 0 ? (
           <View style={styles.loading}><ActivityIndicator size="large" color={colors.blue} /><Text style={styles.loadingText}>جارٍ تحديث العمليات...</Text></View>
         ) : visibleItems.length ? (
           visibleItems.map((expense) => (

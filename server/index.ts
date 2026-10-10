@@ -873,7 +873,7 @@ async function recalculateCashBalances(client: pg.PoolClient) {
 
 app.get("/api/auth/status", async (_req, res) => {
   try {
-    const result = await pool.query("SELECT EXISTS (SELECT 1 FROM members WHERE role = 'admin' AND serial_hash IS NOT NULL) AS configured");
+    const result = await pool.query("SELECT EXISTS (SELECT 1 FROM members WHERE role = 'admin' AND serial_hash IS NOT NULL AND deleted_at IS NULL) AS configured");
     res.json({ administratorConfigured: result.rows[0].configured === true, bootstrapAvailable: Boolean(bootstrapToken) });
   } catch (error) {
     console.error("Authentication status check failed:", error);
@@ -893,11 +893,11 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext('bennini-initial-admin-setup'))");
     const existing = await client.query<Member & { serial_hash: string | null }>(
       `SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities, serial_hash
-       FROM members WHERE role = 'admin' AND serial_hash IS NULL
+       FROM members WHERE role = 'admin' AND serial_hash IS NULL AND deleted_at IS NULL
        ORDER BY created_at ASC LIMIT 1 FOR UPDATE`,
     );
     const alreadyConfigured = await client.query(
-      "SELECT 1 FROM members WHERE role = 'admin' AND serial_hash IS NOT NULL LIMIT 1",
+      "SELECT 1 FROM members WHERE role = 'admin' AND serial_hash IS NOT NULL AND deleted_at IS NULL LIMIT 1",
     );
     if (alreadyConfigured.rowCount) {
       await client.query("ROLLBACK");
@@ -915,24 +915,26 @@ app.post("/api/auth/bootstrap", async (req: Request, res: Response) => {
     let saved: Member | undefined;
     const lookup = serialLookup(serial);
     const hash = await hashSerial(serial);
+    const encryptedSerial = encryptSerial(serial);
     if (existing.rowCount) {
       const updated = await client.query<Member>(
-        `UPDATE members SET serial_lookup = $1, serial_hash = $2, active = TRUE, role = 'admin',
-          allowed_sections = $3, role_name = 'Superadmin',
+        `UPDATE members SET serial_lookup = $1, serial_hash = $2, serial_encrypted = $3,
+          active = TRUE, role = 'admin',
+          allowed_sections = $4, role_name = 'Superadmin',
           updated_at = NOW()
-         WHERE clerk_user_id = $4 AND serial_lookup IS NULL
+         WHERE clerk_user_id = $5 AND serial_lookup IS NULL
          RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
-        [lookup, hash, adminSections, existing.rows[0].clerk_user_id],
+        [lookup, hash, encryptedSerial, adminSections, existing.rows[0].clerk_user_id],
       );
       if (updated.rowCount) saved = updated.rows[0];
     } else {
       const inserted = await client.query<Member>(
         `INSERT INTO members
-           (clerk_user_id, email, serial_lookup, serial_hash, name, role, active, allowed_sections, role_name)
-         VALUES ($1, NULL, $2, $3, 'مدير النظام', 'admin', TRUE, $4, 'Superadmin')
+           (clerk_user_id, email, serial_lookup, serial_hash, serial_encrypted, name, role, active, allowed_sections, role_name)
+         VALUES ($1, NULL, $2, $3, $4, 'مدير النظام', 'admin', TRUE, $5, 'Superadmin')
          ON CONFLICT (serial_lookup) DO NOTHING
          RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
-        [randomUUID(), lookup, hash, adminSections],
+        [randomUUID(), lookup, hash, encryptedSerial, adminSections],
       );
       if (inserted.rowCount) saved = inserted.rows[0];
     }
@@ -964,7 +966,7 @@ app.post("/api/auth/admin-code/reset", async (req: Request, res: Response) => {
     await client.query("SELECT pg_advisory_xact_lock(hashtext('bennini-initial-admin-setup'))");
     const admins = await client.query<Member>(
       `SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities
-       FROM members WHERE role = 'admin' AND serial_hash IS NOT NULL FOR UPDATE`,
+       FROM members WHERE role = 'admin' AND serial_hash IS NOT NULL AND deleted_at IS NULL FOR UPDATE`,
     );
     if (admins.rowCount !== 1) {
       await client.query("ROLLBACK");
@@ -981,10 +983,10 @@ app.post("/api/auth/admin-code/reset", async (req: Request, res: Response) => {
       await client.query("SAVEPOINT admin_code_attempt");
       try {
         const updated = await client.query<Member>(
-          `UPDATE members SET serial_lookup = $1, serial_hash = $2, updated_at = NOW()
-           WHERE clerk_user_id = $3
+          `UPDATE members SET serial_lookup = $1, serial_hash = $2, serial_encrypted = $3, updated_at = NOW()
+           WHERE clerk_user_id = $4
            RETURNING clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities`,
-          [serialLookup(serial), hash, admins.rows[0].clerk_user_id],
+          [serialLookup(serial), hash, encryptSerial(serial), admins.rows[0].clerk_user_id],
         );
         await client.query("RELEASE SAVEPOINT admin_code_attempt");
         if (updated.rowCount) {
@@ -993,6 +995,7 @@ app.post("/api/auth/admin-code/reset", async (req: Request, res: Response) => {
         }
       } catch (error) {
         await client.query("ROLLBACK TO SAVEPOINT admin_code_attempt");
+        await client.query("RELEASE SAVEPOINT admin_code_attempt");
         if ((error as { code?: string }).code !== "23505") throw error;
       }
     }
@@ -3066,7 +3069,7 @@ app.get("/api/field-expense-attachments/:id", requireFieldExpenseSchema, authent
   }
 });
 
-app.get("/api/members", requireRecordNotesSchema, authenticate, requireSection("users"), async (req: AuthenticatedRequest, res) => {
+app.get("/api/members", authenticate, requireSection("users"), async (req: AuthenticatedRequest, res) => {
   const result = await pool.query(
     "SELECT clerk_user_id, COALESCE(email, '') AS email, name, role, role_name, active, allowed_sections, permissions, capabilities, notes, created_at, (serial_hash IS NOT NULL) AS has_serial, (serial_encrypted IS NOT NULL) AS serial_recoverable FROM members WHERE deleted_at IS NULL ORDER BY created_at",
   );

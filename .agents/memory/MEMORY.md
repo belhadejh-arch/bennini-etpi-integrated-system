@@ -6,3 +6,4 @@
 - [Neon pooled connections](neon-pooler.md) — initialize schema search paths with an awaited PostgreSQL pool connection hook, not unsupported startup options.
 - [Schema initialization retries](schema-initialization-retries.md) — never leave a rejected lazy-schema promise cached; transient setup failures can otherwise disable related endpoints.
 - [Serial sign-in policy](serial-sign-in-policy.md) — keep serial-code sign-in free of attempt throttling and temporary lockouts, as explicitly requested.
+- [Serial-code recovery](serial-code-recovery.md) — keep code recovery encrypted and admin-only; rotating the stable session secret makes existing encrypted codes unreadable.

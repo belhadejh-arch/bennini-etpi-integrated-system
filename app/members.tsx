@@ -1,4 +1,4 @@
-import { useAuth, useUser } from "../lib/auth";
+import { useAuth } from "../lib/auth";
 import { useRouter } from "expo-router";
 import { ArrowRight, Check, Clock3, Eye, KeyRound, Plus, Search, ShieldCheck, Trash2, Users, X } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
@@ -23,9 +23,7 @@ type MemberActivityResponse = { items: MemberActivityItem[]; total: number; page
 
 export default function MembersScreen() {
   const router = useRouter();
-  const { isLoaded, isSignedIn, getToken, signOut } = useAuth();
-  const { user } = useUser();
-  const [member, setMember] = useState<Member | null>(null);
+  const { isLoaded, isSignedIn, getToken, signOut, member } = useAuth();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState("");
@@ -33,6 +31,7 @@ export default function MembersScreen() {
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "active" | "inactive">("all");
   const [roleNameDrafts, setRoleNameDrafts] = useState<Record<string, string>>({});
+  const [expandedMemberId, setExpandedMemberId] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newRole, setNewRole] = useState("viewer");
@@ -53,10 +52,7 @@ export default function MembersScreen() {
     setError("");
     try {
       const token = () => getToken();
-      const memberRequest = apiRequest<{ member: Member }>("/me", token);
       const membersRequest = apiRequest<{ members: TeamMember[] }>("/members", token);
-      const me = await memberRequest;
-      setMember(me.member);
       const result = await membersRequest;
       setMembers(result.members);
     } catch (caught) {
@@ -226,7 +222,7 @@ export default function MembersScreen() {
 
   const admin = member?.role === "admin";
   const canViewUsers = hasPermission(member, "users", "view");
-  const selfId = user?.id;
+  const selfId = member?.clerk_user_id;
   const visibleMembers = members.filter((item) =>
     (activeFilter === "all" || item.active === (activeFilter === "active")) &&
     `${item.name} ${item.role_name ?? roleLabel(item.role)}`
@@ -263,20 +259,10 @@ export default function MembersScreen() {
             </View>
           </View>
           {admin ? (
-            <Pressable onPress={() => { setCreatedSerial(""); setCreateOpen((open) => !open); }} style={[styles.action, { flexDirection: "row", alignSelf: "flex-start", alignItems: "center", gap: 8 }]}>
+            <Pressable onPress={() => { setSerialReveal(null); setCreateOpen((open) => !open); }} style={[styles.action, { flexDirection: "row", alignSelf: "flex-start", alignItems: "center", gap: 8 }]}>
               <Plus size={16} color="#FFFFFF" />
               <Text style={styles.actionText}>{createOpen ? "إغلاق النموذج" : "إضافة عضو"}</Text>
             </Pressable>
-          ) : null}
-          {createdSerial ? (
-            <View style={styles.serialNotice}>
-              <Text style={styles.serialTitle}>تم إنشاء الحساب. احفظ رقم الدخول الآن؛ لن يظهر مرة أخرى.</Text>
-              <Text selectable style={styles.serialCode}>{createdSerial}</Text>
-              <Text style={styles.permissionLegend}>أرسله للعضو بطريقة آمنة. يمكنه استخدام الرقم لتسجيل الدخول.</Text>
-              <Pressable onPress={() => setCreatedSerial("")} style={{ alignSelf: "flex-start", paddingVertical: 8 }}>
-                <Text style={{ color: colors.blue, fontWeight: "700" }}>إخفاء الرقم</Text>
-              </Pressable>
-            </View>
           ) : null}
           {createOpen && admin ? (
             <View style={styles.card}>
@@ -358,7 +344,6 @@ export default function MembersScreen() {
                     <Text style={styles.name}>{item.name || "عضو جديد"}</Text>
                     <Text style={styles.email}>{item.has_serial ? "رقم دخول مخصص" : "لا يوجد رقم دخول"}</Text>
                     <Text style={styles.role}>{item.role_name || roleLabel(item.role)}{item.role === "pending" ? " · بانتظار التفعيل" : ""}</Text>
-                    {admin ? <RecordNotes entity="member" recordId={item.clerk_user_id} initialNotes={item.notes} editable /> : null}
                   </View>
                   <View style={{ alignItems: "center", gap: 3 }}>
                     <Switch
@@ -376,7 +361,105 @@ export default function MembersScreen() {
                 </View>
                 {admin ? (
                   <>
+                    <View style={styles.memberTools}>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => setExpandedMemberId((current) => current === item.clerk_user_id ? "" : item.clerk_user_id)}
+                        style={styles.smallAction}
+                      >
+                        <ShieldCheck size={15} color={colors.blue} />
+                        <Text style={styles.smallActionText}>
+                          {expandedMemberId === item.clerk_user_id ? "إخفاء الصلاحيات" : "إدارة الصلاحيات"}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        disabled={serialLoadingId === item.clerk_user_id || savingId === item.clerk_user_id}
+                        onPress={() => {
+                          if (serialReveal?.memberId === item.clerk_user_id) {
+                            setSerialReveal(null);
+                          } else if (item.serial_recoverable) {
+                            void showMemberSerial(item);
+                          } else {
+                            confirmSerialReset(item);
+                          }
+                        }}
+                        style={[styles.smallAction, (serialLoadingId === item.clerk_user_id || savingId === item.clerk_user_id) && styles.disabledToggle]}
+                      >
+                        {serialLoadingId === item.clerk_user_id
+                          ? <ActivityIndicator size="small" color={colors.blue} />
+                          : item.serial_recoverable ? <Eye size={15} color={colors.blue} /> : <KeyRound size={15} color={colors.blue} />}
+                        <Text style={styles.smallActionText}>
+                          {serialReveal?.memberId === item.clerk_user_id
+                            ? "إخفاء الرقم"
+                            : item.serial_recoverable ? "عرض رقم الدخول" : "إصدار رقم دخول"}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={() => toggleMemberActivity(item.clerk_user_id)}
+                        style={styles.smallAction}
+                      >
+                        <Clock3 size={15} color={colors.blue} />
+                        <Text style={styles.smallActionText}>
+                          {activityMemberId === item.clerk_user_id ? "إخفاء العمليات" : "سجل العمليات"}
+                        </Text>
+                      </Pressable>
+                      {!isSelf ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          disabled={savingId === item.clerk_user_id}
+                          onPress={() => confirmDeleteMember(item)}
+                          style={[styles.smallAction, styles.deleteAction, savingId === item.clerk_user_id && styles.disabledToggle]}
+                        >
+                          {savingId === item.clerk_user_id
+                            ? <ActivityIndicator size="small" color={colors.red} />
+                            : <Trash2 size={15} color={colors.red} />}
+                          <Text style={[styles.smallActionText, { color: colors.red }]}>حذف الحساب</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                    {serialReveal?.memberId === item.clerk_user_id ? (
+                      <View style={styles.serialNotice}>
+                        <Text style={styles.serialTitle}>رقم الدخول — {item.name}</Text>
+                        <Text selectable style={styles.serialCode}>{serialReveal.serial}</Text>
+                        <Text style={styles.permissionLegend}>هذا الرقم يسمح بالدخول إلى حساب العضو؛ شاركه معه فقط.</Text>
+                      </View>
+                    ) : null}
+                    {activityMemberId === item.clerk_user_id ? (
+                      <View style={styles.activityPanel}>
+                        <Text style={styles.sectionLabel}>سجل عمليات {item.name} · {activityTotal} عملية</Text>
+                        {activityError ? <Text style={styles.activityError}>{activityError}</Text> : null}
+                        {activityLoading && activityItems.length === 0 ? <ActivityIndicator color={colors.blue} /> : null}
+                        {!activityLoading && !activityError && activityItems.length === 0 ? (
+                          <Text style={styles.emptyText}>لا توجد عمليات مسجّلة لهذا العضو بعد.</Text>
+                        ) : activityItems.map((activity) => (
+                          <View key={activity.id} style={styles.activityRow}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.activityTitle}>{activity.action} · {activitySectionLabel(activity.section)}</Text>
+                              {activity.details ? <Text style={styles.activityDetails}>{activity.details}</Text> : null}
+                              <Text style={styles.activityDate}>{formatActivityDate(activity.created_at)}</Text>
+                            </View>
+                          </View>
+                        ))}
+                        {activityItems.length < activityTotal ? (
+                          <Pressable
+                            disabled={activityLoading}
+                            onPress={() => void loadMemberActivity(item.clerk_user_id, activityPage + 1, true)}
+                            style={styles.loadMore}
+                          >
+                            {activityLoading ? <ActivityIndicator size="small" color={colors.blue} /> : null}
+                            <Text style={styles.smallActionText}>تحميل المزيد من العمليات</Text>
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    ) : null}
+                  </>
+                ) : null}
+                {admin && expandedMemberId === item.clerk_user_id ? (
+                  <>
                     <View style={styles.divider} />
+                    <RecordNotes entity="member" recordId={item.clerk_user_id} initialNotes={item.notes} editable />
                     <Text style={styles.sectionLabel}>المسمى الوظيفي (غير مقيّد بقائمة ثابتة)</Text>
                     <TextInput
                       value={roleNameDrafts[item.clerk_user_id] ?? item.role_name ?? roleLabel(item.role)}
@@ -396,7 +479,7 @@ export default function MembersScreen() {
                     />
                   </>
                 ) : null}
-                {admin ? (
+                {admin && expandedMemberId === item.clerk_user_id ? (
                   <>
                     <View style={styles.divider} />
                     <Text style={styles.sectionLabel}>صلاحيات كل قسم</Text>
@@ -503,6 +586,15 @@ function roleLabel(role: string) {
   return ({ admin: "مدير النظام", finance: "الإدارة المالية", field: "رئيس أشغال", supervisor: "مشرف", viewer: "عضو", pending: "عضو جديد" } as Record<string, string>)[role] ?? "عضو";
 }
 
+function activitySectionLabel(section: string) {
+  return sections.find((item) => item.id === section)?.shortLabel ?? (section === "system" ? "النظام" : section);
+}
+
+function formatActivityDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("ar-DZ");
+}
+
 function actionLabel(action: PermissionAction) {
   return ({ view: "عرض", create: "إضافة", edit: "تعديل", delete: "حذف" } as Record<PermissionAction, string>)[action];
 }
@@ -540,6 +632,17 @@ const styles = {
   serialNotice: { backgroundColor: "#FFF9E8", borderRadius: 14, padding: 16, borderWidth: 1, borderColor: "#F0D78C", gap: 5 },
   serialTitle: { color: colors.navy, fontWeight: "800" as const, textAlign: "right" as const, fontSize: 12 },
   serialCode: { color: colors.navy, fontSize: 29, fontWeight: "900" as const, letterSpacing: 9, textAlign: "center" as const, paddingVertical: 8 },
+  memberTools: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 8, marginTop: 12 },
+  smallAction: { minHeight: 36, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 6, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFFFFF", paddingHorizontal: 10 },
+  smallActionText: { color: colors.blue, fontSize: 10, fontWeight: "700" as const },
+  deleteAction: { borderColor: "#F1C9C9", backgroundColor: "#FFF8F8" },
+  activityPanel: { marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, gap: 8 },
+  activityRow: { flexDirection: "row" as const, borderBottomWidth: 1, borderBottomColor: colors.border, paddingVertical: 8 },
+  activityTitle: { color: colors.navy, textAlign: "right" as const, fontWeight: "700" as const, fontSize: 11 },
+  activityDetails: { color: colors.ink, textAlign: "right" as const, fontSize: 10, lineHeight: 16, marginTop: 3 },
+  activityDate: { color: colors.muted, textAlign: "right" as const, fontSize: 9, marginTop: 4 },
+  activityError: { color: colors.red, textAlign: "right" as const, fontSize: 10 },
+  loadMore: { minHeight: 38, alignSelf: "center" as const, flexDirection: "row" as const, alignItems: "center" as const, gap: 7, paddingHorizontal: 12 },
   searchBox: { minHeight: 46, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFFFFF", flexDirection: "row" as const, alignItems: "center" as const, gap: 9 },
   searchInput: { flex: 1, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, fontSize: 12 },
   empty: { minHeight: 150, alignItems: "center" as const, justifyContent: "center" as const, gap: 8, padding: 20, backgroundColor: "#FFFFFF", borderRadius: 15, borderWidth: 1, borderColor: colors.border },

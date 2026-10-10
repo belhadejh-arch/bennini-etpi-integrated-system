@@ -466,7 +466,7 @@ export default function FinanceSection() {
           </View>
         ) : null}
 
-        {loading ? (
+        {loading && transactions.length === 0 ? (
           <View style={styles.loadingCard}><ActivityIndicator color={colors.blue} /></View>
         ) : transactions.length ? (
           <>

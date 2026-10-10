@@ -219,7 +219,7 @@ export default function AuditLogSection() {
           </View>
         ) : null}
 
-        {loading ? (
+        {loading && result.items.length === 0 ? (
           <View style={styles.center}><ActivityIndicator size="large" color={colors.blue} /><Text style={styles.muted}>جارٍ تحميل سجل العمليات...</Text></View>
         ) : result.items.length ? result.items.map((item) => (
           <View key={item.id} style={styles.entry}>

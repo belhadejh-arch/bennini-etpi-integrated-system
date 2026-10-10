@@ -553,7 +553,7 @@ export default function RentalsSection() {
           <Text style={styles.listCount}>{filteredItems.length} عقد</Text>
         </View>
 
-        {loading ? (
+        {loading && items.length === 0 ? (
           <View style={styles.loading}><ActivityIndicator size="large" color={colors.blue} /><Text style={styles.muted}>جارٍ تحميل عقود الكراء...</Text></View>
         ) : filteredItems.length ? (
           filteredItems.map((rental) => {

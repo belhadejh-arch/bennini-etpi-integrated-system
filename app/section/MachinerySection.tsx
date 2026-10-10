@@ -460,7 +460,7 @@ export default function MachinerySection() {
           </View>
         ) : null}
 
-        {loading ? <View style={styles.loading}><ActivityIndicator color={colors.blue} /></View> : null}
+        {loading && filteredParts.length === 0 ? <View style={styles.loading}><ActivityIndicator color={colors.blue} /></View> : null}
         {!loading && filteredParts.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyText}>{search ? "لا توجد نتائج مطابقة للبحث." : `لا توجد قطع غيار أو إصلاحات مسجلة${selectedMachineId ? " لهذه الآلية" : ""}.`}</Text>

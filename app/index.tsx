@@ -70,7 +70,6 @@ export default function HomeScreen() {
       } else {
         setError(issue.message || "تعذر تحميل لوحة القيادة.");
       }
-      setDashboard(null);
     } finally {
       setLoading(false);
     }
@@ -97,7 +96,7 @@ export default function HomeScreen() {
     else router.push({ pathname: "/section/[section]", params: { section } });
   };
 
-  if (!authLoaded || (isSignedIn && loading && !member)) {
+  if (!authLoaded) {
     return <Centered><ActivityIndicator size="large" color={colors.blue} /><Text style={styles.muted}>جارٍ التحقق من الحساب...</Text></Centered>;
   }
   if (!isSignedIn) return <Redirect href="/(auth)/sign-in" />;
@@ -152,37 +151,37 @@ export default function HomeScreen() {
 
         {error ? <InlineError message={error} onRetry={() => void refresh()} /> : null}
 
+        {availableSections.length ? (
+          <View style={styles.panel}>
+            <SectionHeading title="الأقسام المتاحة لك" description="تظهر هنا الأقسام التي منحك المدير صلاحية الوصول إليها." />
+            <View style={styles.quickAccessGrid}>
+              {availableSections.map((section) => {
+                const Icon = icons[section.id] ?? LayoutDashboard;
+                return (
+                  <Pressable
+                    key={section.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`فتح قسم ${section.label}`}
+                    onPress={() => goToSection(section.id)}
+                    style={({ pressed }) => [styles.quickAccessCard, { width: compact ? "100%" : "31.7%" }, pressed && { opacity: 0.78 }]}
+                  >
+                    <View style={styles.quickAccessIcon}><Icon size={19} color={colors.blue} /></View>
+                    <View style={styles.quickAccessText}>
+                      <Text style={styles.quickAccessTitle} numberOfLines={1}>{section.label}</Text>
+                      <Text style={styles.quickAccessHint}>فتح القسم</Text>
+                    </View>
+                    <ChevronLeft size={16} color="#A6B2C1" />
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
         {loading && !dashboard ? (
           <Centered compact><ActivityIndicator size="large" color={colors.blue} /><Text style={styles.muted}>جارٍ تحميل المؤشرات...</Text></Centered>
         ) : dashboard ? (
           <>
-            {availableSections.length ? (
-              <View style={styles.panel}>
-                <SectionHeading title="الأقسام المتاحة لك" description="تظهر هنا الأقسام التي منحك المدير صلاحية الوصول إليها." />
-                <View style={styles.quickAccessGrid}>
-                  {availableSections.map((section) => {
-                    const Icon = icons[section.id] ?? LayoutDashboard;
-                    return (
-                      <Pressable
-                        key={section.id}
-                        accessibilityRole="button"
-                        accessibilityLabel={`فتح قسم ${section.label}`}
-                        onPress={() => goToSection(section.id)}
-                        style={({ pressed }) => [styles.quickAccessCard, { width: compact ? "100%" : "31.7%" }, pressed && { opacity: 0.78 }]}
-                      >
-                        <View style={styles.quickAccessIcon}><Icon size={19} color={colors.blue} /></View>
-                        <View style={styles.quickAccessText}>
-                          <Text style={styles.quickAccessTitle} numberOfLines={1}>{section.label}</Text>
-                          <Text style={styles.quickAccessHint}>فتح القسم</Text>
-                        </View>
-                        <ChevronLeft size={16} color="#A6B2C1" />
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </View>
-            ) : null}
-
             {hasDashboardStats ? (
               <>
                 <SectionHeading title="المؤشرات الرئيسية" description="اضغط على بطاقة لفتح تفاصيل القسم." />

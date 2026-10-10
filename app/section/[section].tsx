@@ -166,7 +166,7 @@ export default function SectionScreen() {
 
         {!canSee ? (
           <View style={styles.card}><Text style={styles.empty}>ليس لديك صلاحية الوصول إلى هذا القسم. تواصل مع المدير.</Text></View>
-        ) : loading ? (
+        ) : loading && items.length === 0 ? (
           <View style={styles.card}><ActivityIndicator color={colors.blue} /></View>
         ) : items.length === 0 ? (
           <View style={styles.card}>

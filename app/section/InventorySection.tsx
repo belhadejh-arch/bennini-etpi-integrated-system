@@ -521,7 +521,7 @@ export default function InventorySection() {
           <Text style={styles.mutedText}>{total} عملية شراء</Text>
         </View>
 
-        {loading ? (
+        {loading && items.length === 0 ? (
           <View style={styles.card}><ActivityIndicator color={colors.blue} /></View>
         ) : items.length === 0 ? (
           <View style={styles.emptyCard}>

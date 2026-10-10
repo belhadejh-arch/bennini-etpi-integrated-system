@@ -704,7 +704,7 @@ export default function ChequesSection() {
           <Text style={styles.listCount}>{total} شيك</Text>
         </View>
 
-        {loading ? (
+        {loading && items.length === 0 ? (
           <View style={styles.loading}><ActivityIndicator size="large" color={colors.blue} /><Text style={styles.muted}>جارٍ تحميل الشيكات...</Text></View>
         ) : items.length ? (
           items.map((item) => {

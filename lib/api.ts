@@ -49,6 +49,7 @@ export type Member = {
   name: string;
   role: string;
   has_serial?: boolean;
+  serial_recoverable?: boolean;
   role_name?: string;
   active: boolean;
   allowed_sections: string[];
