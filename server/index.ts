@@ -21,6 +21,8 @@ import { driverCostsByMachinery } from "./machinery-costs";
 import { registerFinanceRoutes } from "./finance-routes";
 import { registerPreferencesRoutes } from "./preferences-routes";
 import { frenchNotificationCopy } from "./notification-copy";
+import { retryDatabaseRead } from "./read-recovery";
+import { memberLookupQuery, memberReadinessQuery } from "./member-queries";
 import { FinanceError, prepareFinanceSchema, positiveId, ensureCustomerInvoice, synchronizeChequeInvoices, resolveTransactionAccount } from "./finance-data";
 import { allSectionIds, type SectionId } from "../shared/sections";
 import {
@@ -37,11 +39,25 @@ const databaseUrl = process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("NEON_DATABASE_URL or DATABASE_URL is required.");
 const pool = new Pool({
   connectionString: databaseUrl,
+  connectionTimeoutMillis: 10_000,
+  idleTimeoutMillis: 30_000,
+  maxLifetimeSeconds: 300,
+  keepAlive: true,
   onConnect: async (client) => {
     await client.query("SET search_path TO bennini, public");
   },
 });
+// An idle PostgreSQL socket failure must not crash every user's API process.
+pool.on("error", (error) => console.error("Idle database connection failed:", error));
 const app = express();
+app.use((req, res, next) => {
+  const requestId = randomUUID();
+  res.set("X-Request-Id", requestId);
+  res.on("finish", () => {
+    if (res.statusCode >= 500) console.error("API request failed:", { requestId, method: req.method, path: req.path, status: res.statusCode });
+  });
+  next();
+});
 app.use(compression());
 app.use("/api", (_req, res, next) => {
   res.set("Cache-Control", "private, no-store");
@@ -61,6 +77,7 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(cors({
   credentials: true,
+  exposedHeaders: ["X-Request-Id"],
   origin: (origin, callback) => {
     const isLocalDevelopmentOrigin = process.env.NODE_ENV !== "production" &&
       /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin ?? "");
@@ -321,17 +338,17 @@ function fail(res: Response, status: number, message: string) {
 }
 
 async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Member | null> {
-  await ensureMemberSchema();
   const memberId = sessionMemberId(req);
   if (!memberId) {
     fail(res, 401, "يلزم تسجيل الدخول.");
     return null;
   }
+  await ensureMemberSchema();
 
-  const result = await pool.query<Member>(
-    "SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities, language, appearance FROM members WHERE clerk_user_id = $1 AND deleted_at IS NULL",
+  const result = await retryDatabaseRead(() => pool.query<Member>(
+    memberLookupQuery,
     [memberId],
-  );
+  ));
 
   if (result.rowCount === 0) {
     fail(res, 401, "يلزم تسجيل الدخول.");
@@ -1148,9 +1165,10 @@ app.post("/api/auth/logout", (_req, res) => {
 
 app.get("/api/health", async (_req, res) => {
   try {
-    await pool.query("SELECT 1");
+    await retryDatabaseRead(() => pool.query(memberReadinessQuery));
     res.json({ ok: true });
-  } catch {
+  } catch (error) {
+    console.error("Account readiness check failed:", error, { requestId: res.getHeader("X-Request-Id") });
     fail(res, 503, "قاعدة البيانات غير متاحة.");
   }
 });
@@ -1169,7 +1187,7 @@ app.get("/api/me", async (req: AuthenticatedRequest, res) => {
     }
     res.json({ member });
   } catch (error) {
-    console.error("Failed to load member:", error);
+    console.error("Failed to load member:", error, { requestId: res.getHeader("X-Request-Id") });
     fail(res, 500, "تعذر تحميل بيانات العضو.");
   }
 });

@@ -120,7 +120,7 @@ export default function ChequesSection() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
   const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
-  const { isLoaded, isSignedIn, getToken, language } = useAuth();
+  const { isLoaded, isSignedIn, getToken, getMember, language } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [items, setItems] = useState<Cheque[]>([]);
@@ -177,7 +177,7 @@ export default function ChequesSection() {
     setError("");
     try {
       const token = () => getToken();
-      const memberRequest = apiRequest<{ member: Member }>("/me", token);
+      const memberRequest = getMember();
       const chequesRequest = apiRequest<ChequeResult>(`/cheques?${queryString}`, token);
       const me = await memberRequest;
       setMember(me.member);
@@ -193,7 +193,7 @@ export default function ChequesSection() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, isSignedIn, queryString]);
+  }, [getToken, getMember, isSignedIn, queryString]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");

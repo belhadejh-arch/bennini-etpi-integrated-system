@@ -3,6 +3,7 @@ import { Platform } from "react-native";
 import type { MemberCapabilities, MemberPermissions } from "../shared/access";
 import type { SectionId } from "../shared/sections";
 import { createRequestCoordinator } from "./request-coordinator";
+import { fetchWithRecovery, NetworkRequestError } from "./http-recovery";
 const requests = createRequestCoordinator();
 import { apiErrorFrench } from "../shared/api-error-translations";
 let responseLanguage: "ar" | "fr" = "ar";
@@ -14,6 +15,9 @@ const knownErrors: Record<string, string> = {
   "انتهت جلسة الدخول.": "Votre session a expiré.",
   "لا تملك صلاحية الوصول إلى هذا القسم.": "Vous n’avez pas l’autorisation d’accéder à cette section.",
   "الحساب غير مفعل.": "Ce compte n’est pas activé.",
+  "تعذر الاتصال بالخادم. يرجى إعادة المحاولة.": "Impossible de contacter le serveur. Réessayez.",
+  "تعذر تأكيد نتيجة العملية. تحقق من السجل قبل إعادة الإرسال.": "Impossible de confirmer le résultat. Vérifiez le registre avant de renvoyer l’opération.",
+  "استجابة الخادم غير صالحة. يرجى إعادة المحاولة.": "La réponse du serveur est invalide. Réessayez.",
 };
 export function localizeApiError(message: string, language: "ar" | "fr" = responseLanguage) {
   return language === "fr" ? (knownErrors[message] ?? message) : message;
@@ -43,7 +47,7 @@ export async function apiRequest<T>(
   if (isWrite) requests.invalidate();
   const perform = async (): Promise<T> => {
     try {
-      const response = await fetch(apiUrl(`/api${path}`), {
+      const response = await fetchWithRecovery(apiUrl(`/api${path}`), {
         ...options,
         headers: {
           Accept: "application/json",
@@ -55,14 +59,29 @@ export async function apiRequest<T>(
         credentials: "include",
       });
       const isJson = response.headers.get("content-type")?.includes("application/json");
-      const body = (isJson ? await response.json().catch(() => ({})) : {}) as T & { error?: string };
+      let parsed: unknown;
+      try { parsed = isJson ? await response.json() : null; } catch { parsed = null; }
+      if (response.ok && response.status !== 204 && (parsed === null || typeof parsed !== "object")) {
+        throw new Error(localizeApiError("استجابة الخادم غير صالحة. يرجى إعادة المحاولة.", requestLanguage));
+      }
+      const body = (parsed ?? {}) as T & { error?: string };
       if (!response.ok) {
-        const error = new Error(localizeApiError(body.error || "تعذر الاتصال بالخادم.", requestLanguage)) as Error & { status?: number; body?: unknown };
+        const requestId = response.headers.get("x-request-id");
+        const message = localizeApiError(body.error || "تعذر الاتصال بالخادم.", requestLanguage);
+        const reference = requestId && response.status >= 500
+          ? ` (${requestLanguage === "fr" ? "Référence" : "مرجع"}: ${requestId.slice(0, 8)})` : "";
+        const error = new Error(message + reference) as Error & { status?: number; body?: unknown; requestId?: string };
         error.status = response.status;
         error.body = body;
+        error.requestId = requestId ?? undefined;
         throw error;
       }
       return body;
+    } catch (error) {
+      if (error instanceof NetworkRequestError) {
+        throw new Error(localizeApiError(error.message, requestLanguage));
+      }
+      throw error;
     } finally {
       // Also invalidate reads started while the write was still in progress.
       if (isWrite) requests.invalidate();

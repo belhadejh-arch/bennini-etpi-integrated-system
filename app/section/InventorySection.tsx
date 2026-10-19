@@ -105,7 +105,7 @@ export default function InventorySection() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
   const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
-  const { isLoaded, isSignedIn, getToken, language } = useAuth();
+  const { isLoaded, isSignedIn, getToken, getMember, language } = useAuth();
   const { width } = useWindowDimensions();
   const wide = width >= 820;
   const [member, setMember] = useState<Member | null>(null);
@@ -156,7 +156,7 @@ export default function InventorySection() {
     setError("");
     try {
       const token = () => getToken();
-      const memberRequest = apiRequest<{ member: Member }>("/me", token);
+      const memberRequest = getMember();
       const inventoryRequest = apiRequest<InventoryResult>(`/inventory?${queryString}`, token);
       const me = await memberRequest;
       setMember(me.member);
@@ -171,7 +171,7 @@ export default function InventorySection() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, isSignedIn, queryString]);
+  }, [getToken, getMember, isSignedIn, queryString]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");

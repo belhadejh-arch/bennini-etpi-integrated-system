@@ -31,6 +31,13 @@ All other accounts are created by an administrator from the Users and Permission
 - The API compresses supported responses, prepares lazy schema migrations before listening, and aggregates machine costs in grouped scans rather than a scan per machine.
 - `server/tests/performance.test.ts` compares old/new query results and explains an isolated synthetic dataset. Its timings are a query benchmark, not a claim about real production page-loading times.
 
+## Loading-error recovery
+
+- Section screens reuse the account returned by authenticated sign-in/session restoration instead of making another blocking `/api/me` request. Every data endpoint still authenticates and checks the member's current database permissions.
+- Reads retry transient network/server failures at most three times, with a 25-second timeout per attempt. Writes are never automatically replayed, to prevent duplicate financial entries.
+- A failed session restoration retains the saved session for network/server failures and offers retry. Only an explicit 401/403 rejection clears it.
+- `/api/health` validates the same schema-qualified member projection used by authenticated requests, not just database connectivity. Failed server requests have an `X-Request-Id` that can be correlated with Render logs.
+
 ## Split production hosting (Render API + Vercel web app)
 
 - `render.yaml` deploys only the Express API. It runs `npm ci && npm run typecheck` then `npm start`, uses `/api/health` for health checks, and disables serving the web build.

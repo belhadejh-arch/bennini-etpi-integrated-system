@@ -47,7 +47,7 @@ export default function FinanceSection() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ area?: string | string[] }>();
   const routeArea = Array.isArray(routeParams.area) ? routeParams.area[0] : routeParams.area;
-  const { isLoaded, isSignedIn, getToken, language } = useAuth();
+  const { isLoaded, isSignedIn, getToken, getMember, language } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -109,7 +109,7 @@ export default function FinanceSection() {
     setError("");
     try {
       const token = () => getToken();
-      const me = await apiRequest<{ member: Member }>("/me", token);
+      const me = await getMember();
       setMember(me.member);
       if (me.member.role === "partner") {
         setTransactions([]);
@@ -129,7 +129,7 @@ export default function FinanceSection() {
     } finally {
       setLoading(false);
     }
-  }, [expandedId, getToken, isSignedIn, queryString]);
+  }, [expandedId, getToken, getMember, isSignedIn, queryString]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");

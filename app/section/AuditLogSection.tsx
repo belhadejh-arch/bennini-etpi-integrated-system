@@ -91,7 +91,7 @@ function dataValue(key: string, value: unknown, language: "ar" | "fr") {
 
 export default function AuditLogSection() {
   const router = useRouter();
-  const { getToken, isSignedIn, language } = useAuth();
+  const { getToken, getMember, isSignedIn, language } = useAuth();
   const [member, setMember] = useState<Member | null>(null);
   const [filters, setFilters] = useState(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
@@ -110,7 +110,7 @@ export default function AuditLogSection() {
         if (value) query.set(key === "search" ? "q" : key, value);
       });
       const [me, data] = await Promise.all([
-        apiRequest<{ member: Member }>("/me", () => getToken()),
+        getMember(),
         apiRequest<AuditResponse>(`/audit?${query.toString()}`, () => getToken()),
       ]);
       setMember(me.member);
@@ -120,7 +120,7 @@ export default function AuditLogSection() {
     } finally {
       setLoading(false);
     }
-  }, [appliedFilters, getToken, isSignedIn, page]);
+  }, [appliedFilters, getToken, getMember, isSignedIn, page]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {

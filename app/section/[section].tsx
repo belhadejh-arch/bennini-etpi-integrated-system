@@ -33,7 +33,7 @@ export default function SectionScreen() {
   const params = useLocalSearchParams<{ section: string; focusId?: string | string[] }>();
   const section = params.section as SectionId;
   const focusId = Array.isArray(params.focusId) ? params.focusId[0] : params.focusId;
-  const { isLoaded, isSignedIn, getToken, language } = useAuth();
+  const { isLoaded, isSignedIn, getToken, getMember, language } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
@@ -53,7 +53,7 @@ export default function SectionScreen() {
     setError("");
     try {
       const token = () => getToken();
-      const memberRequest = apiRequest<{ member: Member }>("/me", token);
+      const memberRequest = getMember();
       const sectionRequest = apiRequest<SectionResult>(`/sections/${section}${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token);
       const me = await memberRequest;
       setMember(me.member);
@@ -66,7 +66,7 @@ export default function SectionScreen() {
     } finally {
       setLoading(false);
     }
-  }, [focusId, getToken, isSignedIn, section, sectionMeta]);
+  }, [focusId, getToken, getMember, isSignedIn, section, sectionMeta]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");

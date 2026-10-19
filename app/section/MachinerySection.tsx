@@ -86,7 +86,7 @@ export default function MachinerySection() {
   const routeParams = useLocalSearchParams<{ focusId?: string | string[]; machineId?: string | string[] }>();
   const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
   const routeMachineId = Array.isArray(routeParams.machineId) ? routeParams.machineId[0] : routeParams.machineId;
-  const { isLoaded, isSignedIn, getToken, language } = useAuth();
+  const { isLoaded, isSignedIn, getToken, getMember, language } = useAuth();
   const t = (text: string) => translate(text, language);
   const [member, setMember] = useState<Member | null>(null);
   const [machinery, setMachinery] = useState<Machinery[]>([]);
@@ -137,7 +137,7 @@ export default function MachinerySection() {
     try {
       const token = () => getToken();
       const [me, machineResult, partResult, detailResult] = await Promise.all([
-        apiRequest<{ member: Member }>("/me", token),
+        getMember(),
         apiRequest<{ items: Machinery[] }>("/machinery", token),
         apiRequest<{ items: SparePart[] }>(`/machinery/spare-parts${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token),
         selectedMachineId
@@ -155,7 +155,7 @@ export default function MachinerySection() {
     } finally {
       setLoading(false);
     }
-  }, [focusId, getToken, isSignedIn, selectedMachineId]);
+  }, [focusId, getToken, getMember, isSignedIn, selectedMachineId]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");

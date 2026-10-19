@@ -79,7 +79,7 @@ export default function FieldExpensesSection() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
   const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
-  const { isLoaded, isSignedIn, getToken, language } = useAuth();
+  const { isLoaded, isSignedIn, getToken, getMember, language } = useAuth();
   const t = (text: string) => translate(text, language);
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
@@ -121,7 +121,7 @@ export default function FieldExpensesSection() {
     try {
       const token = () => getToken();
       const [me, result, machines] = await Promise.all([
-        apiRequest<{ member: Member }>("/me", token),
+        getMember(),
         apiRequest<Result>(`/field-expenses${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token),
         apiRequest<{ items: MachineryOption[] }>("/machinery/options", token),
       ]);
@@ -136,7 +136,7 @@ export default function FieldExpensesSection() {
     } finally {
       setLoading(false);
     }
-  }, [focusId, getToken, isSignedIn]);
+  }, [focusId, getToken, getMember, isSignedIn]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");

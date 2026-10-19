@@ -1,15 +1,17 @@
 import * as SecureStore from "expo-secure-store";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { Appearance as NativeAppearance, Platform } from "react-native";
-import { apiRequest, setResponseLanguage, type Appearance, type Language, type Member } from "./api";
-import { setActiveLanguage, setActivePalette } from "./theme";
-import { setTranslationLanguage } from "./localization";
+import { Appearance as NativeAppearance, Platform, View, Text, Pressable } from "react-native";
+import { apiRequest, localizeApiError, setResponseLanguage, type Appearance, type Language, type Member } from "./api";
+import { colors, setActiveLanguage, setActivePalette } from "./theme";
+import { setTranslationLanguage, translate } from "./localization";
+import { shouldClearSavedSession } from "./session-policy";
 
 type SignInResult = { token: string; member: Member };
 type AuthContextValue = {
   isLoaded: boolean;
   isSignedIn: boolean;
   getToken: () => Promise<string | null>;
+  getMember: () => Promise<{ member: Member }>;
   signInWithSerial: (serial: string) => Promise<void>;
   signOut: () => Promise<void>;
   member: Member | null;
@@ -65,6 +67,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [member, setMember] = useState<Member | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [sessionAttempt, setSessionAttempt] = useState(0);
   const [preferences, setPreferences] = useState<Preferences>({ language: "ar", appearance: "light" });
   const [systemDark, setSystemDark] = useState(NativeAppearance.getColorScheme() === "dark");
   useEffect(() => {
@@ -83,9 +87,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setResponseLanguage(preferences.language);
   }, [preferences, systemDark]);
   const getToken = useCallback(async () => sessionToken, [sessionToken]);
+  const getMember = useCallback(async () => {
+    if (!member) throw new Error(localizeApiError("يلزم تسجيل الدخول."));
+    return { member };
+  }, [member]);
 
   useEffect(() => {
     let alive = true;
+    setIsLoaded(false);
+    setSessionError(null);
     void (async () => {
       try {
         const storedToken = await readToken();
@@ -107,18 +117,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setActiveLanguage(accountPrefs.language);
           await savePreferences(accountPrefs);
         }
-      } catch {
-        await saveToken(null);
-        if (alive) {
-          setSessionToken(null);
-          setMember(null);
+      } catch (error) {
+        if (shouldClearSavedSession(error)) {
+          await saveToken(null);
+          if (alive) {
+            setSessionToken(null);
+            setMember(null);
+          }
+        } else if (alive) {
+          // A timeout or database outage is not a sign-out.
+          setSessionError(error instanceof Error ? error.message : localizeApiError("تعذر الاتصال بالخادم."));
         }
       } finally {
         if (alive) setIsLoaded(true);
       }
     })();
     return () => { alive = false; };
-  }, []);
+  }, [sessionAttempt]);
 
   const signInWithSerial = useCallback(async (serial: string) => {
     const result = await apiRequest<SignInResult>("/auth/login", async () => null, {
@@ -172,6 +187,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoaded,
     isSignedIn: Boolean(member),
     getToken,
+    getMember,
     signInWithSerial,
     signOut,
     member,
@@ -179,9 +195,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     appearance: preferences.appearance,
     isDark: preferences.appearance === "system" ? systemDark : preferences.appearance === "dark",
     updatePreferences,
-  }), [getToken, isLoaded, member, preferences, signInWithSerial, signOut, updatePreferences, systemDark]);
+  }), [getToken, getMember, isLoaded, member, preferences, signInWithSerial, signOut, updatePreferences, systemDark]);
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={value}>{sessionError && !member ? (
+    <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center", padding: 24, gap: 20 }}>
+      <Text accessibilityRole="alert" style={{ color: colors.ink, fontSize: 16, fontWeight: "500", lineHeight: 26, textAlign: "center" }}>{sessionError}</Text>
+      <Pressable accessibilityRole="button" onPress={() => setSessionAttempt((attempt) => attempt + 1)} style={{ backgroundColor: colors.action, paddingHorizontal: 24, paddingVertical: 14, borderRadius: 12 }}>
+        <Text style={{ color: colors.white, fontSize: 16, fontWeight: "600", lineHeight: 26 }}>{translate("إعادة المحاولة", preferences.language)}</Text>
+      </Pressable>
+    </View>
+  ) : children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
