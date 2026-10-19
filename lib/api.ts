@@ -2,6 +2,8 @@ import Constants from "expo-constants";
 import { Platform } from "react-native";
 import type { MemberCapabilities, MemberPermissions } from "../shared/access";
 import type { SectionId } from "../shared/sections";
+import { createRequestCoordinator } from "./request-coordinator";
+const requests = createRequestCoordinator();
 import { apiErrorFrench } from "../shared/api-error-translations";
 let responseLanguage: "ar" | "fr" = "ar";
 export function setResponseLanguage(language: "ar" | "fr") { responseLanguage = language; }
@@ -35,26 +37,40 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const token = await getToken();
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
-  const response = await fetch(apiUrl(`/api${path}`), {
-    ...options,
-    headers: {
-      Accept: "application/json",
-      ...(options.body && !isFormData ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(Platform.OS !== "web" ? { "X-App-Client": "native" } : {}),
-      ...options.headers,
-    },
-    credentials: "include",
-  });
-  const isJson = response.headers.get("content-type")?.includes("application/json");
-  const body = (isJson ? await response.json().catch(() => ({})) : {}) as T & { error?: string };
-  if (!response.ok) {
-    const error = new Error(localizeApiError(body.error || "تعذر الاتصال بالخادم.")) as Error & { status?: number; body?: unknown };
-    error.status = response.status;
-    error.body = body;
-    throw error;
-  }
-  return body;
+  const method = (options.method ?? "GET").toUpperCase();
+  const requestLanguage = responseLanguage;
+  const isWrite = !["GET", "HEAD", "OPTIONS"].includes(method);
+  if (isWrite) requests.invalidate();
+  const perform = async (): Promise<T> => {
+    try {
+      const response = await fetch(apiUrl(`/api${path}`), {
+        ...options,
+        headers: {
+          Accept: "application/json",
+          ...(options.body && !isFormData ? { "Content-Type": "application/json" } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(Platform.OS !== "web" ? { "X-App-Client": "native" } : {}),
+          ...options.headers,
+        },
+        credentials: "include",
+      });
+      const isJson = response.headers.get("content-type")?.includes("application/json");
+      const body = (isJson ? await response.json().catch(() => ({})) : {}) as T & { error?: string };
+      if (!response.ok) {
+        const error = new Error(localizeApiError(body.error || "تعذر الاتصال بالخادم.", requestLanguage)) as Error & { status?: number; body?: unknown };
+        error.status = response.status;
+        error.body = body;
+        throw error;
+      }
+      return body;
+    } finally {
+      // Also invalidate reads started while the write was still in progress.
+      if (isWrite) requests.invalidate();
+    }
+  };
+  if (method !== "GET" || options.body || options.signal) return perform();
+  const headerKey = JSON.stringify(Array.from(new Headers(options.headers).entries()).sort(([a], [b]) => a.localeCompare(b)));
+  return requests.read(JSON.stringify([path, token, requestLanguage, headerKey, options.credentials, options.cache]), perform);
 }
 
 export type Member = {

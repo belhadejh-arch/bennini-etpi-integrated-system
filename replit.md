@@ -24,6 +24,13 @@ All other accounts are created by an administrator from the Users and Permission
 - Check all interface translation keys with `node scripts/verify-ui-localization.cjs`. Run `node --import tsx --test server/tests/*.test.ts` for preference ownership, financial links, machinery aggregation, theme contrast, and translation tests.
 - New spare-part/repair entries belong in field operations with a registered machine. Historical standalone part records remain readable; do not copy them into field expenses and double-count their costs.
 
+## Data-loading performance
+
+- Identical pending GET requests share one network call, scoped by account, language, headers, and filters. Responses are not kept after completion; writes invalidate pending-read sharing before and after they settle. Requests with cancellation signals remain independent.
+- Financial API responses are private and not browser-cached. Only versioned Expo assets get year-long immutable caching. HTML revalidates so a new release remains discoverable.
+- The API compresses supported responses, prepares lazy schema migrations before listening, and aggregates machine costs in grouped scans rather than a scan per machine.
+- `server/tests/performance.test.ts` compares old/new query results and explains an isolated synthetic dataset. Its timings are a query benchmark, not a claim about real production page-loading times.
+
 ## Split production hosting (Render API + Vercel web app)
 
 - `render.yaml` deploys only the Express API. It runs `npm ci && npm run typecheck` then `npm start`, uses `/api/health` for health checks, and disables serving the web build.

@@ -15,6 +15,7 @@ import {
 import { promisify } from "node:util";
 import multer from "multer";
 import cors from "cors";
+import compression from "compression";
 import pg from "pg";
 import { driverCostsByMachinery } from "./machinery-costs";
 import { registerFinanceRoutes } from "./finance-routes";
@@ -41,6 +42,11 @@ const pool = new Pool({
   },
 });
 const app = express();
+app.use(compression());
+app.use("/api", (_req, res, next) => {
+  res.set("Cache-Control", "private, no-store");
+  next();
+});
 const port = Number(process.env.PORT ?? 5000);
 const sessionSecret = process.env.SESSION_SECRET;
 if (!sessionSecret) throw new Error("SESSION_SECRET is required.");
@@ -1437,17 +1443,16 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), async (req:
     const cashQuery = canSeeFinance
       ? fieldSchemaReady.then(() => pool.query(`
         SELECT
-          COALESCE((SELECT SUM(amount) FROM transactions WHERE type = 'income'), 0) AS income,
-          COALESCE((SELECT SUM(amount) FROM transactions WHERE type = 'expense'), 0)
+          COALESCE(SUM(amount) FILTER (WHERE type = 'income'), 0) AS income,
+          COALESCE(SUM(amount) FILTER (WHERE type = 'expense'), 0)
             ${fieldExpenseTotal} AS outgoing
+        FROM transactions
       `))
       : Promise.resolve({ rows: [{ income: 0, outgoing: 0 }] });
     const purchasesQuery = canSeeFinance && canSeeInventory
-      ? pool.query("SELECT COALESCE(SUM(total_cost), 0) AS total FROM inventory_items")
-      : Promise.resolve({ rows: [{ total: 0 }] });
-    const inventoryQuery = canSeeFinance && canSeeInventory
-      ? pool.query("SELECT COALESCE(SUM(remaining_quantity * buy_price), 0) AS total FROM inventory_items")
-      : Promise.resolve({ rows: [{ total: 0 }] });
+      ? pool.query("SELECT COALESCE(SUM(total_cost), 0) AS total, COALESCE(SUM(remaining_quantity * buy_price), 0) AS remaining_total FROM inventory_items")
+      : Promise.resolve({ rows: [{ total: 0, remaining_total: 0 }] });
+    const inventoryQuery = purchasesQuery.then((result) => ({ rows: [{ total: result.rows[0].remaining_total }] }));
     const chequesQuery = canSeeCheques
       ? pool.query(`
         SELECT
@@ -2512,26 +2517,29 @@ async function loadMachineryFinancialSummary() {
     await Promise.all([ensureRentalSchema(), ensureFieldExpenseSchema()]);
     const result = await pool.query(`
       SELECT m.id, m.code, m.name, m.category, m.status, m.hours_worked, m.notes,
-        COALESCE((
-          SELECT COUNT(*)::int FROM field_expenses e
-          WHERE e.machinery_id = m.id AND e.category IN ('قطع غيار', 'إصلاح آلية')
-        ), 0)::int AS repair_count,
-        COUNT(p.id)::int AS legacy_repair_count,
-        COALESCE(SUM(p.quantity * p.buy_price + p.repair_expense), 0)
-          + COALESCE((SELECT SUM(e.amount) FROM field_expenses e WHERE e.machinery_id = m.id), 0)
-          + COALESCE((SELECT SUM(r.total_amount) FROM rentals r WHERE r.machinery_id = m.id), 0)
-          AS total_expenses,
+        COALESCE(field.repair_count, 0)::int AS repair_count,
+        COALESCE(parts.record_count, 0)::int AS legacy_repair_count,
+        COALESCE(parts.total, 0) + COALESCE(field.total, 0) + COALESCE(rental.total, 0) AS total_expenses,
         driver.id AS driver_assignment_id, driver.driver_name, driver.monthly_salary,
         driver.start_date::text AS driver_start_date
       FROM machinery m
-      LEFT JOIN machinery_spare_parts p ON p.machinery_id = m.id
+      LEFT JOIN (
+        SELECT machinery_id, COUNT(*)::int AS record_count, SUM(quantity * buy_price + repair_expense) AS total
+        FROM machinery_spare_parts GROUP BY machinery_id
+      ) parts ON parts.machinery_id = m.id
+      LEFT JOIN (
+        SELECT machinery_id, COUNT(*) FILTER (WHERE category IN ('قطع غيار', 'إصلاح آلية'))::int AS repair_count,
+          SUM(amount) AS total FROM field_expenses GROUP BY machinery_id
+      ) field ON field.machinery_id = m.id
+      LEFT JOIN (
+        SELECT machinery_id, SUM(total_amount) AS total FROM rentals GROUP BY machinery_id
+      ) rental ON rental.machinery_id = m.id
       LEFT JOIN LATERAL (
         SELECT id, driver_name, monthly_salary, start_date
         FROM machinery_driver_assignments
         WHERE machinery_id = m.id AND end_date IS NULL
         ORDER BY start_date DESC, id DESC LIMIT 1
       ) driver ON TRUE
-      GROUP BY m.id, driver.id, driver.driver_name, driver.monthly_salary, driver.start_date
       ORDER BY m.code, m.id`);
     const assignments = await pool.query(`
       SELECT machinery_id, monthly_salary, start_date::text AS start_date, end_date::text AS end_date
@@ -3839,8 +3847,11 @@ app.get("/api/audit", authenticate, requireSection("audit"), async (req: Authent
 
 const webRoot = path.resolve(process.cwd(), "dist");
 if (process.env.SERVE_WEB !== "false" && existsSync(webRoot)) {
+  app.use("/_expo/static", express.static(path.join(webRoot, "_expo/static"), { immutable: true, maxAge: "1y", index: false }));
+  app.use("/assets", express.static(path.join(webRoot, "assets"), { immutable: true, maxAge: "1y", index: false }));
   app.use(express.static(webRoot, { index: false }));
   app.get("*", (_req, res) => {
+    res.set("Cache-Control", "no-cache");
     res.sendFile(path.join(webRoot, "index.html"));
   });
 }
@@ -3851,6 +3862,12 @@ async function startServer() {
     const schema = readFileSync(path.resolve(process.cwd(), "server/schema.sql"), "utf8");
     await pool.query(schema);
     await prepareFinanceSchema(pool);
+    // Prepare lazy migrations before accepting requests; first navigation does no DDL.
+    await ensureMemberSchema();
+    await ensureMachinerySchema();
+    await Promise.all([ensureRentalSchema(), ensureFieldExpenseSchema(), ensureNotificationSchema()]);
+    await ensureRecordNotesSchema();
+    await ensureAuditLogSchema();
     await pool.query(`
       UPDATE members
       SET role_name = 'Superadmin', updated_at = NOW()

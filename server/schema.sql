@@ -393,3 +393,9 @@ CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs (created_at DESC
 CREATE INDEX IF NOT EXISTS audit_logs_performed_by_created_idx ON audit_logs (performed_by_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_section_created_idx ON audit_logs (section, created_at DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_type_created_idx ON audit_logs (event_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS transactions_recent_idx ON transactions (created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS transactions_ledger_page_idx ON transactions (transaction_date DESC, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS field_expenses_machine_created_idx ON field_expenses (machinery_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS field_expenses_actor_created_idx ON field_expenses (created_by_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS rentals_machine_start_idx ON rentals (machinery_id, start_date DESC, id DESC);
+CREATE INDEX IF NOT EXISTS machinery_current_driver_idx ON machinery_driver_assignments (machinery_id, start_date DESC, id DESC) WHERE end_date IS NULL;

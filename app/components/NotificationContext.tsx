@@ -1,6 +1,6 @@
 import { useAuth } from "../../lib/auth";
-import { usePathname } from "expo-router";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { AppState, Platform } from "react-native";
 import { apiRequest } from "../../lib/api";
 
 type NotificationContextValue = {
@@ -14,12 +14,12 @@ const NotificationContext = createContext<NotificationContextValue>({
 });
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
+    if (Platform.OS === "web" && typeof document !== "undefined" && document.visibilityState === "hidden") return;
     try {
       const result = await apiRequest<{ unreadCount: number }>("/notifications", () => getToken());
       setUnreadCount(result.unreadCount);
@@ -35,8 +35,11 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     }
     void refresh();
     const timer = setInterval(() => void refresh(), 60_000);
-    return () => clearInterval(timer);
-  }, [isLoaded, isSignedIn, pathname, refresh]);
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refresh();
+    });
+    return () => { clearInterval(timer); subscription.remove(); };
+  }, [isLoaded, isSignedIn, refresh]);
 
   const value = useMemo(() => ({ unreadCount, refresh }), [refresh, unreadCount]);
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>;
