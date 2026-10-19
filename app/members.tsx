@@ -283,12 +283,14 @@ export default function MembersScreen() {
                   { value: "finance", label: "الإدارة المالية" },
                   { value: "field", label: "رئيس أشغال" },
                   { value: "supervisor", label: "مشرف" },
+                  { value: "partner", label: "شريك" },
                 ].map((option) => (
                   <Pressable key={option.value} onPress={() => setNewRole(option.value)} style={[styles.permissionChip, newRole === option.value && styles.chipActive]}>
                     <Text style={[styles.chipText, newRole === option.value && styles.chipTextActive]}>{option.label}</Text>
                   </Pressable>
                 ))}
               </View>
+              {newRole === "partner" ? <Text style={styles.permissionLegend}>اربط حساب الدخول لاحقًا بحساب الشريك من شاشة المالية؛ سيظهر للشريك حسابه فقط بعد تسجيل الدخول.</Text> : null}
               <Text style={[styles.sectionLabel, { marginTop: 14 }]}>المسمى الوظيفي (اختياري)</Text>
               <TextInput
                 value={newRoleName}
@@ -583,7 +585,7 @@ export default function MembersScreen() {
 }
 
 function roleLabel(role: string) {
-  return ({ admin: "مدير النظام", finance: "الإدارة المالية", field: "رئيس أشغال", supervisor: "مشرف", viewer: "عضو", pending: "عضو جديد" } as Record<string, string>)[role] ?? "عضو";
+  return ({ admin: "مدير النظام", finance: "الإدارة المالية", field: "رئيس أشغال", supervisor: "مشرف", partner: "شريك", viewer: "عضو", pending: "عضو جديد" } as Record<string, string>)[role] ?? "عضو";
 }
 
 function activitySectionLabel(section: string) {

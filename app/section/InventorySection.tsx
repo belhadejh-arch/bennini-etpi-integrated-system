@@ -12,6 +12,7 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, Vi
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
+import EntityPicker, { type FinanceEntity } from "../components/EntityPicker";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDzd } from "../../lib/theme";
@@ -35,6 +36,9 @@ type InventoryItem = {
   purchase_date: string;
   notes: string;
   attachments: Attachment[];
+  customer_id?: number | null;
+  customer_name?: string | null;
+  customer_invoice_id?: number | null;
 };
 type Movement = {
   id: number;
@@ -54,7 +58,7 @@ type Summary = {
   used_quantity: number;
   total_cost: number | string;
   stock_value: number | string;
-  expected_profit: number | string;
+  expected_profit: number | string | null;
   realized_profit: number | string;
 };
 type InventoryResult = { items: InventoryItem[]; total: number; page: number; pageSize: number; summary: Summary };
@@ -116,6 +120,7 @@ export default function InventorySection() {
   const [appliedFilters, setAppliedFilters] = useState<Filters>(emptyFilters);
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [purchase, setPurchase] = useState<PurchaseDraft>(emptyPurchase());
+  const [purchaseCustomer, setPurchaseCustomer] = useState<FinanceEntity | null>(null);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [pickedDocs, setPickedDocs] = useState<PickedDocument[]>([]);
   const [movementItem, setMovementItem] = useState<InventoryItem | null>(null);
@@ -180,6 +185,7 @@ export default function InventorySection() {
   const startNewPurchase = () => {
     setEditingItem(null);
     setPurchase(emptyPurchase());
+    setPurchaseCustomer(null);
     setPickedDocs([]);
     setPurchaseOpen(true);
     setError("");
@@ -194,6 +200,7 @@ export default function InventorySection() {
       supplier: item.supplier, invoiceNumber: item.invoice_number,
       purchaseDate: dateLabel(item.purchase_date), notes: item.notes || "",
     });
+    setPurchaseCustomer(item.customer_id && item.customer_name ? { id: item.customer_id, name: item.customer_name } : null);
     setPurchaseOpen(true);
     setError("");
   };
@@ -232,9 +239,11 @@ export default function InventorySection() {
     if (!purchase.name.trim() || !purchase.supplier.trim() ||
         !Number.isSafeInteger(Number(purchase.quantity)) || Number(purchase.quantity) < 1 ||
         purchase.buyPrice === "" || !Number.isFinite(Number(purchase.buyPrice)) || Number(purchase.buyPrice) < 0 ||
-        purchase.salePrice === "" || !Number.isFinite(Number(purchase.salePrice)) || Number(purchase.salePrice) < 0 ||
+        (purchase.salePrice !== "" && (!Number.isFinite(Number(purchase.salePrice)) || Number(purchase.salePrice) < 0)) ||
+        (!editingItem && (!purchaseCustomer || !purchase.invoiceNumber.trim())) ||
+        (purchaseCustomer && !purchase.invoiceNumber.trim()) ||
         !/^\d{4}-\d{2}-\d{2}$/.test(purchase.purchaseDate)) {
-      setError("أكمل اسم السلعة والكمية والأسعار والمورد وتاريخ الشراء.");
+      setError("أكمل بيانات السلعة والمورد والتاريخ، واربط الشراء الجديد بزبون مسجل ورقم فاتورة.");
       return;
     }
     setSaving(true);
@@ -244,9 +253,9 @@ export default function InventorySection() {
     try {
       const payload = JSON.stringify({
         name: purchase.name.trim(), quantity: Number(purchase.quantity),
-        buyPrice: Number(purchase.buyPrice), salePrice: Number(purchase.salePrice),
+        buyPrice: Number(purchase.buyPrice), salePrice: purchase.salePrice.trim() ? Number(purchase.salePrice) : null,
         supplier: purchase.supplier.trim(), invoiceNumber: purchase.invoiceNumber.trim(),
-        purchaseDate: purchase.purchaseDate, notes: purchase.notes.trim(),
+        purchaseDate: purchase.purchaseDate, notes: purchase.notes.trim(), customerId: purchaseCustomer?.id ?? null,
       });
       const result = editingItem
         ? await apiRequest<{ item: InventoryItem }>(`/inventory/${editingItem.id}`, () => getToken(), { method: "PATCH", body: payload })
@@ -258,6 +267,7 @@ export default function InventorySection() {
       }
       setPurchaseOpen(false);
       setPurchase(emptyPurchase());
+      setPurchaseCustomer(null);
       setEditingItem(null);
       setPickedDocs([]);
       await refresh();
@@ -266,6 +276,7 @@ export default function InventorySection() {
       if (savedItemId) {
         setPurchaseOpen(false);
         setPurchase(emptyPurchase());
+        setPurchaseCustomer(null);
         setEditingItem(null);
         setPickedDocs([]);
         setError(savedDocuments ? message : `تم حفظ الشراء، لكن تعذر رفع المستندات. ${message}`);
@@ -380,10 +391,10 @@ export default function InventorySection() {
 
   const purchaseQuantity = Number(purchase.quantity) || 0;
   const buyPrice = Number(purchase.buyPrice) || 0;
-  const salePrice = Number(purchase.salePrice) || 0;
+  const salePrice = purchase.salePrice.trim() ? Number(purchase.salePrice) : null;
   const totalCost = purchaseQuantity * buyPrice;
-  const expectedSales = purchaseQuantity * salePrice;
-  const expectedProfit = expectedSales - totalCost;
+  const expectedSales = salePrice == null ? null : purchaseQuantity * salePrice;
+  const expectedProfit = expectedSales == null ? null : expectedSales - totalCost;
   const pageCount = Math.max(1, Math.ceil(total / 25));
 
   return (
@@ -418,7 +429,7 @@ export default function InventorySection() {
           <View style={styles.summaryGrid}>
             <SummaryCard label="إجمالي تكلفة المشتريات" value={formatDzd(amount(summary.total_cost))} accent={colors.blue} />
             <SummaryCard label="قيمة المخزون المتبقي" value={formatDzd(amount(summary.stock_value))} accent="#0F766E" />
-            <SummaryCard label="الربح المتوقع" value={profitLabel(summary.expected_profit)} accent="#15803D" />
+            <SummaryCard label="الربح المتوقع" value={summary.expected_profit == null ? "غير محدد" : profitLabel(summary.expected_profit)} accent="#15803D" />
             <SummaryCard label="الربح المحقق من البيع" value={profitLabel(summary.realized_profit)} accent="#B45309" />
             <SummaryCard label="المخزون المتبقي" value={`${Number(summary.remaining_quantity) || 0} قطعة`} accent={colors.navy} />
             <SummaryCard label="المباع / المستعمل" value={`${Number(summary.sold_quantity) || 0} / ${Number(summary.used_quantity) || 0} قطعة`} accent="#7C3AED" />
@@ -431,17 +442,20 @@ export default function InventorySection() {
             <View style={styles.formGrid}>
               <Field label="اسم السلعة *" value={purchase.name} onChange={(value) => setPurchaseField("name", value)} placeholder="مثال: أنبوب فولاذي" />
               <Field label="المورد *" value={purchase.supplier} onChange={(value) => setPurchaseField("supplier", value)} placeholder="اسم المورد" />
+              <View style={{ flexGrow: 1, flexBasis: 205, minWidth: 145 }}>
+                <EntityPicker kind="customer" value={purchaseCustomer} onChange={setPurchaseCustomer} label={`الزبون${editingItem ? " (اختياري للسجلات القديمة)" : " *"}`} />
+              </View>
               <Field label="الكمية *" value={purchase.quantity} onChange={(value) => setPurchaseField("quantity", value)} placeholder="0" numeric />
               <Field label="رقم الفاتورة" value={purchase.invoiceNumber} onChange={(value) => setPurchaseField("invoiceNumber", value)} placeholder="اختياري" />
               <Field label="سعر الشراء للوحدة (دج) *" value={purchase.buyPrice} onChange={(value) => setPurchaseField("buyPrice", value)} placeholder="0" numeric />
-              <Field label="سعر البيع للوحدة (دج) *" value={purchase.salePrice} onChange={(value) => setPurchaseField("salePrice", value)} placeholder="0" numeric />
+              <Field label="سعر البيع للوحدة (دج) (اختياري)" value={purchase.salePrice} onChange={(value) => setPurchaseField("salePrice", value)} placeholder="غير محدد" numeric />
               <Field label="تاريخ الشراء *" value={purchase.purchaseDate} onChange={(value) => setPurchaseField("purchaseDate", value)} placeholder="YYYY-MM-DD" />
               <Field label="ملاحظات" value={purchase.notes} onChange={(value) => setPurchaseField("notes", value)} placeholder="تفاصيل إضافية" />
             </View>
             <View style={styles.calculationBox}>
               <Calculation label="إجمالي التكلفة" value={formatDzd(totalCost)} />
-              <Calculation label="قيمة البيع المتوقعة" value={formatDzd(expectedSales)} />
-              <Calculation label="الربح المتوقع" value={formatDzd(expectedProfit)} highlight />
+              {expectedSales != null ? <Calculation label="قيمة البيع المتوقعة" value={formatDzd(expectedSales)} /> : null}
+              {expectedProfit != null ? <Calculation label="الربح المتوقع" value={formatDzd(expectedProfit)} highlight /> : null}
             </View>
             {canAddAttachments ? (
               <View style={styles.actionsRow}>
@@ -537,6 +551,7 @@ export default function InventorySection() {
                 <Text style={styles.itemMeta}>
                   {item.supplier || "دون مورد"} · فاتورة {item.invoice_number || "—"} · {dateLabel(item.purchase_date)}
                 </Text>
+                {item.customer_name ? <Text style={styles.customerLink} onPress={() => router.push(`/section/finance?area=customers&customerId=${item.customer_id}`)}>{item.customer_name} · فاتورة الزبون {item.customer_invoice_id ?? item.invoice_number}</Text> : <Text style={styles.mutedText}>شراء قديم غير مربوط بزبون</Text>}
               </View>
               <View style={[styles.stockBadge, item.remaining_quantity > 0 ? styles.stockBadgeAvailable : styles.stockBadgeEmpty]}>
                 <Text style={[styles.stockBadgeText, item.remaining_quantity > 0 ? styles.stockTextAvailable : styles.stockTextEmpty]}>
@@ -551,7 +566,7 @@ export default function InventorySection() {
               <Metric label="سعر الشراء للوحدة" value={formatDzd(amount(item.buy_price))} />
               <Metric label="سعر البيع للوحدة" value={item.sale_price == null ? "غير محدد" : formatDzd(amount(item.sale_price))} />
               <Metric label="إجمالي التكلفة" value={formatDzd(amount(item.total_cost))} />
-              <Metric label="الربح المتوقع" value={item.expected_profit == null ? "غير محدد" : profitLabel(item.expected_profit)} accent="#15803D" />
+              <Metric label="الربح المتوقع" value={item.sale_price == null || item.expected_profit == null ? "غير محدد" : profitLabel(item.expected_profit)} accent="#15803D" />
               <Metric label="الربح المحقق" value={profitLabel(item.realized_profit)} accent="#B45309" />
             </View>
             <RecordNotes entity="inventory" recordId={item.id} initialNotes={item.notes} editable={canEdit} />
@@ -756,6 +771,7 @@ const styles = {
   itemHeading: { flex: 1, width: "100%" as const },
   itemName: { color: colors.navy, fontSize: 15, fontWeight: "900" as const, textAlign: "right" as const },
   itemMeta: { color: colors.muted, fontSize: 10, marginTop: 4, textAlign: "right" as const, lineHeight: 16 },
+  customerLink: { color: colors.blue, fontSize: 10, fontWeight: "800" as const, textAlign: "right" as const, marginTop: 5 },
   stockBadge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6 },
   stockBadgeAvailable: { backgroundColor: "#ECFDF3" },
   stockBadgeEmpty: { backgroundColor: "#FEF2F2" },

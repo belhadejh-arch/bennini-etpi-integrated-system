@@ -17,6 +17,8 @@ import multer from "multer";
 import cors from "cors";
 import pg from "pg";
 import { driverCostsByMachinery } from "./machinery-costs";
+import { registerFinanceRoutes } from "./finance-routes";
+import { FinanceError, prepareFinanceSchema, positiveId, ensureCustomerInvoice, synchronizeChequeInvoices, resolveTransactionAccount } from "./finance-data";
 import { allSectionIds, type SectionId } from "../shared/sections";
 import {
   effectivePermissions,
@@ -60,7 +62,7 @@ app.use(cors({
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-type Member = {
+export type Member = {
   clerk_user_id: string;
   email: string | null;
   name: string;
@@ -72,7 +74,7 @@ type Member = {
   capabilities?: MemberCapabilities;
 };
 
-type AuthenticatedRequest = Request & {
+export type AuthenticatedRequest = Request & {
   member?: Member;
 };
 
@@ -337,6 +339,15 @@ async function authenticate(req: AuthenticatedRequest, res: Response, next: Next
       fail(res, 403, "الحساب قيد انتظار تفعيل المدير.");
       return;
     }
+    if (member.role === "partner") {
+      const ownRead = req.method === "GET" && (
+        /^\/api\/finance\/accounts(?:\/\d+)?$/.test(req.path) ||
+        /^\/api\/transaction-attachments\/\d+$/.test(req.path) ||
+        ["/api/transactions", "/api/dashboard", "/api/notifications"].includes(req.path)
+      );
+      const readNotification = req.method === "POST" && req.path === "/api/notifications/read";
+      if (!ownRead && !readNotification) return fail(res, 403, "حساب الشريك مخصص للاطلاع على حساباته فقط.");
+    }
     next();
   } catch (error) {
     console.error("Authentication check failed:", error);
@@ -392,7 +403,7 @@ function requireFileUpload(req: AuthenticatedRequest, res: Response, next: NextF
 }
 
 type AuditEventType = "create" | "update" | "delete" | "review" | "attachment" | "permissions" | "note" | "setup" | "other";
-type AuditEventOptions = {
+export type AuditEventOptions = {
   section: SectionId | "system";
   eventType: AuditEventType;
   entityId?: string | number | null;
@@ -725,7 +736,9 @@ const inventoryItemSelect = `
   SELECT i.id, i.name, i.quantity, i.remaining_quantity, i.buy_price, i.total_cost,
     i.sale_price, COALESCE(s.name, i.supplier) AS supplier,
     COALESCE(pi.invoice_number, i.invoice_number) AS invoice_number,
-    i.supplier_id, i.invoice_id, i.recorded_by_id, i.recorded_by_name,
+    i.supplier_id, i.invoice_id, i.customer_id, i.customer_invoice_id,
+    (SELECT name FROM finance_accounts WHERE id = i.customer_id) AS customer_name,
+    i.recorded_by_id, i.recorded_by_name,
     i.purchase_date, i.notes, i.created_at,
     CASE WHEN i.sale_price IS NULL THEN NULL
       ELSE i.quantity * i.sale_price - i.total_cost END AS expected_profit,
@@ -791,15 +804,15 @@ function validInventoryPurchase(body: Record<string, unknown>) {
   const notes = typeof body.notes === "string" ? body.notes.trim() : "";
   const quantity = Number(body.quantity);
   const buyPrice = Number(body.buyPrice);
-  const salePrice = Number(body.salePrice);
+  const salePrice = body.salePrice === "" || body.salePrice == null ? null : Number(body.salePrice);
   const purchaseDate = body.purchaseDate;
   const maxMoney = 99999999999999.99;
   if (!name || name.length > 200 || !supplier || supplier.length > 200 ||
       invoiceNumber.length > 120 || notes.length > 5000 ||
       !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 1000000000 ||
       !Number.isFinite(buyPrice) || buyPrice < 0 || buyPrice > maxMoney ||
-      !Number.isFinite(salePrice) || salePrice < 0 || salePrice > maxMoney ||
-      quantity * buyPrice > maxMoney || quantity * salePrice > maxMoney ||
+      (salePrice !== null && (!Number.isFinite(salePrice) || salePrice < 0 || salePrice > maxMoney)) ||
+      quantity * buyPrice > maxMoney || (salePrice !== null && quantity * salePrice > maxMoney) ||
       (purchaseDate !== undefined && !validIsoDate(purchaseDate))) {
     return null;
   }
@@ -817,6 +830,11 @@ function validCheque(body: Record<string, unknown>, current?: Record<string, unk
   const invoiceId = rawInvoiceId === null || rawInvoiceId === undefined || rawInvoiceId === ""
     ? null
     : Number(rawInvoiceId);
+  const rawCustomerId = field("customerId");
+  const customerId = rawCustomerId == null || rawCustomerId === "" ? null : Number(rawCustomerId);
+  const rawInvoiceIds = field("invoiceIds");
+  if (rawInvoiceIds !== undefined && !Array.isArray(rawInvoiceIds)) return null;
+  const invoiceIds = (Array.isArray(rawInvoiceIds) ? rawInvoiceIds : []).map(Number);
   const beneficiary = typeof field("beneficiary") === "string" ? String(field("beneficiary")).trim() : "";
   const bank = typeof field("bank") === "string" ? String(field("bank")).trim() : "";
   const notes = typeof field("notes") === "string" ? String(field("notes")).trim() : "";
@@ -826,8 +844,12 @@ function validCheque(body: Record<string, unknown>, current?: Record<string, unk
   const status = field("status") ?? "pending";
 
   if (!chequeNumber || chequeNumber.length > 120 ||
-      invoiceNumber.length > 120 || !beneficiary || beneficiary.length > 200 ||
+      (customerId === null && invoiceNumber.length > 120) || !beneficiary || beneficiary.length > 200 ||
       (invoiceId !== null && (!Number.isSafeInteger(invoiceId) || invoiceId <= 0)) ||
+      (customerId !== null && (!Number.isSafeInteger(customerId) || customerId <= 0 || !invoiceIds.length)) ||
+      invoiceIds.length > 100 || new Set(invoiceIds).size !== invoiceIds.length ||
+      invoiceIds.some((id) => !Number.isSafeInteger(id) || id <= 0) ||
+      (customerId === null && invoiceIds.length > 0) ||
       bank.length > 200 || notes.length > 5000 ||
       !Number.isFinite(amount) || amount <= 0 || amount > maxChequeAmount ||
       !validIsoDate(issueDate) || !validIsoDate(dueDate) || dueDate < issueDate ||
@@ -835,7 +857,7 @@ function validCheque(body: Record<string, unknown>, current?: Record<string, unk
     return null;
   }
 
-  return { chequeNumber, invoiceNumber, invoiceId, beneficiary, bank, amount, issueDate, dueDate, status, notes };
+  return { chequeNumber, invoiceNumber, invoiceId, customerId, invoiceIds, beneficiary, bank, amount, issueDate, dueDate, status, notes };
 }
 
 async function ensureSupplierInvoice(
@@ -905,6 +927,11 @@ async function recalculateCashBalances(client: pg.PoolClient) {
      WHERE target.id = balances.id`,
   );
 }
+
+registerFinanceRoutes(app, {
+  pool, authenticate, requireSection, requirePermission, audit: writeAuditWithClient,
+  machinery: loadMachineryFinancialSummary,
+});
 
 app.get("/api/auth/status", async (_req, res) => {
   try {
@@ -1138,7 +1165,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
   const member = req.member!;
   const canSeeField = hasPermission(member, "field", "view");
   const canReviewField = hasPermission(member, "field", "edit");
-  const canSeeTransactions = hasPermission(member, "finance", "view");
+  const canSeeTransactions = member.role !== "partner" && hasPermission(member, "finance", "view");
   const canSeeCheques = hasPermission(member, "cheques", "view");
   const canSeeRentals = hasPermission(member, "rentals", "view");
   const canSeeInventory = hasPermission(member, "inventory", "view");
@@ -1361,6 +1388,20 @@ app.post("/api/notifications/read", authenticate, async (req: AuthenticatedReque
 app.get("/api/dashboard", authenticate, requireSection("dashboard"), async (req: AuthenticatedRequest, res) => {
   try {
     const member = req.member!;
+    if (member.role === "partner") {
+      const totals = await pool.query(`
+        SELECT COALESCE(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE 0 END),0) AS incoming,
+          COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END),0) AS outgoing
+        FROM transactions t JOIN finance_accounts a ON a.id = t.account_id WHERE a.member_id = $1
+      `, [member.clerk_user_id]);
+      const incoming = Number(totals.rows[0].incoming);
+      const outgoing = Number(totals.rows[0].outgoing);
+      return res.json({
+        stats: { incoming, outgoing, balance: incoming - outgoing, purchases: 0, inventoryValue: 0,
+          pendingCheques: 0, pendingChequeCount: 0, dueCheques: 0, dueChequeCount: 0, rentalRemaining: 0 },
+        recentOperations: [], fieldExpenses: [],
+      });
+    }
     const canSeeFinance = hasPermission(member, "finance", "view");
     const canSeeInventory = hasPermission(member, "inventory", "view");
     const canSeeCheques = hasPermission(member, "cheques", "view");
@@ -1451,7 +1492,7 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), async (req:
   }
 });
 
-app.get("/api/transactions", authenticate, requireSection("finance"), async (req, res) => {
+app.get("/api/transactions", authenticate, requireSection("finance"), async (req: AuthenticatedRequest, res) => {
   const query = req.query;
   const where: string[] = [];
   const values: unknown[] = [];
@@ -1459,6 +1500,11 @@ app.get("/api/transactions", authenticate, requireSection("finance"), async (req
     values.push(item);
     return `$${values.length}`;
   };
+  if (req.member!.role === "partner") {
+    where.push(`t.account_id IN (SELECT id FROM finance_accounts WHERE member_id = ${value(req.member!.clerk_user_id)} AND kind = 'partner')`);
+  } else if (query.scope === "other") {
+    where.push("t.account_id IS NULL");
+  }
   const type = typeof query.type === "string" ? query.type : "";
   const method = typeof query.paymentMethod === "string" ? query.paymentMethod : "";
   const from = typeof query.from === "string" ? query.from : "";
@@ -1504,7 +1550,8 @@ app.get("/api/transactions", authenticate, requireSection("finance"), async (req
     const [result, count, balance] = await Promise.all([
       pool.query(
         `SELECT t.id, t.type, t.amount, t.party, t.reason, t.payment_method, t.transaction_date AS date,
-          t.cash_balance_after, t.notes, t.recorded_by_id, t.recorded_by_name, t.created_at, t.updated_at,
+          t.cash_balance_after, t.account_id, t.interest_rate, ROUND(t.amount * t.interest_rate / 100, 2) AS interest_amount,
+          t.notes, t.recorded_by_id, t.recorded_by_name, t.created_at, t.updated_at,
           COALESCE((SELECT json_agg(json_build_object(
             'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
           ) ORDER BY a.created_at) FROM transaction_attachments a WHERE a.transaction_id = t.id), '[]'::json) AS attachments
@@ -1516,7 +1563,9 @@ app.get("/api/transactions", authenticate, requireSection("finance"), async (req
       pool.query(`SELECT COUNT(*)::int AS total FROM transactions t ${clause}`, values),
       pool.query(
         `SELECT COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END), 0) AS amount
-         FROM transactions WHERE payment_method = 'نقداً'`,
+         FROM transactions WHERE payment_method = 'نقداً'
+         ${req.member!.role === "partner" ? "AND account_id IN (SELECT id FROM finance_accounts WHERE member_id = $1 AND kind = 'partner')" : ""}`,
+        req.member!.role === "partner" ? [req.member!.clerk_user_id] : [],
       ),
     ]);
     res.json({ items: result.rows, total: count.rows[0].total, page, pageSize, cashBalance: Number(balance.rows[0].amount) });
@@ -1602,6 +1651,10 @@ app.post("/api/inventory", authenticate, requireSection("inventory"), requirePer
   try {
     await client.query("BEGIN");
     const member = req.member!;
+    const customerId = positiveId(req.body?.customerId);
+    if (!customerId) throw new FinanceError(400, "اختر الزبون المرتبط بعملية الشراء.");
+    const customerInvoiceId = await ensureCustomerInvoice(client, customerId, purchase.invoiceNumber,
+      typeof purchase.purchaseDate === "string" ? purchase.purchaseDate : new Date().toISOString().slice(0, 10), member);
     const links = await ensureSupplierInvoice(
       client,
       purchase.supplier,
@@ -1612,12 +1665,12 @@ app.post("/api/inventory", authenticate, requireSection("inventory"), requirePer
     const result = await client.query(
       `INSERT INTO inventory_items
         (name, quantity, remaining_quantity, buy_price, total_cost, sale_price, supplier, invoice_number,
-         supplier_id, invoice_id, purchase_date, notes, recorded_by_id, recorded_by_name)
-       VALUES ($1, $2, $2, $3, $2 * $3, $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE), $10, $11, $12)
+         supplier_id, invoice_id, purchase_date, notes, recorded_by_id, recorded_by_name, customer_id, customer_invoice_id)
+       VALUES ($1, $2, $2, $3, $2 * $3, $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE), $10, $11, $12, $13, $14)
        RETURNING id`,
       [purchase.name, purchase.quantity, purchase.buyPrice, purchase.salePrice, purchase.supplier,
         purchase.invoiceNumber, links.supplierId, links.invoiceId, purchase.purchaseDate ?? null,
-        purchase.notes, member.clerk_user_id, member.name],
+        purchase.notes, member.clerk_user_id, member.name, customerId, customerInvoiceId],
     );
     const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [result.rows[0].id]);
     await writeAuditWithClient(client, member, "تسجيل عملية شراء", `${purchase.name} — ${purchase.quantity} قطعة من ${purchase.supplier} بقيمة ${purchase.quantity * purchase.buyPrice} دج.`,
@@ -1626,6 +1679,7 @@ app.post("/api/inventory", authenticate, requireSection("inventory"), requirePer
     res.status(201).json({ item: item.rows[0] });
   } catch (error) {
     await client.query("ROLLBACK");
+    if (error instanceof FinanceError) return fail(res, error.status, error.message);
     console.error("Inventory purchase creation failed:", error);
     fail(res, 500, "تعذر تسجيل عملية الشراء.");
   } finally {
@@ -1643,12 +1697,31 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
   try {
     await client.query("BEGIN");
     const existing = await client.query(
-      "SELECT id, name, supplier FROM inventory_items WHERE id = $1 FOR UPDATE",
+      "SELECT id, name, supplier, customer_id, customer_invoice_id, invoice_number, quantity, buy_price FROM inventory_items WHERE id = $1 FOR UPDATE",
       [id],
     );
     if (!existing.rowCount) {
       await client.query("ROLLBACK");
       return fail(res, 404, "عملية الشراء غير موجودة.");
+    }
+    const prior = existing.rows[0];
+    const customerId = req.body?.customerId === undefined ? positiveId(prior.customer_id) : positiveId(req.body.customerId);
+    await client.query("SELECT id FROM finance_accounts WHERE id = ANY($1::bigint[]) ORDER BY id FOR UPDATE",
+      [[prior.customer_id, customerId].filter((value) => value !== null)]);
+    const sameInvoice = customerId === positiveId(prior.customer_id) &&
+      purchase.invoiceNumber.trim().toLocaleLowerCase() === String(prior.invoice_number).trim().toLocaleLowerCase();
+    const sameAmount = Number(prior.quantity) === purchase.quantity && Number(prior.buy_price) === purchase.buyPrice;
+    let customerInvoiceId = positiveId(prior.customer_invoice_id);
+    if (customerInvoiceId) {
+      await client.query("SELECT id FROM customer_invoices WHERE id = $1 FOR UPDATE", [customerInvoiceId]);
+      const paid = await client.query("SELECT 1 FROM cheque_customer_invoices WHERE invoice_id = $1 AND active", [customerInvoiceId]);
+      if (paid.rowCount && (!sameInvoice || !sameAmount)) {
+        throw new FinanceError(409, "الفاتورة مرتبطة بشيك؛ أزل ربطها قبل تغيير الزبون أو رقم الفاتورة أو قيمتها.");
+      }
+    }
+    if (!sameInvoice || !sameAmount || (customerId && !customerInvoiceId)) {
+      customerInvoiceId = await ensureCustomerInvoice(client, customerId, purchase.invoiceNumber,
+        String(purchase.purchaseDate ?? new Date().toISOString().slice(0, 10)), req.member!);
     }
     const movements = await client.query(
       "SELECT COALESCE(SUM(quantity), 0)::int AS quantity FROM inventory_movements WHERE inventory_item_id = $1",
@@ -1668,11 +1741,12 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
     await client.query(
       `UPDATE inventory_items SET name = $1, quantity = $2, remaining_quantity = $2 - $3,
         buy_price = $4, total_cost = $2 * $4, sale_price = $5, supplier = $6,
-        invoice_number = $7, supplier_id = $8, invoice_id = $9, purchase_date = $10, notes = $11
+        invoice_number = $7, supplier_id = $8, invoice_id = $9, purchase_date = $10, notes = $11,
+        customer_id = $13, customer_invoice_id = $14
        WHERE id = $12`,
       [purchase.name, purchase.quantity, movements.rows[0].quantity, purchase.buyPrice, purchase.salePrice,
         purchase.supplier, purchase.invoiceNumber, links.supplierId, links.invoiceId,
-        purchase.purchaseDate, purchase.notes, id],
+        purchase.purchaseDate, purchase.notes, id, customerId, customerInvoiceId],
     );
     const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [id]);
     await writeAuditWithClient(client, req.member!, "تعديل بيانات شراء", `تحديث بيانات السلعة ${purchase.name}، رقم ${id}.`,
@@ -1681,6 +1755,7 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
     res.json({ item: item.rows[0] });
   } catch (error) {
     await client.query("ROLLBACK");
+    if (error instanceof FinanceError) return fail(res, error.status, error.message);
     console.error("Inventory purchase update failed:", error);
     fail(res, 500, "تعذر تعديل بيانات الشراء.");
   } finally {
@@ -1837,7 +1912,15 @@ app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res
   try {
     const [items, count, alerts] = await Promise.all([
       pool.query(
-        `SELECT c.id, c.cheque_number, c.invoice_id,
+        `SELECT c.id, c.cheque_number, c.invoice_id, c.customer_id,
+          (SELECT name FROM finance_accounts WHERE id = c.customer_id) AS customer_name,
+          COALESCE((SELECT json_agg(link.invoice_id ORDER BY link.invoice_id)
+            FROM cheque_customer_invoices link WHERE link.cheque_id = c.id), '[]'::json) AS invoice_ids,
+          COALESCE((SELECT json_agg(json_build_object(
+            'id', ci.id, 'invoice_number', ci.invoice_number,
+            'amount', COALESCE((SELECT SUM(i.total_cost) FROM inventory_items i WHERE i.customer_invoice_id = ci.id), 0)
+          ) ORDER BY ci.id) FROM cheque_customer_invoices link
+            JOIN customer_invoices ci ON ci.id = link.invoice_id WHERE link.cheque_id = c.id), '[]'::json) AS invoices,
           COALESCE(pi.invoice_number, c.invoice_number) AS invoice_number,
           s.name AS invoice_supplier_name, c.amount, c.beneficiary, c.bank,
           c.issue_date, c.due_date, c.status, c.notes, c.recorded_by_id,
@@ -1891,10 +1974,13 @@ app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res
 app.post("/api/cheques", authenticate, requireSection("cheques"), requirePermission("cheques", "create"), async (req: AuthenticatedRequest, res) => {
   const cheque = validCheque(req.body ?? {});
   if (!cheque) return fail(res, 400, "تحقق من رقم الشيك والمبلغ والمستفيد والبنك والتواريخ والحالة.");
+  if (!cheque.customerId) return fail(res, 400, "اختر الزبون وفاتورة واحدة على الأقل.");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const invoice = await resolveChequeInvoice(client, cheque.invoiceId, cheque.invoiceNumber);
+    const invoice = cheque.customerId
+      ? { invoiceId: null, invoiceNumber: "" }
+      : await resolveChequeInvoice(client, cheque.invoiceId, cheque.invoiceNumber);
     if (!invoice) {
       await client.query("ROLLBACK");
       return fail(res, 400, "الفاتورة المحددة غير موجودة.");
@@ -1911,12 +1997,15 @@ app.post("/api/cheques", authenticate, requireSection("cheques"), requirePermiss
         cheque.bank, cheque.issueDate, cheque.dueDate, cheque.status, cheque.notes,
         member.clerk_user_id, member.name],
     );
+    await synchronizeChequeInvoices(client, Number(result.rows[0].id), cheque.customerId, cheque.invoiceIds, String(cheque.status));
     await writeAuditWithClient(client, member, "تسجيل شيك", `تسجيل الشيك رقم ${cheque.chequeNumber} بقيمة ${cheque.amount} دج.`,
       { section: "cheques", eventType: "create", entityId: result.rows[0].id, data: { chequeNumber: cheque.chequeNumber, invoiceNumber: invoice.invoiceNumber, invoiceId: invoice.invoiceId, amount: cheque.amount, beneficiary: cheque.beneficiary } });
     await client.query("COMMIT");
     res.status(201).json({ item: { ...result.rows[0], attachments: [] } });
   } catch (error) {
     await client.query("ROLLBACK");
+    if (error instanceof FinanceError) return fail(res, error.status, error.message);
+    if ((error as { code?: string })?.code === "23505") return fail(res, 409, "إحدى الفواتير مرتبطة بشيك آخر.");
     console.error("Cheque creation failed:", error);
     fail(res, 500, "تعذر تسجيل الشيك.");
   } finally {
@@ -1932,7 +2021,8 @@ app.patch("/api/cheques/:id", authenticate, requireSection("cheques"), requirePe
     await client.query("BEGIN");
     const existing = await client.query(
       `SELECT cheque_number AS "chequeNumber", invoice_number AS "invoiceNumber",
-        invoice_id AS "invoiceId", amount,
+        invoice_id AS "invoiceId", customer_id AS "customerId",
+        ARRAY(SELECT invoice_id FROM cheque_customer_invoices WHERE cheque_id = cheques.id ORDER BY invoice_id) AS "invoiceIds", amount,
         beneficiary, bank, issue_date::text AS "issueDate", due_date::text AS "dueDate", status, notes
        FROM cheques WHERE id = $1 FOR UPDATE`,
       [id],
@@ -1942,11 +2032,13 @@ app.patch("/api/cheques/:id", authenticate, requireSection("cheques"), requirePe
       return fail(res, 404, "الشيك غير موجود.");
     }
     const cheque = validCheque(req.body ?? {}, existing.rows[0]);
-    if (!cheque) {
+    if (!cheque || (existing.rows[0].customerId && !cheque.customerId)) {
       await client.query("ROLLBACK");
       return fail(res, 400, "بيانات الشيك غير صالحة.");
     }
-    const invoice = await resolveChequeInvoice(client, cheque.invoiceId, cheque.invoiceNumber);
+    const invoice = cheque.customerId
+      ? { invoiceId: null, invoiceNumber: "" }
+      : await resolveChequeInvoice(client, cheque.invoiceId, cheque.invoiceNumber);
     if (!invoice) {
       await client.query("ROLLBACK");
       return fail(res, 400, "الفاتورة المحددة غير موجودة.");
@@ -1960,12 +2052,17 @@ app.patch("/api/cheques/:id", authenticate, requireSection("cheques"), requirePe
       [cheque.chequeNumber, invoice.invoiceId, invoice.invoiceNumber, cheque.amount, cheque.beneficiary,
         cheque.bank, cheque.issueDate, cheque.dueDate, cheque.status, cheque.notes, id],
     );
+    if (cheque.customerId) {
+      await synchronizeChequeInvoices(client, id, cheque.customerId, cheque.invoiceIds, String(cheque.status));
+    }
     await writeAuditWithClient(client, req.member!, "تعديل بيانات شيك", `تحديث بيانات الشيك رقم ${cheque.chequeNumber}.`,
       { section: "cheques", eventType: "update", entityId: id, data: { chequeNumber: cheque.chequeNumber, amount: cheque.amount, beneficiary: cheque.beneficiary, status: cheque.status } });
     await client.query("COMMIT");
     res.json({ item: result.rows[0] });
   } catch (error) {
     await client.query("ROLLBACK");
+    if (error instanceof FinanceError) return fail(res, error.status, error.message);
+    if ((error as { code?: string })?.code === "23505") return fail(res, 409, "إحدى الفواتير مرتبطة بشيك آخر.");
     console.error("Cheque update failed:", error);
     fail(res, 500, "تعذر تعديل بيانات الشيك.");
   } finally {
@@ -2398,8 +2495,8 @@ app.get("/api/machinery/options", requireMachinerySchema, authenticate, async (r
   }
 });
 
-app.get("/api/machinery", requireMachinerySchema, authenticate, requireSection("machinery"), async (_req, res) => {
-  try {
+async function loadMachineryFinancialSummary() {
+    await ensureMachinerySchema();
     await Promise.all([ensureRentalSchema(), ensureFieldExpenseSchema()]);
     const result = await pool.query(`
       SELECT m.id, m.code, m.name, m.category, m.status, m.hours_worked, m.notes,
@@ -2428,13 +2525,17 @@ app.get("/api/machinery", requireMachinerySchema, authenticate, requireSection("
       FROM machinery_driver_assignments
     `);
     const driverCosts = driverCostsByMachinery(assignments.rows);
-    res.json({
-      items: result.rows.map((machine) => ({
+    return result.rows.map((machine) => ({
         ...machine,
         total_expenses: Number(machine.total_expenses || 0) + (driverCosts.get(Number(machine.id)) ?? 0),
         driver_total_cost: driverCosts.get(Number(machine.id)) ?? 0,
-      })),
-    });
+        driver_monthly_salary: machine.monthly_salary,
+      }));
+}
+
+app.get("/api/machinery", requireMachinerySchema, authenticate, requireSection("machinery"), async (_req, res) => {
+  try {
+    res.json({ items: await loadMachineryFinancialSummary() });
   } catch (error) {
     console.error("Machinery list failed:", error);
     fail(res, 500, "تعذر تحميل قائمة المركبات والآليات.");
@@ -2925,11 +3026,13 @@ app.post("/api/transactions", authenticate, requireSection("finance"), requirePe
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(574382910)");
     const member = req.member!;
+    const account = await resolveTransactionAccount(client, req.body ?? {});
     const result = await client.query(
-      `INSERT INTO transactions (type, amount, party, reason, payment_method, transaction_date, notes, recorded_by_id, recorded_by_name)
-       VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE), $7, $8, $9)
+      `INSERT INTO transactions (type, amount, party, reason, payment_method, transaction_date, notes, recorded_by_id, recorded_by_name, account_id, interest_rate)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, CURRENT_DATE), $7, $8, $9, $10, $11)
        RETURNING id`,
-      [type, amount, party.trim(), String(reason ?? "").trim(), paymentMethod, transactionDate ?? null, String(notes ?? "").trim(), member.clerk_user_id, member.name],
+      [type, amount, account.party ?? party.trim(), String(reason ?? "").trim(), paymentMethod, transactionDate ?? null,
+        String(notes ?? "").trim(), member.clerk_user_id, member.name, account.accountId, account.interestRate],
     );
     await recalculateCashBalances(client);
     const item = await client.query(
@@ -2944,6 +3047,7 @@ app.post("/api/transactions", authenticate, requireSection("finance"), requirePe
     res.status(201).json({ item: item.rows[0] });
   } catch (error) {
     await client.query("ROLLBACK");
+    if (error instanceof FinanceError) return fail(res, error.status, error.message);
     console.error("Transaction creation failed:", error);
     fail(res, 500, "تعذر حفظ العملية المالية.");
   } finally {
@@ -2963,11 +3067,18 @@ app.patch("/api/transactions/:id", authenticate, requireSection("finance"), requ
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(574382910)");
+    const existing = await client.query("SELECT account_id, interest_rate FROM transactions WHERE id = $1 FOR UPDATE", [id]);
+    if (!existing.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "العملية المالية غير موجودة.");
+    }
+    const account = await resolveTransactionAccount(client, req.body ?? {}, existing.rows[0]);
     const result = await client.query(
       `UPDATE transactions SET type = $1, amount = $2, party = $3, reason = $4, payment_method = $5,
-        transaction_date = $6, notes = $7, updated_at = NOW()
+        transaction_date = $6, notes = $7, updated_at = NOW(), account_id = $9, interest_rate = $10
        WHERE id = $8 RETURNING id`,
-      [type, amount, party.trim(), String(reason ?? "").trim(), paymentMethod, transactionDate, String(notes ?? "").trim(), id],
+      [type, amount, account.party ?? party.trim(), String(reason ?? "").trim(), paymentMethod, transactionDate,
+        String(notes ?? "").trim(), id, account.accountId, account.interestRate],
     );
     if (!result.rowCount) {
       await client.query("ROLLBACK");
@@ -2986,6 +3097,7 @@ app.patch("/api/transactions/:id", authenticate, requireSection("finance"), requ
     res.json({ item: item.rows[0] });
   } catch (error) {
     await client.query("ROLLBACK");
+    if (error instanceof FinanceError) return fail(res, error.status, error.message);
     console.error("Transaction update failed:", error);
     fail(res, 500, "تعذر تعديل العملية المالية.");
   } finally {
@@ -3056,13 +3168,15 @@ app.post("/api/transactions/:id/attachments", authenticate, requireSection("fina
   }
 });
 
-app.get("/api/transaction-attachments/:id", authenticate, requireSection("finance"), async (req, res) => {
+app.get("/api/transaction-attachments/:id", authenticate, requireSection("finance"), async (req: AuthenticatedRequest, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم المستند غير صالح.");
   try {
     const result = await pool.query(
-      `SELECT file_name, mime_type, file_data FROM transaction_attachments WHERE id = $1`,
-      [id],
+      `SELECT a.file_name, a.mime_type, a.file_data FROM transaction_attachments a
+       JOIN transactions t ON t.id = a.transaction_id
+       WHERE a.id = $1 ${req.member!.role === "partner" ? "AND t.account_id IN (SELECT id FROM finance_accounts WHERE member_id = $2 AND kind = 'partner')" : ""}`,
+      req.member!.role === "partner" ? [id, req.member!.clerk_user_id] : [id],
     );
     if (!result.rowCount) return fail(res, 404, "المستند غير موجود.");
     const attachment = result.rows[0];
@@ -3432,12 +3546,13 @@ app.post("/api/members", authenticate, requireAdmin, async (req: AuthenticatedRe
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
   const roleName = typeof req.body?.roleName === "string" ? req.body.roleName.trim() : "";
   const role = typeof req.body?.role === "string" ? req.body.role : "viewer";
-  const roles = new Set(["finance", "field", "supervisor", "viewer"]);
+  const roles = new Set(["finance", "field", "supervisor", "viewer", "partner"]);
   if (name.length < 2 || name.length > 100 || !roles.has(role) || roleName.length > 80) {
     return fail(res, 400, "أدخل اسماً صحيحاً واختر نوع حساب صالحاً.");
   }
   const labels: Record<string, string> = {
     finance: "الإدارة المالية",
+    partner: "شريك",
     field: "رئيس أشغال",
     supervisor: "مشرف",
     viewer: "عضو",
@@ -3778,6 +3893,7 @@ async function startServer() {
     await pool.query("CREATE SCHEMA IF NOT EXISTS bennini");
     const schema = readFileSync(path.resolve(process.cwd(), "server/schema.sql"), "utf8");
     await pool.query(schema);
+    await prepareFinanceSchema(pool);
     await pool.query(`
       UPDATE members
       SET role_name = 'Superadmin', updated_at = NOW()

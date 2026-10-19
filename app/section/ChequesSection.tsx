@@ -13,6 +13,7 @@ import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextIn
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
+import EntityPicker, { type FinanceEntity } from "../components/EntityPicker";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDzd } from "../../lib/theme";
@@ -26,6 +27,10 @@ type Cheque = {
   invoice_number: string;
   invoice_id: number | string | null;
   invoice_supplier_name?: string | null;
+  customer_id?: number | null;
+  customer_name?: string | null;
+  invoice_ids?: number[];
+  invoices?: Array<{ id: number; invoice_number: string; amount: number | string }>;
   amount: number | string;
   beneficiary: string;
   bank: string;
@@ -38,11 +43,13 @@ type Cheque = {
   attachments: Attachment[];
 };
 type PurchaseInvoice = {
-  id: number | string;
+  id: number;
   invoice_number: string;
-  invoice_date: string | null;
-  supplier_name: string;
-  purchase_count: number;
+  invoice_date?: string | null;
+  amount: number | string;
+  paid?: boolean;
+  cheque_id?: number | null;
+  cheque_number?: string | null;
 };
 type DueAlert = {
   id: number;
@@ -117,7 +124,10 @@ export default function ChequesSection() {
   const [member, setMember] = useState<Member | null>(null);
   const [items, setItems] = useState<Cheque[]>([]);
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([]);
-  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [customer, setCustomer] = useState<FinanceEntity | null>(null);
+  const [selectedInvoices, setSelectedInvoices] = useState<PurchaseInvoice[]>([]);
+  const [invoiceQuery, setInvoiceQuery] = useState("");
+  const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
   const [dueAlerts, setDueAlerts] = useState<DueAlert[]>([]);
   const [dueAlertCount, setDueAlertCount] = useState(0);
   const [total, setTotal] = useState(0);
@@ -153,12 +163,12 @@ export default function ChequesSection() {
     return params.toString();
   }, [dateFrom, dateTo, focusId, page, search, statusFilter]);
   const matchingInvoices = useMemo(() => {
-    const needle = invoiceSearch.trim().toLocaleLowerCase();
-    if (!needle) return [];
+    const needle = invoiceQuery.trim().toLocaleLowerCase();
     return invoices.filter((invoice) =>
-      `${invoice.invoice_number} ${invoice.supplier_name}`.toLocaleLowerCase().includes(needle),
-    ).slice(0, 6);
-  }, [invoiceSearch, invoices]);
+      `${invoice.invoice_number} ${invoice.invoice_date ?? ""}`.toLocaleLowerCase().includes(needle) &&
+      !selectedInvoices.some((selected) => selected.id === invoice.id),
+    ).slice(0, 8);
+  }, [invoiceQuery, invoices, selectedInvoices]);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
@@ -198,19 +208,17 @@ export default function ChequesSection() {
   }, [searchInput]);
 
   useEffect(() => {
-    const query = invoiceSearch.trim();
-    if (!formOpen || !isSignedIn || draft.invoiceId || !query) {
-      setInvoices([]);
-      return;
-    }
+    if (!formOpen || !customer) { setInvoices([]); return; }
+    let active = true;
+    const params = new URLSearchParams({ customerId: String(customer.id) });
+    if (editingCheque) params.set("chequeId", String(editingCheque.id));
     const timer = setTimeout(() => {
-      const params = new URLSearchParams({ q: query });
-      void apiRequest<{ items: PurchaseInvoice[] }>(`/purchase-invoices?${params}`, () => getToken())
-        .then((result) => setInvoices(result.items))
-        .catch((caught) => setError(caught instanceof Error ? caught.message : "تعذر البحث عن الفواتير."));
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [draft.invoiceId, formOpen, getToken, invoiceSearch, isSignedIn]);
+      void apiRequest<{ items: PurchaseInvoice[] }>(`/finance/customer-invoices?${params}`, getToken)
+        .then((result) => { if (active) setInvoices(result.items); })
+        .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "تعذر تحميل فواتير الزبون."); });
+    }, 120);
+    return () => { active = false; clearTimeout(timer); };
+  }, [customer, editingCheque, formOpen, getToken]);
 
   const setField = <K extends keyof Draft>(key: K, value: Draft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -221,7 +229,7 @@ export default function ChequesSection() {
     setEditingCheque(null);
     setPickedDocs([]);
     setDraft(emptyDraft());
-    setInvoiceSearch("");
+    setCustomer(null); setSelectedInvoices([]); setInvoiceQuery(""); setInvoices([]); setInvoicePickerOpen(false);
   };
 
   const beginCreate = () => {
@@ -229,7 +237,7 @@ export default function ChequesSection() {
     setEditingCheque(null);
     setPickedDocs([]);
     setDraft(emptyDraft());
-    setInvoiceSearch("");
+    setCustomer(null); setSelectedInvoices([]); setInvoiceQuery(""); setInvoices([]); setInvoicePickerOpen(false);
     setFormOpen(true);
   };
 
@@ -249,9 +257,10 @@ export default function ChequesSection() {
       status: item.status,
       notes: item.notes || "",
     });
-    setInvoiceSearch(item.invoice_id != null && item.invoice_supplier_name
-      ? `${item.invoice_number} — ${item.invoice_supplier_name}`
-      : item.invoice_number || "");
+    setCustomer(item.customer_id && item.customer_name ? { id: item.customer_id, name: item.customer_name } : null);
+    setSelectedInvoices(item.invoices ?? []);
+    setInvoicePickerOpen(false);
+    setInvoiceQuery("");
     setFormOpen(true);
   };
 
@@ -323,7 +332,9 @@ export default function ChequesSection() {
     if (!draft.chequeNumber.trim() || !draft.beneficiary.trim() ||
         !Number.isFinite(Number(draft.amount)) || Number(draft.amount) <= 0 ||
         !/^\d{4}-\d{2}-\d{2}$/.test(draft.issueDate) ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(draft.dueDate) || draft.dueDate < draft.issueDate) {
+        !/^\d{4}-\d{2}-\d{2}$/.test(draft.dueDate) || draft.dueDate < draft.issueDate ||
+        (!editingCheque && (!customer || selectedInvoices.length === 0)) ||
+        (customer && selectedInvoices.length === 0)) {
       setError("أكمل رقم الشيك والمبلغ والمستفيد، وتحقق من أن تاريخ الاستحقاق لا يسبق الإصدار.");
       return;
     }
@@ -334,8 +345,9 @@ export default function ChequesSection() {
       const payload = JSON.stringify({
         ...draft,
         chequeNumber: draft.chequeNumber.trim(),
-        invoiceId: draft.invoiceId ? Number(draft.invoiceId) : null,
-        invoiceNumber: draft.invoiceNumber.trim(),
+        invoiceId: customer ? null : draft.invoiceId ? Number(draft.invoiceId) : null,
+        invoiceNumber: customer ? undefined : draft.invoiceNumber.trim(),
+        ...(customer || !editingCheque ? { customerId: customer?.id ?? null, invoiceIds: selectedInvoices.map((invoice) => invoice.id) } : {}),
         amount: Number(draft.amount),
         beneficiary: draft.beneficiary.trim(),
         bank: draft.bank.trim(),
@@ -523,62 +535,62 @@ export default function ChequesSection() {
             </View>
             <View style={styles.formGrid}>
               <Field label="رقم الشيك *" value={draft.chequeNumber} onChange={(value) => setField("chequeNumber", value)} placeholder="رقم الشيك" />
-              <Field
-                label="فاتورة المشتريات (اختياري)"
-                value={invoiceSearch}
-                onChange={(value) => {
-                  setInvoiceSearch(value);
-                  setDraft((current) => ({ ...current, invoiceId: "", invoiceNumber: value }));
-                }}
-                placeholder="ابحث برقم الفاتورة أو اسم المورد"
-              />
               <Field label="المبلغ (دج) *" value={draft.amount} onChange={(value) => setField("amount", value)} placeholder="0" numeric />
               <Field label="المستفيد *" value={draft.beneficiary} onChange={(value) => setField("beneficiary", value)} placeholder="اسم المستفيد" />
               <Field label="البنك" value={draft.bank} onChange={(value) => setField("bank", value)} placeholder="اسم البنك" />
               <Field label="تاريخ الإصدار *" value={draft.issueDate} onChange={(value) => setField("issueDate", value)} placeholder="YYYY-MM-DD" />
               <Field label="تاريخ الاستحقاق *" value={draft.dueDate} onChange={(value) => setField("dueDate", value)} placeholder="YYYY-MM-DD" />
             </View>
-            {draft.invoiceId ? (
-              <Text style={{ color: "#0F766E", fontSize: 11, fontWeight: "800", textAlign: "right" }}>
-                الشيك مرتبط فعلياً بفاتورة {invoiceSearch}
-              </Text>
-            ) : (
-              <View style={{ width: "100%", gap: 6 }}>
-                {matchingInvoices.map((invoice) => (
-                  <Pressable
-                    key={String(invoice.id)}
-                    accessibilityRole="button"
-                    onPress={() => {
-                      setDraft((current) => ({
-                        ...current,
-                        invoiceId: String(invoice.id),
-                        invoiceNumber: invoice.invoice_number,
-                      }));
-                      setInvoiceSearch(`${invoice.invoice_number} — ${invoice.supplier_name}`);
-                    }}
-                    style={{
-                      minHeight: 42, borderWidth: 1, borderColor: colors.border, borderRadius: 9,
-                      backgroundColor: "#F7F9FC", paddingHorizontal: 10, paddingVertical: 7,
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Text style={{ color: colors.navy, fontSize: 11, fontWeight: "800", textAlign: "right" }}>
-                      فاتورة {invoice.invoice_number} — {invoice.supplier_name}
-                    </Text>
-                    {invoice.invoice_date ? (
-                      <Text style={{ color: colors.muted, fontSize: 9, textAlign: "right", marginTop: 3 }}>
-                        {dateLabel(invoice.invoice_date)}
-                      </Text>
-                    ) : null}
+            <View style={styles.invoiceChooser}>
+              <EntityPicker
+                kind="customer"
+                value={customer}
+                label="الزبون صاحب الفاتورة *"
+                onChange={(next) => {
+                  setCustomer(next);
+                  setSelectedInvoices([]);
+                  setInvoices([]);
+                  setInvoiceQuery("");
+                  setInvoicePickerOpen(!!next);
+                  setDraft((current) => ({ ...current, invoiceId: "", invoiceNumber: "" }));
+                }}
+              />
+              {customer ? (
+                <>
+                  {selectedInvoices.length ? selectedInvoices.map((invoice) => (
+                    <View key={invoice.id} style={styles.invoiceRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.invoiceText}>فاتورة {invoice.invoice_number} · {formatDzd(Number(invoice.amount))}</Text>
+                        <Text style={styles.invoiceMeta}>{dateLabel(invoice.invoice_date || "")}</Text>
+                      </View>
+                      <Pressable accessibilityRole="button" accessibilityLabel={`إزالة فاتورة ${invoice.invoice_number}`} onPress={() => setSelectedInvoices((current) => current.filter((item) => item.id !== invoice.id))}>
+                        <X size={16} color={colors.red} />
+                      </Pressable>
+                    </View>
+                  )) : null}
+                  <Pressable onPress={() => { setInvoicePickerOpen(true); setInvoiceQuery(""); }} style={styles.addInvoiceButton}>
+                    <Plus size={14} color={colors.blue} /><Text style={styles.invoiceButtonText}>إضافة فاتورة</Text>
                   </Pressable>
-                ))}
-                {invoiceSearch.trim() && matchingInvoices.length === 0 ? (
-                  <Text style={{ color: colors.muted, fontSize: 10, textAlign: "right" }}>
-                    لا توجد فاتورة مطابقة؛ سيُحفظ الرقم دون ربط حتى تُسجّل الفاتورة.
-                  </Text>
-                ) : null}
-              </View>
-            )}
+                  {invoicePickerOpen ? <Field label="ابحث في فواتير الزبون" value={invoiceQuery} onChange={setInvoiceQuery} placeholder="رقم الفاتورة أو تاريخها" /> : null}
+                  {invoicePickerOpen ? matchingInvoices.map((invoice) => (
+                    <Pressable key={invoice.id} onPress={() => {
+                      setSelectedInvoices((current) => current.some((item) => item.id === invoice.id) ? current : [...current, invoice]);
+                      setInvoiceQuery("");
+                      setInvoicePickerOpen(false);
+                    }} style={styles.invoiceOption}>
+                      <Text style={styles.invoiceText}>فاتورة {invoice.invoice_number} · {formatDzd(Number(invoice.amount))}</Text>
+                      <Text style={styles.invoiceMeta}>{dateLabel(invoice.invoice_date || "")} · {invoice.cheque_id ? `شيك ${invoice.cheque_number || invoice.cheque_id}` : "غير مرتبطة بشيك"}</Text>
+                    </Pressable>
+                  )) : null}
+                  {invoicePickerOpen && !loading && invoices.length === 0 ? <Text style={styles.invoiceMeta}>لا توجد فواتير غير مسددة لهذا الزبون.</Text> : null}
+                </>
+              ) : editingCheque && !editingCheque.customer_id ? (
+                <Text style={styles.invoiceMeta}>شيك قديم دون ربط زبون؛ اترك الاختيار فارغًا للحفاظ على رقم الفاتورة القديم، أو اختر زبونًا لربطه بفواتير مسجلة.</Text>
+              ) : null}
+              {editingCheque && selectedInvoices.length === 0 && !customer ? (
+                <Text style={styles.invoiceMeta}>الفاتورة الحالية: {editingCheque.invoice_number || "غير محددة"} (رابط قديم محفوظ)</Text>
+              ) : null}
+            </View>
             <Text style={styles.fieldLabel}>حالة الشيك</Text>
             <View style={styles.choiceRow}>
               {statusOptions.filter((option) => option.value).map((option) => (
@@ -723,7 +735,13 @@ export default function ChequesSection() {
                   </View>
                 </View>
                 <View style={styles.detailsGrid}>
-                  <Detail label="رقم الفاتورة" value={item.invoice_number || "—"} />
+                  <View style={styles.detailCell}>
+                    <Text style={styles.detailLabel}>الزبون</Text>
+                    <Text onPress={() => item.customer_id && router.push(`/section/finance?area=customers&customerId=${item.customer_id}`)} style={[styles.detailValue, item.customer_id ? { color: colors.blue, fontWeight: "800" } : null]}>
+                      {item.customer_name || item.invoice_supplier_name || "غير مربوط"}
+                    </Text>
+                  </View>
+                  <Detail label="الفواتير المرتبطة" value={item.invoices?.length ? item.invoices.map((invoice) => invoice.invoice_number).join("، ") : item.invoice_number || "—"} />
                   <Detail label="تاريخ الإصدار" value={dateLabel(item.issue_date)} />
                   <Detail label="تاريخ الاستحقاق" value={dateLabel(item.due_date)} highlight={isDueSoon} />
                   {isDueSoon ? (
@@ -863,6 +881,13 @@ function ActionButton({ label, onPress, icon, danger }: {
 const styles = {
   screen: { flex: 1, backgroundColor: colors.background, direction: "rtl" as const },
   page: { width: "100%" as const, maxWidth: 1100, alignSelf: "center" as const, padding: 20, paddingBottom: 36, gap: 16 },
+  invoiceChooser: { gap: 8, padding: 12, borderRadius: 11, backgroundColor: "#F6F8FB", borderWidth: 1, borderColor: colors.border },
+  invoiceRow: { minHeight: 46, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10, paddingHorizontal: 10, borderRadius: 9, backgroundColor: "#E9F4ED" },
+  invoiceOption: { minHeight: 43, justifyContent: "center" as const, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFFFFF" },
+  invoiceText: { color: colors.navy, textAlign: "right" as const, fontSize: 11, fontWeight: "800" as const },
+  invoiceMeta: { color: colors.muted, textAlign: "right" as const, fontSize: 9, lineHeight: 15 },
+  addInvoiceButton: { minHeight: 35, alignSelf: "flex-start" as const, flexDirection: "row" as const, alignItems: "center" as const, gap: 5, paddingHorizontal: 10, borderRadius: 8, backgroundColor: "#EAF1FF" },
+  invoiceButtonText: { color: colors.blue, fontSize: 10, fontWeight: "800" as const },
   intro: { marginBottom: 1 },
   headingRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 9 },
   headingIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#EAF1FA", alignItems: "center" as const, justifyContent: "center" as const },

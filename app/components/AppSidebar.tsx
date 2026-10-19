@@ -211,5 +211,5 @@ const styles = {
 };
 
 function roleLabel(role: string) {
-  return ({ admin: "مدير النظام", finance: "الإدارة المالية", field: "رئيس أشغال", supervisor: "مشرف", viewer: "عضو" } as Record<string, string>)[role] ?? "عضو";
+  return ({ admin: "مدير النظام", finance: "الإدارة المالية", field: "رئيس أشغال", supervisor: "مشرف", partner: "شريك", viewer: "عضو" } as Record<string, string>)[role] ?? "عضو";
 }

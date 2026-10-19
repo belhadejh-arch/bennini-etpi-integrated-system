@@ -23,6 +23,9 @@ export function hasPermission(
   action: PermissionAction,
 ): boolean {
   if (!member) return false;
+  // A partner's account ownership is enforced again by the API. Saved permissions
+  // can never grant a partner access to other sections or administrative writes.
+  if (member.role === "partner") return action === "view" && (section === "dashboard" || section === "finance");
   if (member.role === "admin") return true;
   if (section === "dashboard") return action === "view";
   if (section === "finance" && action === "view" && member.capabilities?.viewFinancialData === false) return false;

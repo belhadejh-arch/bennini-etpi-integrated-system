@@ -337,7 +337,7 @@ function Centered({ children, compact }: { children: React.ReactNode; compact?: 
 }
 
 function roleLabel(role?: string) {
-  return ({ admin: "مدير النظام", finance: "الإدارة المالية", field: "رئيس أشغال", supervisor: "مشرف", viewer: "عضو" } as Record<string, string>)[role ?? ""] ?? "عضو";
+  return ({ admin: "مدير النظام", finance: "الإدارة المالية", field: "رئيس أشغال", supervisor: "مشرف", partner: "شريك", viewer: "عضو" } as Record<string, string>)[role ?? ""] ?? "عضو";
 }
 
 function formatDate(value: string) {

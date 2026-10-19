@@ -2,7 +2,7 @@ import { useAuth, useUser } from "../../lib/auth";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowRight, ChevronLeft, ChevronRight, Eye, FilePlus2, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -13,6 +13,8 @@ import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDzd } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
+import FinanceAccounts from "./FinanceAccounts";
+import FinanceMachinery from "./FinanceMachinery";
 
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type Transaction = {
@@ -42,6 +44,8 @@ function localDate() {
 
 export default function FinanceSection() {
   const router = useRouter();
+  const routeParams = useLocalSearchParams<{ area?: string | string[] }>();
+  const routeArea = Array.isArray(routeParams.area) ? routeParams.area[0] : routeParams.area;
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
@@ -79,7 +83,7 @@ export default function FinanceSection() {
   });
 
   const isAdmin = member?.role === "admin";
-  const canAccess = hasPermission(member, "finance", "view");
+  const canAccess = member?.role === "partner" || hasPermission(member, "finance", "view");
   const canCreate = hasPermission(member, "finance", "create");
   const canEdit = hasPermission(member, "finance", "edit");
   const canManage = canCreate || canEdit;
@@ -104,11 +108,15 @@ export default function FinanceSection() {
     setError("");
     try {
       const token = () => getToken();
-      const memberRequest = apiRequest<{ member: Member }>("/me", token);
-      const transactionsRequest = apiRequest<TransactionResult>(`/transactions?${queryString}`, token);
-      const me = await memberRequest;
+      const me = await apiRequest<{ member: Member }>("/me", token);
       setMember(me.member);
-      const result = await transactionsRequest;
+      if (me.member.role === "partner") {
+        setTransactions([]);
+        setTotal(0);
+        setCashBalance(0);
+        return;
+      }
+      const result = await apiRequest<TransactionResult>(`/transactions?scope=other&${queryString}`, token);
       setTransactions(result.items);
       setTotal(result.total);
       setCashBalance(result.cashBalance);
@@ -300,6 +308,12 @@ export default function FinanceSection() {
     );
   }
 
+  const area = member?.role === "partner" ? "partners" : routeArea || "transactions";
+  const navigateArea = (next: string) => router.setParams({ area: next === "transactions" ? undefined : next });
+  if (member && area === "customers" && member.role !== "partner") return <FinanceAccounts key="customers" kind="customer" member={member} onNavigate={navigateArea} />;
+  if (member && area === "partners") return <FinanceAccounts key="partners" kind="partner" member={member} onNavigate={navigateArea} />;
+  if (member && area === "machinery" && member.role !== "partner") return <FinanceMachinery member={member} onNavigate={navigateArea} />;
+
   return (
     <View style={styles.screen}>
       <AppHeader
@@ -335,6 +349,21 @@ export default function FinanceSection() {
             </Pressable>
           ) : null}
         </View>
+
+        {member?.role !== "partner" ? (
+          <View style={styles.areaNav}>
+            {[
+              ["transactions", "العمليات الأخرى"],
+              ["customers", "الزبائن"],
+              ["partners", "الشركاء"],
+              ["machinery", "الآليات"],
+            ].map(([value, label]) => (
+              <Pressable key={value} onPress={() => navigateArea(value)} style={[styles.areaChip, area === value && styles.areaChipActive]}>
+                <Text style={[styles.areaChipText, area === value && styles.areaChipTextActive]}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
 
         {error ? (
           <View style={styles.error}>
@@ -589,6 +618,11 @@ const styles = {
   intro: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 12 },
   title: { color: colors.navy, fontWeight: "900" as const, fontSize: 23, textAlign: "right" as const },
   subtitle: { color: colors.muted, fontSize: 12, marginTop: 5, textAlign: "right" as const },
+  areaNav: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7 },
+  areaChip: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 20, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border },
+  areaChipActive: { backgroundColor: colors.navy, borderColor: colors.navy },
+  areaChipText: { color: colors.blue, fontSize: 11, fontWeight: "800" as const },
+  areaChipTextActive: { color: "#FFFFFF" },
   addButton: { minHeight: 46, borderRadius: 12, paddingHorizontal: 16, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
   addButtonText: { color: colors.navy, fontWeight: "800" as const, fontSize: 13 },
   summary: { padding: 21, borderRadius: 17, backgroundColor: colors.navy, gap: 8, borderWidth: 1, borderColor: "#17365D" },

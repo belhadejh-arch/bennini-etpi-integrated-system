@@ -48,7 +48,7 @@ test("aggregation and salary-alert queries are valid in PostgreSQL (read-only)",
     const notificationSql = source.match(/WITH current_month AS \([\s\S]*?LIMIT 30\n\s*`/);
     assert.ok(notificationSql);
     await client.query(`EXPLAIN ${notificationSql[0].replace(/`\s*$/, "")}`);
-    const machineryRoute = source.slice(source.indexOf('app.get("/api/machinery",'));
+    const machineryRoute = source.slice(source.indexOf("async function loadMachineryFinancialSummary("));
     const aggregationSql = machineryRoute.match(/SELECT m\.id, m\.code[\s\S]*?ORDER BY m\.code, m\.id/);
     assert.ok(aggregationSql);
     await client.query(`EXPLAIN ${aggregationSql[0]}`);
