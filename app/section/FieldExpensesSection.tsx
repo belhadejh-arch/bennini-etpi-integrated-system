@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
+import MachineryPicker, { type MachineryOption } from "../components/MachineryPicker";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
@@ -21,6 +22,9 @@ type ReviewStatus = "pending" | "reviewed";
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type FieldExpense = {
   id: number;
+  machinery_id: number | null;
+  machinery_name: string | null;
+  machinery_code: string | null;
   category: string;
   amount: number | string;
   site_name: string;
@@ -38,6 +42,7 @@ type FieldExpense = {
 };
 type Result = { items: FieldExpense[]; pendingCount: number };
 type Draft = {
+  machineryId: string;
   category: string;
   amount: string;
   siteName: string;
@@ -50,6 +55,7 @@ type ApiError = Error & { status?: number; body?: { pending?: boolean } };
 
 const quickCategories = ["مازوت", "قطع غيار", "مشتريات", "إصلاح آلية", "مصاريف أخرى"];
 const emptyDraft = (): Draft => ({
+  machineryId: "",
   category: "مازوت",
   amount: "",
   siteName: "",
@@ -78,6 +84,7 @@ export default function FieldExpensesSection() {
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [items, setItems] = useState<FieldExpense[]>([]);
+  const [machineryOptions, setMachineryOptions] = useState<MachineryOption[]>([]);
   const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -103,7 +110,7 @@ export default function FieldExpensesSection() {
       (categoryFilter === "all" || item.category === categoryFilter) &&
       (!dateFrom || item.created_at.slice(0, 10) >= dateFrom) &&
       (!dateTo || item.created_at.slice(0, 10) <= dateTo) &&
-      (!search.trim() || `${item.id} ${item.category} ${item.site_name} ${item.created_by_name} ${item.details} ${item.notes} ${item.review_status}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))),
+       (!search.trim() || `${item.id} ${item.category} ${item.site_name} ${item.machinery_name ?? ""} ${item.machinery_code ?? ""} ${item.created_by_name} ${item.details} ${item.notes} ${item.review_status}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))),
     [categoryFilter, dateFrom, dateTo, items, search, statusFilter],
   );
 
@@ -113,12 +120,14 @@ export default function FieldExpensesSection() {
     setError("");
     try {
       const token = () => getToken();
-      const [me, result] = await Promise.all([
+      const [me, result, machines] = await Promise.all([
         apiRequest<{ member: Member }>("/me", token),
         apiRequest<Result>(`/field-expenses${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token),
+        apiRequest<{ items: MachineryOption[] }>("/machinery/options", token),
       ]);
       setMember(me.member);
       setItems(result.items);
+      setMachineryOptions(machines.items);
       setPendingCount(result.pendingCount);
     } catch (caught) {
       const issue = caught as ApiError;
@@ -183,6 +192,11 @@ export default function FieldExpensesSection() {
   const submitExpense = async () => {
     const amount = Number(draft.amount);
     const liters = draft.fuelLiters.trim() ? Number(draft.fuelLiters) : undefined;
+    const requiresMachinery = ["مازوت", "قطع غيار", "إصلاح آلية"].includes(draft.category);
+    if (requiresMachinery && !draft.machineryId) {
+      setError("اختر الآلة المرتبطة بالمازوت أو قطع الغيار أو الإصلاح.");
+      return;
+    }
     if (!draft.category.trim() || !draft.siteName.trim() || !Number.isFinite(amount) || amount <= 0 ||
         (draft.category === "مازوت" && (!liters || !Number.isFinite(liters) || liters <= 0)) ||
         (liters !== undefined && (!Number.isFinite(liters) || liters <= 0))) {
@@ -198,6 +212,7 @@ export default function FieldExpensesSection() {
         method: "POST",
         body: JSON.stringify({
           category: draft.category,
+          machineryId: draft.machineryId ? Number(draft.machineryId) : null,
           amount,
           siteName: draft.siteName.trim(),
           details: draft.details.trim(),
@@ -361,6 +376,7 @@ export default function FieldExpensesSection() {
                 <Pressable key={category} onPress={() => setDraft((current) => ({
                   ...current,
                   category,
+                  machineryId: ["مازوت", "قطع غيار", "إصلاح آلية"].includes(category) ? current.machineryId : "",
                   fuelLiters: category === "مازوت" ? current.fuelLiters : "",
                 }))}
                   style={[styles.categoryChip, draft.category === category && styles.categoryChipSelected]}>
@@ -370,6 +386,15 @@ export default function FieldExpensesSection() {
               ))}
             </View>
 
+            {["مازوت", "قطع غيار", "إصلاح آلية"].includes(draft.category) ? (
+              <MachineryPicker
+                items={machineryOptions}
+                value={draft.machineryId}
+                label="الآلة المرتبطة بالعملية *"
+                emptyLabel="ابحث عن الآلة بالاسم أو الرقم"
+                onChange={(id) => setField("machineryId", id)}
+              />
+            ) : null}
             <View style={styles.formGrid}>
               <Field label="المبلغ (دج) *" value={draft.amount} onChange={(value) => setField("amount", value)} placeholder="مثال: 50000" numeric />
               {draft.category === "مازوت" ? (
@@ -528,6 +553,9 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, can
             {isFuel ? <View style={styles.litersBadge}><Fuel size={12} color={colors.amber} /><Text style={styles.litersText}>{expense.fuel_liters} لتر</Text></View> : null}
           </View>
           <Text style={styles.expenseSite}>{expense.site_name}</Text>
+          {expense.machinery_name ? (
+            <Text style={styles.expenseMachine}>الآلة: {expense.machinery_name}{expense.machinery_code ? ` · ${expense.machinery_code}` : ""}</Text>
+          ) : null}
         </View>
         <View style={styles.amountColumn}>
           <Text style={styles.expenseAmount}>{formatDzd(localAmount(expense.amount))}</Text>
@@ -645,6 +673,7 @@ const styles = {
   litersBadge: { minHeight: 24, borderRadius: 8, backgroundColor: colors.amberSoft, paddingHorizontal: 7, flexDirection: "row" as const, alignItems: "center" as const, gap: 4 },
   litersText: { color: colors.amber, fontSize: 9, fontWeight: "800" as const },
   expenseSite: { color: colors.muted, fontSize: 10, textAlign: "right" as const, marginTop: 4 },
+  expenseMachine: { color: colors.blue, fontSize: 10, fontWeight: "800" as const, textAlign: "right" as const, marginTop: 4 },
   amountColumn: { alignItems: "flex-start" as const, gap: 5 },
   expenseAmount: { color: colors.blue, fontSize: 13, fontWeight: "900" as const },
   reviewBadge: { borderRadius: 7, paddingHorizontal: 7, paddingVertical: 4 },

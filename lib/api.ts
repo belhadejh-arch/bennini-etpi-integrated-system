@@ -60,12 +60,13 @@ export type Member = {
 
 export type AppNotification = {
   id: string;
-  type: "cheque_due" | "rental_ending" | "new_expense" | "field_operation" | "field_review" | "low_inventory" | "low_spare_part";
+  type: "cheque_due" | "rental_ending" | "new_expense" | "field_operation" | "field_review" | "low_inventory" | "low_spare_part" | "driver_month_anniversary";
   title: string;
   message: string;
   section: SectionId;
   view?: string;
   recordId: number;
+  machineId?: number;
   createdAt: string;
   read: boolean;
 };

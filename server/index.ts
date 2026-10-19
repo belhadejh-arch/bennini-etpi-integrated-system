@@ -436,7 +436,47 @@ function validIsoDate(value: unknown): value is string {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
+type DriverAssignmentCostRow = {
+  machinery_id: number | string;
+  monthly_salary: number | string;
+  start_date: string;
+  end_date: string | null;
+};
+
+function driverCostsByMachinery(rows: DriverAssignmentCostRow[], today = new Date().toISOString().slice(0, 10)) {
+  const totals = new Map<number, number>();
+  const todayMs = Date.parse(`${today}T00:00:00.000Z`);
+  for (const row of rows) {
+    const startMs = Date.parse(`${String(row.start_date).slice(0, 10)}T00:00:00.000Z`);
+    const endValue = row.end_date ? String(row.end_date).slice(0, 10) : today;
+    const endMs = Math.min(Date.parse(`${endValue}T00:00:00.000Z`), todayMs);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) continue;
+    let cursor = new Date(Date.UTC(new Date(startMs).getUTCFullYear(), new Date(startMs).getUTCMonth(), 1));
+    let cost = 0;
+    while (cursor.getTime() <= endMs) {
+      const year = cursor.getUTCFullYear();
+      const month = cursor.getUTCMonth();
+      const monthStart = Date.UTC(year, month, 1);
+      const nextMonth = Date.UTC(year, month + 1, 1);
+      const monthEnd = nextMonth - 86400000;
+      const coveredStart = Math.max(startMs, monthStart);
+      const coveredEnd = Math.min(endMs, monthEnd);
+      if (coveredEnd >= coveredStart) {
+        const daysInMonth = (nextMonth - monthStart) / 86400000;
+        const daysCovered = Math.floor((coveredEnd - coveredStart) / 86400000) + 1;
+        cost += Number(row.monthly_salary) * daysCovered / daysInMonth;
+      }
+      cursor = new Date(nextMonth);
+    }
+    const machineId = Number(row.machinery_id);
+    totals.set(machineId, (totals.get(machineId) ?? 0) + cost);
+  }
+  for (const [id, total] of totals) totals.set(id, Math.round(total * 100) / 100);
+  return totals;
+}
+
 type RentalInput = {
+  machineryId: number | null;
   equipment: string;
   clientOrOwner: string;
   startDate: string;
@@ -451,6 +491,8 @@ type RentalInput = {
 };
 
 function validRental(body: Record<string, unknown>, existing?: Partial<RentalInput>): RentalInput | null {
+  const rawMachineryId = body.machineryId === undefined ? existing?.machineryId : body.machineryId;
+  const machineryId = rawMachineryId == null || rawMachineryId === "" ? null : Number(rawMachineryId);
   const equipment = String(body.equipment ?? existing?.equipment ?? "").trim();
   const clientOrOwner = String(body.clientOrOwner ?? existing?.clientOrOwner ?? "").trim();
   const startDate = body.startDate ?? existing?.startDate;
@@ -460,7 +502,8 @@ function validRental(body: Record<string, unknown>, existing?: Partial<RentalInp
   const paidAmount = Number(body.paidAmount ?? existing?.paidAmount ?? 0);
   const status = body.status ?? existing?.status ?? "active";
   const notes = String(body.notes ?? existing?.notes ?? "").trim();
-  if (!equipment || equipment.length > 200 || !clientOrOwner || clientOrOwner.length > 200 ||
+  if ((machineryId !== null && (!Number.isSafeInteger(machineryId) || machineryId <= 0)) ||
+      !equipment || equipment.length > 200 || !clientOrOwner || clientOrOwner.length > 200 ||
       !validIsoDate(startDate) || !validIsoDate(endDate) || endDate < startDate ||
       !["daily", "monthly"].includes(String(ratePeriod)) ||
       !Number.isFinite(rentalRate) || rentalRate < 0 ||
@@ -473,7 +516,7 @@ function validRental(body: Record<string, unknown>, existing?: Partial<RentalInp
   const totalAmount = Math.round(duration * rentalRate * 100) / 100;
   if (paidAmount > totalAmount) return null;
   return {
-    equipment, clientOrOwner, startDate, endDate,
+    machineryId, equipment, clientOrOwner, startDate, endDate,
     ratePeriod: ratePeriod as RentalInput["ratePeriod"],
     rentalRate, duration, totalAmount, paidAmount,
     status: status as RentalInput["status"], notes,
@@ -486,9 +529,10 @@ function ensureRentalSchema() {
   return cacheSchemaSetup(
     () => rentalSchemaPromise,
     (value) => { rentalSchemaPromise = value; },
-    () => pool.query(`
+    () => ensureMachinerySchema().then(() => pool.query(`
     CREATE TABLE IF NOT EXISTS rentals (
       id BIGSERIAL PRIMARY KEY,
+      machinery_id BIGINT REFERENCES machinery(id) ON DELETE RESTRICT,
       equipment TEXT NOT NULL,
       client_or_owner TEXT NOT NULL,
       start_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -500,13 +544,24 @@ function ensureRentalSchema() {
       rental_rate NUMERIC(16, 2) NOT NULL DEFAULT 0,
       duration INTEGER NOT NULL DEFAULT 1,
       notes TEXT NOT NULL DEFAULT '',
+      created_by_id TEXT REFERENCES members(clerk_user_id),
+      created_by_name TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE rentals
+      ADD COLUMN IF NOT EXISTS machinery_id BIGINT REFERENCES machinery(id) ON DELETE RESTRICT,
       ADD COLUMN IF NOT EXISTS rate_period TEXT NOT NULL DEFAULT 'daily',
       ADD COLUMN IF NOT EXISTS rental_rate NUMERIC(16, 2) NOT NULL DEFAULT 0,
       ADD COLUMN IF NOT EXISTS duration INTEGER NOT NULL DEFAULT 1,
-      ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+      ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '',
+      ADD COLUMN IF NOT EXISTS created_by_id TEXT REFERENCES members(clerk_user_id),
+      ADD COLUMN IF NOT EXISTS created_by_name TEXT;
+    UPDATE rentals r SET machinery_id = m.id
+      FROM machinery m
+      WHERE r.machinery_id IS NULL
+        AND LOWER(TRIM(r.equipment)) = LOWER(TRIM(m.name))
+        AND (SELECT COUNT(*) FROM machinery matches
+             WHERE LOWER(TRIM(matches.name)) = LOWER(TRIM(r.equipment))) = 1;
     CREATE TABLE IF NOT EXISTS rental_attachments (
       id BIGSERIAL PRIMARY KEY,
       rental_id BIGINT NOT NULL REFERENCES rentals(id) ON DELETE CASCADE,
@@ -519,8 +574,9 @@ function ensureRentalSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS rentals_end_date_idx ON rentals (end_date);
+    CREATE INDEX IF NOT EXISTS rentals_machinery_idx ON rentals (machinery_id, start_date DESC);
     CREATE INDEX IF NOT EXISTS rental_attachments_rental_idx ON rental_attachments (rental_id, created_at);
-    `),
+    `)),
   );
 }
 
@@ -540,9 +596,10 @@ function ensureFieldExpenseSchema() {
   return cacheSchemaSetup(
     () => fieldExpenseSchemaPromise,
     (value) => { fieldExpenseSchemaPromise = value; },
-    () => pool.query(`
+    () => ensureMachinerySchema().then(() => pool.query(`
       CREATE TABLE IF NOT EXISTS field_expenses (
         id BIGSERIAL PRIMARY KEY,
+        machinery_id BIGINT REFERENCES machinery(id) ON DELETE RESTRICT,
         category TEXT NOT NULL,
         amount NUMERIC(16, 2) NOT NULL CHECK (amount > 0),
         site_name TEXT NOT NULL,
@@ -559,6 +616,7 @@ function ensureFieldExpenseSchema() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       ALTER TABLE field_expenses
+        ADD COLUMN IF NOT EXISTS machinery_id BIGINT REFERENCES machinery(id) ON DELETE RESTRICT,
         ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '',
         ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending',
         ADD COLUMN IF NOT EXISTS reviewed_by_id TEXT REFERENCES members(clerk_user_id),
@@ -577,8 +635,9 @@ function ensureFieldExpenseSchema() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS field_expenses_review_created_idx ON field_expenses (review_status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS field_expenses_machinery_idx ON field_expenses (machinery_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS field_expense_attachments_expense_idx ON field_expense_attachments (field_expense_id, created_at);
-    `),
+    `)),
   );
 }
 
@@ -610,6 +669,18 @@ function ensureMachinerySchema() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       ALTER TABLE machinery ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+      CREATE TABLE IF NOT EXISTS machinery_driver_assignments (
+        id BIGSERIAL PRIMARY KEY,
+        machinery_id BIGINT NOT NULL REFERENCES machinery(id) ON DELETE RESTRICT,
+        driver_name TEXT NOT NULL,
+        monthly_salary NUMERIC(16, 2) NOT NULL CHECK (monthly_salary >= 0),
+        start_date DATE NOT NULL,
+        end_date DATE,
+        created_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+        created_by_name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CHECK (end_date IS NULL OR end_date >= start_date)
+      );
       CREATE TABLE IF NOT EXISTS machinery_spare_parts (
         id BIGSERIAL PRIMARY KEY,
         machinery_id BIGINT NOT NULL REFERENCES machinery(id) ON DELETE RESTRICT,
@@ -639,6 +710,8 @@ function ensureMachinerySchema() {
       );
       CREATE INDEX IF NOT EXISTS machinery_spare_parts_machine_date_idx
         ON machinery_spare_parts (machinery_id, installation_date DESC, created_at DESC);
+      CREATE INDEX IF NOT EXISTS machinery_driver_assignments_machine_date_idx
+        ON machinery_driver_assignments (machinery_id, start_date DESC, id DESC);
       CREATE INDEX IF NOT EXISTS machinery_spare_part_attachments_part_idx
         ON machinery_spare_part_attachments (spare_part_id, created_at);
     `),
@@ -1108,6 +1181,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
   const canSeeRentals = hasPermission(member, "rentals", "view");
   const canSeeInventory = hasPermission(member, "inventory", "view");
   const canSeeMachinery = hasPermission(member, "machinery", "view");
+    const canSeeDriverAlerts = canSeeMachinery && (member.role === "admin" || member.role === "finance");
   const canSeeAllField = member.role === "admin" || member.role === "finance";
 
   try {
@@ -1130,11 +1204,12 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
     }
     if (canSeeRentals) {
       sources.push(pool.query(`
-        SELECT 'rental_ending' AS type, id AS record_id, equipment AS label,
-          end_date::text AS date_value, end_date - CURRENT_DATE AS days_left, created_at
-        FROM rentals
-        WHERE status = 'active' AND end_date <= CURRENT_DATE + 7
-        ORDER BY end_date ASC, id ASC LIMIT 30
+        SELECT 'rental_ending' AS type, r.id AS record_id, COALESCE(m.name, r.equipment) AS label,
+          r.end_date::text AS date_value, r.end_date - CURRENT_DATE AS days_left, r.created_at
+        FROM rentals r
+        LEFT JOIN machinery m ON m.id = r.machinery_id
+        WHERE r.status = 'active' AND r.end_date <= CURRENT_DATE + 7
+        ORDER BY r.end_date ASC, r.id ASC LIMIT 30
       `));
     }
     if (canSeeTransactions) {
@@ -1184,6 +1259,35 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
         ORDER BY stock_quantity ASC, name ASC LIMIT 30
       `));
     }
+    if (canSeeDriverAlerts) {
+      sources.push(pool.query(`
+        WITH current_month AS (
+          SELECT date_trunc('month', CURRENT_DATE)::date AS month_start,
+            (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month - 1 day')::date AS month_end
+        ),
+        anniversaries AS (
+          SELECT a.id, a.machinery_id, a.driver_name, m.name AS machine_name, a.created_at,
+            CASE
+              WHEN (cm.month_start + (LEAST(EXTRACT(DAY FROM a.start_date)::int, EXTRACT(DAY FROM cm.month_end)::int) - 1)) >= CURRENT_DATE
+              THEN cm.month_start + (LEAST(EXTRACT(DAY FROM a.start_date)::int, EXTRACT(DAY FROM cm.month_end)::int) - 1)
+              ELSE (cm.month_start + INTERVAL '1 month')::date +
+                (LEAST(EXTRACT(DAY FROM a.start_date)::int,
+                  EXTRACT(DAY FROM (cm.month_start + INTERVAL '2 month - 1 day'))::int) - 1)
+            END AS due_date
+          FROM machinery_driver_assignments a
+          JOIN machinery m ON m.id = a.machinery_id
+          CROSS JOIN current_month cm
+          WHERE a.end_date IS NULL
+        )
+        SELECT 'driver_month_anniversary' AS type, id AS record_id, machinery_id AS machine_id,
+          driver_name AS label, machine_name AS detail,
+          due_date - CURRENT_DATE AS days_left, created_at
+        FROM anniversaries
+        WHERE due_date - CURRENT_DATE = 5
+        ORDER BY due_date, id
+        LIMIT 30
+      `));
+    }
 
     const groups = await Promise.all(sources);
     const notifications = groups.flatMap((group) => group.rows).map((row) => {
@@ -1229,6 +1333,12 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
           title = `انخفاض مخزون ${String(row.label)}`;
           message = `المتبقي ${Number(row.remaining_quantity)} من أصل ${Number(row.quantity)}.`;
           break;
+        case "driver_month_anniversary":
+          section = "machinery";
+          view = "vehicles";
+          title = `اكتمال شهر عمل السائق ${String(row.label)}`;
+          message = `السائق ${String(row.label)} في آلية ${String(row.detail)} يكمل شهراً من العمل خلال 5 أيام.`;
+          break;
         default:
           section = "machinery";
           view = "spare-parts";
@@ -1243,6 +1353,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
         section,
         view,
         recordId,
+        ...(row.machine_id ? { machineId: Number(row.machine_id) } : {}),
         createdAt: row.created_at,
       };
     }).sort((a, b) => new Date(String(b.createdAt)).getTime() - new Date(String(a.createdAt)).getTime())
@@ -2000,16 +2111,16 @@ app.get("/api/rentals", requireRentalSchema, authenticate, requireSection("renta
   try {
     const [items, alerts] = await Promise.all([
       pool.query(`
-        SELECT r.id, r.equipment, r.client_or_owner, r.start_date::text, r.end_date::text,
+        SELECT r.id, r.machinery_id, COALESCE(m.name, r.equipment) AS equipment, r.client_or_owner, r.start_date::text, r.end_date::text,
           r.total_amount, r.paid_amount, GREATEST(r.total_amount - r.paid_amount, 0) AS remaining,
-          r.status, r.rate_period, r.rental_rate, r.duration, r.notes, r.created_at,
+          r.status, r.rate_period, r.rental_rate, r.duration, r.notes, r.created_by_name, r.created_at,
           COALESCE((
             SELECT json_agg(json_build_object(
               'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
             ) ORDER BY a.created_at, a.id)
             FROM rental_attachments a WHERE a.rental_id = r.id
           ), '[]'::json) AS attachments
-        FROM rentals r ${focusId === null ? "" : "WHERE r.id = $1"}
+        FROM rentals r LEFT JOIN machinery m ON m.id = r.machinery_id ${focusId === null ? "" : "WHERE r.id = $1"}
         ORDER BY CASE WHEN r.status = 'active' THEN 0 ELSE 1 END, r.end_date ASC, r.id DESC
       `, focusId === null ? [] : [focusId]),
       pool.query(`
@@ -2034,17 +2145,24 @@ app.get("/api/rentals", requireRentalSchema, authenticate, requireSection("renta
 
 app.post("/api/rentals", requireRentalSchema, authenticate, requireSection("rentals"), requirePermission("rentals", "create"), async (req: AuthenticatedRequest, res) => {
   const rental = validRental(req.body ?? {});
-  if (!rental) return fail(res, 400, "تحقق من بيانات الكراء والتواريخ والسعر والمبلغ المدفوع.");
+  if (!rental || rental.machineryId === null) return fail(res, 400, "اختر آلية مسجلة وتحقق من بيانات الكراء والتواريخ والسعر.");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    const machine = await client.query("SELECT id, name FROM machinery WHERE id = $1", [rental.machineryId]);
+    if (!machine.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "الآلية المحددة غير موجودة.");
+    }
+    rental.equipment = machine.rows[0].name;
     const result = await client.query(
       `INSERT INTO rentals
-        (equipment, client_or_owner, start_date, end_date, total_amount, paid_amount, status,
-         rate_period, rental_rate, duration, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
-      [rental.equipment, rental.clientOrOwner, rental.startDate, rental.endDate, rental.totalAmount,
-        rental.paidAmount, rental.status, rental.ratePeriod, rental.rentalRate, rental.duration, rental.notes],
+        (machinery_id, equipment, client_or_owner, start_date, end_date, total_amount, paid_amount, status,
+         rate_period, rental_rate, duration, notes, created_by_id, created_by_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+      [rental.machineryId, rental.equipment, rental.clientOrOwner, rental.startDate, rental.endDate, rental.totalAmount,
+        rental.paidAmount, rental.status, rental.ratePeriod, rental.rentalRate, rental.duration, rental.notes,
+        req.member!.clerk_user_id, req.member!.name],
     );
     await writeAuditWithClient(client, req.member!, "تسجيل عقد كراء",
       `${rental.equipment} لصالح ${rental.clientOrOwner} بقيمة ${rental.totalAmount} دج.`,
@@ -2067,7 +2185,7 @@ app.patch("/api/rentals/:id", requireRentalSchema, authenticate, requireSection(
   try {
     await client.query("BEGIN");
     const existing = await client.query(
-      `SELECT equipment, client_or_owner AS "clientOrOwner", start_date::text AS "startDate",
+      `SELECT machinery_id AS "machineryId", equipment, client_or_owner AS "clientOrOwner", start_date::text AS "startDate",
         end_date::text AS "endDate", rate_period AS "ratePeriod", rental_rate AS "rentalRate",
         paid_amount AS "paidAmount", status, notes FROM rentals WHERE id = $1 FOR UPDATE`,
       [id],
@@ -2081,11 +2199,19 @@ app.patch("/api/rentals/:id", requireRentalSchema, authenticate, requireSection(
       await client.query("ROLLBACK");
       return fail(res, 400, "بيانات الكراء غير صالحة. يجب ألا يتجاوز المدفوع الإجمالي.");
     }
+    if (rental.machineryId !== null) {
+      const machine = await client.query("SELECT name FROM machinery WHERE id = $1", [rental.machineryId]);
+      if (!machine.rowCount) {
+        await client.query("ROLLBACK");
+        return fail(res, 404, "الآلية المحددة غير موجودة.");
+      }
+      rental.equipment = machine.rows[0].name;
+    }
     await client.query(
-      `UPDATE rentals SET equipment = $1, client_or_owner = $2, start_date = $3, end_date = $4,
-        total_amount = $5, paid_amount = $6, status = $7, rate_period = $8, rental_rate = $9,
-        duration = $10, notes = $11 WHERE id = $12`,
-      [rental.equipment, rental.clientOrOwner, rental.startDate, rental.endDate, rental.totalAmount,
+      `UPDATE rentals SET machinery_id = $1, equipment = $2, client_or_owner = $3, start_date = $4, end_date = $5,
+        total_amount = $6, paid_amount = $7, status = $8, rate_period = $9, rental_rate = $10,
+        duration = $11, notes = $12 WHERE id = $13`,
+      [rental.machineryId, rental.equipment, rental.clientOrOwner, rental.startDate, rental.endDate, rental.totalAmount,
         rental.paidAmount, rental.status, rental.ratePeriod, rental.rentalRate, rental.duration, rental.notes, id],
     );
     await writeAuditWithClient(client, req.member!, "تعديل عقد كراء", `تحديث عقد الكراء رقم ${id}.`,
@@ -2296,16 +2422,57 @@ app.patch("/api/record-notes/:entity/:id", requireRecordNotesSchema, authenticat
   }
 });
 
+app.get("/api/machinery/options", requireMachinerySchema, authenticate, async (req: AuthenticatedRequest, res) => {
+  const member = req.member!;
+  if (!["machinery", "rentals", "field"].some((section) => hasPermission(member, section as SectionId, "view"))) {
+    return fail(res, 403, "ليس لديك صلاحية الوصول إلى قائمة الآليات.");
+  }
+  try {
+    const result = await pool.query("SELECT id, name, code FROM machinery ORDER BY name, code, id");
+    res.json({ items: result.rows });
+  } catch (error) {
+    console.error("Machinery options failed:", error);
+    fail(res, 500, "تعذر تحميل قائمة الآليات.");
+  }
+});
+
 app.get("/api/machinery", requireMachinerySchema, authenticate, requireSection("machinery"), async (_req, res) => {
   try {
+    await Promise.all([ensureRentalSchema(), ensureFieldExpenseSchema()]);
     const result = await pool.query(`
       SELECT m.id, m.code, m.name, m.category, m.status, m.hours_worked, m.notes,
-        COUNT(p.id)::int AS repair_count,
-        COALESCE(SUM(p.quantity * p.buy_price + p.repair_expense), 0) AS total_expenses
+        COUNT(p.id)::int + COALESCE((
+          SELECT COUNT(*)::int FROM field_expenses e
+          WHERE e.machinery_id = m.id AND e.category IN ('قطع غيار', 'إصلاح آلية')
+        ), 0) AS repair_count,
+        COALESCE(SUM(p.quantity * p.buy_price + p.repair_expense), 0)
+          + COALESCE((SELECT SUM(e.amount) FROM field_expenses e WHERE e.machinery_id = m.id), 0)
+          + COALESCE((SELECT SUM(r.total_amount) FROM rentals r WHERE r.machinery_id = m.id), 0)
+          AS total_expenses,
+        driver.id AS driver_assignment_id, driver.driver_name, driver.monthly_salary,
+        driver.start_date::text AS driver_start_date
       FROM machinery m
       LEFT JOIN machinery_spare_parts p ON p.machinery_id = m.id
-      GROUP BY m.id ORDER BY m.code, m.id`);
-    res.json({ items: result.rows });
+      LEFT JOIN LATERAL (
+        SELECT id, driver_name, monthly_salary, start_date
+        FROM machinery_driver_assignments
+        WHERE machinery_id = m.id AND end_date IS NULL
+        ORDER BY start_date DESC, id DESC LIMIT 1
+      ) driver ON TRUE
+      GROUP BY m.id, driver.id, driver.driver_name, driver.monthly_salary, driver.start_date
+      ORDER BY m.code, m.id`);
+    const assignments = await pool.query(`
+      SELECT machinery_id, monthly_salary, start_date::text AS start_date, end_date::text AS end_date
+      FROM machinery_driver_assignments
+    `);
+    const driverCosts = driverCostsByMachinery(assignments.rows);
+    res.json({
+      items: result.rows.map((machine) => ({
+        ...machine,
+        total_expenses: Number(machine.total_expenses || 0) + (driverCosts.get(Number(machine.id)) ?? 0),
+        driver_total_cost: driverCosts.get(Number(machine.id)) ?? 0,
+      })),
+    });
   } catch (error) {
     console.error("Machinery list failed:", error);
     fail(res, 500, "تعذر تحميل قائمة المركبات والآليات.");
@@ -2317,8 +2484,18 @@ app.post("/api/machinery", requireMachinerySchema, authenticate, requireSection(
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
   const category = typeof req.body?.category === "string" ? req.body.category.trim() : "";
   const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() : "";
+  const driverName = typeof req.body?.driverName === "string" ? req.body.driverName.trim() : "";
+  const salaryRaw = req.body?.driverMonthlySalary;
+  const driverMonthlySalary = salaryRaw === "" || salaryRaw == null ? null : Number(salaryRaw);
+  const driverStartDate = typeof req.body?.driverStartDate === "string" ? req.body.driverStartDate : "";
   if (!code || code.length > 80 || !name || name.length > 200 || category.length > 120 || notes.length > 5000) {
     return fail(res, 400, "أدخل رقماً تعريفياً واسماً صالحين للمركبة أو الآلية.");
+  }
+  if ((driverName && (driverName.length > 200 || driverMonthlySalary === null ||
+       !Number.isFinite(driverMonthlySalary) || driverMonthlySalary < 0 || !validIsoDate(driverStartDate) ||
+       driverStartDate > new Date().toISOString().slice(0, 10))) ||
+      (!driverName && (driverMonthlySalary !== null || driverStartDate))) {
+    return fail(res, 400, "أكمل اسم السائق وراتبه وتاريخ بداية عمله أو اترك بيانات السائق فارغة.");
   }
   const client = await pool.connect();
   try {
@@ -2328,8 +2505,16 @@ app.post("/api/machinery", requireMachinerySchema, authenticate, requireSection(
        RETURNING id, code, name, category, status, hours_worked, notes`,
       [code, name, category, notes],
     );
+    if (driverName && driverMonthlySalary !== null) {
+      await client.query(
+        `INSERT INTO machinery_driver_assignments
+          (machinery_id, driver_name, monthly_salary, start_date, created_by_id, created_by_name)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [result.rows[0].id, driverName, driverMonthlySalary, driverStartDate, req.member!.clerk_user_id, req.member!.name],
+      );
+    }
     await writeAuditWithClient(client, req.member!, "تسجيل مركبة أو آلية", `${name} — ${code}.`,
-      { section: "machinery", eventType: "create", entityId: result.rows[0].id, data: { code, name, category } });
+      { section: "machinery", eventType: "create", entityId: result.rows[0].id, data: { code, name, category, driverName: driverName || null } });
     await client.query("COMMIT");
     res.status(201).json({ item: result.rows[0] });
   } catch (error) {
@@ -2339,6 +2524,139 @@ app.post("/api/machinery", requireMachinerySchema, authenticate, requireSection(
     fail(res, 500, "تعذر تسجيل المركبة أو الآلية.");
   } finally {
     client.release();
+  }
+});
+
+app.patch("/api/machinery/:id/driver", requireMachinerySchema, authenticate, requireSection("machinery"), requirePermission("machinery", "edit"), async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  const driverName = typeof req.body?.driverName === "string" ? req.body.driverName.trim() : "";
+  const monthlySalary = Number(req.body?.monthlySalary);
+  const startDate = req.body?.startDate;
+  if (!Number.isSafeInteger(id) || id <= 0 || !driverName || driverName.length > 200 ||
+      !Number.isFinite(monthlySalary) || monthlySalary < 0 || !validIsoDate(startDate)) {
+    return fail(res, 400, "تحقق من اسم السائق وراتبه وتاريخ بداية العمل.");
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const machine = await client.query("SELECT id, name FROM machinery WHERE id = $1 FOR UPDATE", [id]);
+    if (!machine.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "المركبة أو الآلية غير موجودة.");
+    }
+    const current = await client.query(
+      `SELECT id, start_date::text AS start_date FROM machinery_driver_assignments
+       WHERE machinery_id = $1 AND end_date IS NULL ORDER BY start_date DESC, id DESC LIMIT 1 FOR UPDATE`,
+      [id],
+    );
+    if (!validIsoDate(startDate) || startDate > new Date().toISOString().slice(0, 10) ||
+        (current.rowCount && startDate <= current.rows[0].start_date)) {
+      await client.query("ROLLBACK");
+      return fail(res, 400, "يجب أن يكون تاريخ تعيين السائق الجديد صالحاً وبعد بداية عمل السائق السابق.");
+    }
+    if (current.rowCount) {
+      await client.query(
+        "UPDATE machinery_driver_assignments SET end_date = ($1::date - 1) WHERE id = $2",
+        [startDate, current.rows[0].id],
+      );
+    }
+    const assignment = await client.query(
+      `INSERT INTO machinery_driver_assignments
+        (machinery_id, driver_name, monthly_salary, start_date, created_by_id, created_by_name)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [id, driverName, monthlySalary, startDate, req.member!.clerk_user_id, req.member!.name],
+    );
+    await writeAuditWithClient(client, req.member!, "تغيير سائق آلية",
+      `تعيين ${driverName} على ${machine.rows[0].name} ابتداءً من ${startDate}.`,
+      { section: "machinery", eventType: "update", entityId: id, data: { driverName, monthlySalary, startDate, assignmentId: assignment.rows[0].id } });
+    await client.query("COMMIT");
+    res.json({ ok: true, assignmentId: assignment.rows[0].id });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Machinery driver update failed:", error);
+    fail(res, 500, "تعذر حفظ تعيين السائق.");
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/machinery/:id/details", requireMachinerySchema, authenticate, requireSection("machinery"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم الآلية غير صالح.");
+  try {
+    await Promise.all([ensureRentalSchema(), ensureFieldExpenseSchema()]);
+    const [machine, rentals, fieldExpenses, drivers] = await Promise.all([
+      pool.query("SELECT id, code, name, category, status, notes FROM machinery WHERE id = $1", [id]),
+      pool.query(`
+        SELECT r.id, COALESCE(m.name, r.equipment) AS equipment, r.client_or_owner, r.start_date::text, r.end_date::text,
+          r.total_amount, r.paid_amount, r.created_by_name, r.created_at,
+          COALESCE((SELECT json_agg(json_build_object(
+            'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
+          ) ORDER BY a.created_at, a.id) FROM rental_attachments a WHERE a.rental_id = r.id), '[]'::json) AS attachments
+        FROM rentals r LEFT JOIN machinery m ON m.id = r.machinery_id
+        WHERE r.machinery_id = $1 ORDER BY r.start_date DESC, r.id DESC LIMIT 200
+      `, [id]),
+      pool.query(`
+        SELECT e.id, e.category, e.amount, e.site_name, e.details, e.fuel_liters, e.created_by_name, e.created_at,
+          COALESCE((SELECT json_agg(json_build_object(
+            'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
+          ) ORDER BY a.created_at, a.id) FROM field_expense_attachments a WHERE a.field_expense_id = e.id), '[]'::json) AS attachments
+        FROM field_expenses e WHERE e.machinery_id = $1 ORDER BY e.created_at DESC, e.id DESC LIMIT 300
+      `, [id]),
+      pool.query(`
+        SELECT id, driver_name, monthly_salary, start_date::text AS start_date, end_date::text AS end_date,
+          created_by_name, created_at
+        FROM machinery_driver_assignments WHERE machinery_id = $1
+        ORDER BY start_date DESC, id DESC
+      `, [id]),
+    ]);
+    if (!machine.rowCount) return fail(res, 404, "المركبة أو الآلية غير موجودة.");
+    const driverTotalCost = driverCostsByMachinery(drivers.rows).get(id) ?? 0;
+    res.json({
+      machine: machine.rows[0],
+      rentals: rentals.rows,
+      fieldExpenses: fieldExpenses.rows,
+      driverHistory: drivers.rows,
+      driverTotalCost,
+    });
+  } catch (error) {
+    console.error("Machinery detail load failed:", error);
+    fail(res, 500, "تعذر تحميل تفاصيل الآلية.");
+  }
+});
+
+app.get("/api/machinery/related-attachments/:kind/:id", requireMachinerySchema, authenticate, requireSection("machinery"), async (req, res) => {
+  const kind = req.params.kind;
+  const attachmentId = Number(req.params.id);
+  const machineId = Number(req.query.machineryId);
+  if (!["rental", "field"].includes(kind) || !Number.isSafeInteger(attachmentId) || attachmentId <= 0 ||
+      !Number.isSafeInteger(machineId) || machineId <= 0) {
+    return fail(res, 400, "بيانات المرفق غير صالحة.");
+  }
+  try {
+    await Promise.all([ensureRentalSchema(), ensureFieldExpenseSchema()]);
+    const result = kind === "rental"
+      ? await pool.query(`
+        SELECT a.file_name, a.mime_type, a.file_data FROM rental_attachments a
+        JOIN rentals r ON r.id = a.rental_id
+        WHERE a.id = $1 AND r.machinery_id = $2
+      `, [attachmentId, machineId])
+      : await pool.query(`
+        SELECT a.file_name, a.mime_type, a.file_data FROM field_expense_attachments a
+        JOIN field_expenses e ON e.id = a.field_expense_id
+        WHERE a.id = $1 AND e.machinery_id = $2
+      `, [attachmentId, machineId]);
+    if (!result.rowCount) return fail(res, 404, "المرفق غير موجود أو لا يرتبط بهذه الآلة.");
+    const attachment = result.rows[0];
+    const inline = attachment.mime_type === "application/pdf" || attachment.mime_type.startsWith("image/");
+    const safeName = encodeURIComponent(String(attachment.file_name).replace(/[\r\n"]/g, ""));
+    res.setHeader("Content-Type", attachment.mime_type);
+    res.setHeader("Content-Disposition", `${inline ? "inline" : "attachment"}; filename*=UTF-8''${safeName}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(Buffer.from(attachment.file_data));
+  } catch (error) {
+    console.error("Machinery related attachment read failed:", error);
+    fail(res, 500, "تعذر فتح مرفق العملية.");
   }
 });
 
@@ -2879,7 +3197,8 @@ app.get("/api/field-expenses", requireFieldExpenseSchema, authenticate, requireS
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const result = await pool.query(
-      `SELECT f.id, f.category, f.amount, f.site_name, f.details, f.notes, f.fuel_liters,
+      `SELECT f.id, f.machinery_id, m.name AS machinery_name, m.code AS machinery_code,
+        f.category, f.amount, f.site_name, f.details, f.notes, f.fuel_liters,
         f.created_by_id, f.created_by_name, f.created_at, f.review_status,
         f.reviewed_by_name, f.reviewed_at, f.review_notes,
         COALESCE((
@@ -2888,7 +3207,7 @@ app.get("/api/field-expenses", requireFieldExpenseSchema, authenticate, requireS
           ) ORDER BY a.created_at, a.id)
           FROM field_expense_attachments a WHERE a.field_expense_id = f.id
         ), '[]'::json) AS attachments
-       FROM field_expenses f ${where}
+       FROM field_expenses f LEFT JOIN machinery m ON m.id = f.machinery_id ${where}
        ORDER BY CASE WHEN f.review_status = 'pending' THEN 0 ELSE 1 END, f.created_at DESC, f.id DESC
        LIMIT 200`,
       values,
@@ -2910,8 +3229,14 @@ app.post("/api/field-expenses", requireFieldExpenseSchema, authenticate, require
   const siteText = typeof siteName === "string" ? siteName.trim() : "";
   const numericAmount = Number(amount);
   const liters = fuelLiters === undefined || fuelLiters === null || fuelLiters === "" ? null : Number(fuelLiters);
+  const machineryId = req.body?.machineryId === undefined || req.body?.machineryId === null || req.body?.machineryId === ""
+    ? null
+    : Number(req.body.machineryId);
+  const requiresMachinery = ["مازوت", "قطع غيار", "إصلاح آلية"].includes(categoryText);
   if (!categoryText || categoryText.length > 120 || !siteText || siteText.length > 200 ||
       !Number.isFinite(numericAmount) || numericAmount <= 0 || numericAmount > 99999999999999.99 ||
+      (machineryId !== null && (!Number.isSafeInteger(machineryId) || machineryId <= 0)) ||
+      (requiresMachinery && machineryId === null) ||
       (categoryText === "مازوت" && liters === null) ||
       (liters !== null && (!Number.isFinite(liters) || liters <= 0 || liters > 99999999)) ||
       String(details ?? "").length > 3000 || String(notes ?? "").length > 5000) {
@@ -2921,13 +3246,20 @@ app.post("/api/field-expenses", requireFieldExpenseSchema, authenticate, require
   try {
     await client.query("BEGIN");
     const member = req.member!;
+    if (machineryId !== null) {
+      const machine = await client.query("SELECT id FROM machinery WHERE id = $1", [machineryId]);
+      if (!machine.rowCount) {
+        await client.query("ROLLBACK");
+        return fail(res, 404, "الآلية المحددة غير موجودة.");
+      }
+    }
     const result = await client.query(
       `INSERT INTO field_expenses
-        (category, amount, site_name, details, fuel_liters, notes, created_by_id, created_by_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, category, amount, site_name, details, notes, fuel_liters,
+        (machinery_id, category, amount, site_name, details, fuel_liters, notes, created_by_id, created_by_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id, machinery_id, category, amount, site_name, details, notes, fuel_liters,
          created_by_id, created_by_name, created_at, review_status`,
-      [categoryText, numericAmount, siteText, String(details ?? "").trim(), liters,
+      [machineryId, categoryText, numericAmount, siteText, String(details ?? "").trim(), liters,
         String(notes ?? "").trim(), member.clerk_user_id, member.name],
     );
     await writeAuditWithClient(client, member, "تسجيل مصروف ميداني",

@@ -197,6 +197,8 @@ CREATE TABLE IF NOT EXISTS rentals (
   rental_rate NUMERIC(16, 2) NOT NULL DEFAULT 0 CHECK (rental_rate >= 0),
   duration INTEGER NOT NULL DEFAULT 1 CHECK (duration > 0),
   notes TEXT NOT NULL DEFAULT '',
+  created_by_id TEXT REFERENCES members(clerk_user_id),
+  created_by_name TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -254,6 +256,26 @@ CREATE TABLE IF NOT EXISTS machinery (
 );
 
 ALTER TABLE machinery ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE rentals
+  ADD COLUMN IF NOT EXISTS machinery_id BIGINT REFERENCES machinery(id) ON DELETE RESTRICT,
+  ADD COLUMN IF NOT EXISTS created_by_id TEXT REFERENCES members(clerk_user_id),
+  ADD COLUMN IF NOT EXISTS created_by_name TEXT;
+ALTER TABLE field_expenses
+  ADD COLUMN IF NOT EXISTS machinery_id BIGINT REFERENCES machinery(id) ON DELETE RESTRICT;
+
+CREATE TABLE IF NOT EXISTS machinery_driver_assignments (
+  id BIGSERIAL PRIMARY KEY,
+  machinery_id BIGINT NOT NULL REFERENCES machinery(id) ON DELETE RESTRICT,
+  driver_name TEXT NOT NULL,
+  monthly_salary NUMERIC(16, 2) NOT NULL CHECK (monthly_salary >= 0),
+  start_date DATE NOT NULL,
+  end_date DATE,
+  created_by_id TEXT NOT NULL REFERENCES members(clerk_user_id),
+  created_by_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (end_date IS NULL OR end_date >= start_date)
+);
 
 CREATE TABLE IF NOT EXISTS machinery_spare_parts (
   id BIGSERIAL PRIMARY KEY,

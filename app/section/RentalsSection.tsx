@@ -12,6 +12,7 @@ import type { ReactNode } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
+import MachineryPicker, { type MachineryOption } from "../components/MachineryPicker";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
@@ -23,6 +24,7 @@ type RatePeriod = "daily" | "monthly";
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type Rental = {
   id: number;
+  machinery_id: number | null;
   equipment: string;
   client_or_owner: string;
   start_date: string;
@@ -46,6 +48,7 @@ type RentalAlert = {
 };
 type RentalResult = { items: Rental[]; dueAlertCount: number; dueAlerts: RentalAlert[] };
 type Draft = {
+  machineryId: string;
   equipment: string;
   clientOrOwner: string;
   startDate: string;
@@ -75,7 +78,7 @@ function localDate() {
 
 function emptyDraft(): Draft {
   return {
-    equipment: "", clientOrOwner: "", startDate: localDate(), endDate: localDate(),
+    machineryId: "", equipment: "", clientOrOwner: "", startDate: localDate(), endDate: localDate(),
     ratePeriod: "daily", rentalRate: "", paidAmount: "0", status: "active", notes: "",
   };
 }
@@ -113,6 +116,7 @@ export default function RentalsSection() {
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [items, setItems] = useState<Rental[]>([]);
+  const [machineryOptions, setMachineryOptions] = useState<MachineryOption[]>([]);
   const [dueAlerts, setDueAlerts] = useState<RentalAlert[]>([]);
   const [dueAlertCount, setDueAlertCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -126,12 +130,17 @@ export default function RentalsSection() {
   const [statusFilter, setStatusFilter] = useState<Status | "">("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [newMachineOpen, setNewMachineOpen] = useState(false);
+  const [newMachine, setNewMachine] = useState({
+    code: "", name: "", category: "", driverName: "", driverMonthlySalary: "", driverStartDate: localDate(),
+  });
 
   const isAdmin = member?.role === "admin";
   const canAccess = hasPermission(member, "rentals", "view");
   const canCreate = hasPermission(member, "rentals", "create");
   const canEdit = hasPermission(member, "rentals", "edit");
   const canManage = canCreate || canEdit;
+  const canCreateMachine = hasPermission(member, "machinery", "create");
   const canAddAttachments = canManage && canUploadFiles(member);
   const duration = durationFor(draft.startDate, draft.endDate, draft.ratePeriod);
   const totalAmount = Math.round(duration * amount(draft.rentalRate) * 100) / 100;
@@ -151,12 +160,14 @@ export default function RentalsSection() {
     setError("");
     try {
       const token = () => getToken();
-      const [me, result] = await Promise.all([
+      const [me, result, machines] = await Promise.all([
         apiRequest<{ member: Member }>("/me", token),
         apiRequest<RentalResult>(`/rentals${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token),
+        apiRequest<{ items: MachineryOption[] }>("/machinery/options", token),
       ]);
       setMember(me.member);
       setItems(result.items);
+      setMachineryOptions(machines.items);
       setDueAlerts(result.dueAlerts);
       setDueAlertCount(result.dueAlertCount);
     } catch (caught) {
@@ -181,6 +192,7 @@ export default function RentalsSection() {
     setEditing(null);
     setPickedDocs([]);
     setDraft(emptyDraft());
+    setNewMachineOpen(false);
   };
 
   const startCreate = () => {
@@ -196,6 +208,7 @@ export default function RentalsSection() {
     setEditing(rental);
     setPickedDocs([]);
     setDraft({
+      machineryId: rental.machinery_id ? String(rental.machinery_id) : "",
       equipment: rental.equipment,
       clientOrOwner: rental.client_or_owner,
       startDate: dateLabel(rental.start_date),
@@ -207,6 +220,33 @@ export default function RentalsSection() {
       notes: rental.notes || "",
     });
     setFormOpen(true);
+  };
+
+  const saveNewMachine = async () => {
+    if (!newMachine.code.trim() || !newMachine.name.trim()) {
+      setError("أدخل الرقم التعريفي واسم الآلة الجديدة.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const result = await apiRequest<{ item: MachineryOption }>("/machinery", () => getToken(), {
+        method: "POST",
+        body: JSON.stringify({
+          ...newMachine,
+          notes: "",
+          driverStartDate: newMachine.driverName.trim() ? newMachine.driverStartDate : "",
+        }),
+      });
+      setMachineryOptions((current) => [...current, result.item].sort((a, b) => a.name.localeCompare(b.name, "ar")));
+      setDraft((current) => ({ ...current, machineryId: String(result.item.id), equipment: result.item.name }));
+      setNewMachine({ code: "", name: "", category: "", driverName: "", driverMonthlySalary: "", driverStartDate: localDate() });
+      setNewMachineOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "تعذر تسجيل الآلة الجديدة.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const uploadDocuments = async (rentalId: number, documents: PickedDocument[]) => {
@@ -242,7 +282,7 @@ export default function RentalsSection() {
   };
 
   const saveRental = async () => {
-    if (!draft.equipment.trim() || !draft.clientOrOwner.trim() ||
+    if ((!draft.machineryId && !editing) || (!draft.equipment.trim() && !draft.machineryId) || !draft.clientOrOwner.trim() ||
         !/^\d{4}-\d{2}-\d{2}$/.test(draft.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(draft.endDate) ||
         draft.endDate < draft.startDate || amount(draft.rentalRate) < 0 ||
         !Number.isFinite(Number(draft.rentalRate)) || amount(draft.paidAmount) < 0 ||
@@ -256,7 +296,8 @@ export default function RentalsSection() {
     try {
       const payload = JSON.stringify({
         ...draft,
-        equipment: draft.equipment.trim(),
+        machineryId: draft.machineryId ? Number(draft.machineryId) : undefined,
+        equipment: machineryOptions.find((machine) => String(machine.id) === draft.machineryId)?.name || draft.equipment.trim(),
         clientOrOwner: draft.clientOrOwner.trim(),
         rentalRate: amount(draft.rentalRate),
         paidAmount: amount(draft.paidAmount),
@@ -288,6 +329,7 @@ export default function RentalsSection() {
 
   const changeStatus = async (rental: Rental, status: Status) => {
     const payload = {
+      machineryId: rental.machinery_id ?? undefined,
       equipment: rental.equipment,
       clientOrOwner: rental.client_or_owner,
       startDate: dateLabel(rental.start_date),
@@ -453,7 +495,36 @@ export default function RentalsSection() {
               <Text style={styles.requiredHint}>الحقول ذات * مطلوبة</Text>
             </View>
             <View style={styles.formGrid}>
-              <Field label="الشيء المؤجر *" value={draft.equipment} onChange={(value) => setField("equipment", value)} placeholder="اسم الآلية أو المعدة" />
+              <MachineryPicker
+                items={machineryOptions}
+                value={draft.machineryId}
+                label="الآلة المسجلة *"
+                emptyLabel="ابحث عن الآلة بالاسم أو الرقم"
+                onChange={(id) => {
+                  const machine = machineryOptions.find((item) => String(item.id) === id);
+                  setDraft((current) => ({ ...current, machineryId: id, equipment: machine?.name ?? current.equipment }));
+                }}
+                onAdd={canCreateMachine ? () => setNewMachineOpen((open) => !open) : undefined}
+              />
+              {editing && !editing.machinery_id ? (
+                <Text style={styles.helper}>هذا عقد قديم غير مربوط بمعرّف آلة: {editing.equipment}. يمكنك إبقاؤه كما هو أو ربطه بآلة مسجلة.</Text>
+              ) : null}
+              {newMachineOpen && canCreateMachine ? (
+                <View style={styles.machineAddCard}>
+                  <Text style={styles.fieldLabel}>تسجيل آلة جديدة ثم العودة إلى العقد</Text>
+                  <View style={styles.formGrid}>
+                    <Field label="الرقم التعريفي *" value={newMachine.code} onChange={(value) => setNewMachine((current) => ({ ...current, code: value }))} placeholder="مثال: TR-001" />
+                    <Field label="اسم الآلة *" value={newMachine.name} onChange={(value) => setNewMachine((current) => ({ ...current, name: value }))} placeholder="شاحنة أو حفارة..." />
+                    <Field label="النوع" value={newMachine.category} onChange={(value) => setNewMachine((current) => ({ ...current, category: value }))} placeholder="الفئة أو النوع" />
+                  </View>
+                  <Field label="اسم السائق (اختياري)" value={newMachine.driverName} onChange={(value) => setNewMachine((current) => ({ ...current, driverName: value }))} placeholder="اسم السائق" />
+                  <Field label="راتب السائق الشهري (دج)" value={newMachine.driverMonthlySalary} onChange={(value) => setNewMachine((current) => ({ ...current, driverMonthlySalary: value }))} placeholder="0" numeric />
+                  <Field label="تاريخ بداية عمل السائق" value={newMachine.driverStartDate} onChange={(value) => setNewMachine((current) => ({ ...current, driverStartDate: value }))} placeholder="YYYY-MM-DD" />
+                  <Pressable onPress={() => void saveNewMachine()} disabled={saving} style={styles.outlineButton}>
+                    <Text style={styles.outlineButtonText}>{saving ? "جارٍ التسجيل..." : "حفظ الآلة واختيارها"}</Text>
+                  </Pressable>
+                </View>
+              ) : null}
               <Field label="اسم المستأجر / المؤجر *" value={draft.clientOrOwner} onChange={(value) => setField("clientOrOwner", value)} placeholder="الاسم أو الجهة" />
               <Field label="تاريخ بداية الكراء *" value={draft.startDate} onChange={(value) => setField("startDate", value)} placeholder="YYYY-MM-DD" />
               <Field label="تاريخ نهاية الكراء *" value={draft.endDate} onChange={(value) => setField("endDate", value)} placeholder="YYYY-MM-DD" />
@@ -698,6 +769,7 @@ const styles = {
   addButton: { minHeight: 48, borderRadius: 13, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
   addButtonText: { color: colors.navy, fontWeight: "900" as const, fontSize: 13 },
   formCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 18 },
+  machineAddCard: { backgroundColor: "#F7FAFD", borderWidth: 1, borderColor: "#C8D9EC", borderRadius: 12, padding: 12, gap: 9 },
   formHeading: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10, marginBottom: 12 },
   cardHeading: { color: colors.navy, fontSize: 15, fontWeight: "900" as const, textAlign: "right" as const },
   requiredHint: { color: colors.muted, fontSize: 10 },

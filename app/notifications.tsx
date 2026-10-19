@@ -8,6 +8,7 @@ import {
   Check,
   ClipboardCheck,
   FileClock,
+  HardHat,
   PackageOpen,
   ReceiptText,
   RefreshCw,
@@ -30,6 +31,7 @@ const icons = {
   field_review: ClipboardCheck,
   low_inventory: PackageOpen,
   low_spare_part: AlertTriangle,
+  driver_month_anniversary: HardHat,
 } as const;
 
 function timeLabel(value: string) {
@@ -103,7 +105,8 @@ export default function NotificationsScreen() {
       pathname: "/section/[section]",
       params: {
         section: item.section,
-        focusId: String(item.recordId),
+        ...(item.type === "driver_month_anniversary" ? {} : { focusId: String(item.recordId) }),
+        ...(item.machineId ? { machineId: String(item.machineId) } : {}),
         ...(item.view ? { view: item.view } : {}),
       },
     });
@@ -191,7 +194,7 @@ export default function NotificationsScreen() {
           <View style={styles.list}>
             {visibleItems.map((item) => {
               const Icon = icons[item.type];
-              const urgent = item.type === "cheque_due" || item.type === "rental_ending" || item.type === "field_review";
+              const urgent = item.type === "cheque_due" || item.type === "rental_ending" || item.type === "field_review" || item.type === "driver_month_anniversary";
               return (
                 <Pressable
                   key={item.id}

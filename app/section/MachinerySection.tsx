@@ -28,6 +28,28 @@ type Machinery = {
   repair_count: number;
   total_expenses: number | string;
   notes: string;
+  driver_assignment_id: number | null;
+  driver_name: string | null;
+  monthly_salary: number | string | null;
+  driver_start_date: string | null;
+  driver_total_cost: number | string;
+};
+type MachineDetails = {
+  machine: { id: number; code: string; name: string; category: string; status: string; notes: string };
+  rentals: Array<{
+    id: number; equipment: string; client_or_owner: string; start_date: string; end_date: string;
+    total_amount: number | string; paid_amount: number | string; created_by_name: string | null;
+    created_at: string; attachments: Attachment[];
+  }>;
+  fieldExpenses: Array<{
+    id: number; category: string; amount: number | string; site_name: string; details: string;
+    fuel_liters: number | string | null; created_by_name: string; created_at: string; attachments: Attachment[];
+  }>;
+  driverHistory: Array<{
+    id: number; driver_name: string; monthly_salary: number | string; start_date: string;
+    end_date: string | null; created_by_name: string; created_at: string;
+  }>;
+  driverTotalCost: number;
 };
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type SparePart = {
@@ -59,14 +81,37 @@ const numberValue = (value: string | number | null | undefined) => {
   return Number.isFinite(number) ? number : 0;
 };
 const dateLabel = (value: string | null) => value ? value.slice(0, 10) : "—";
+const salaryPeriodFraction = (start: string, end: string | null) => {
+  const startTime = Date.parse(`${start.slice(0, 10)}T00:00:00.000Z`);
+  const endTime = Date.parse(`${(end ?? localDate()).slice(0, 10)}T00:00:00.000Z`);
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return 0;
+  let cursor = new Date(Date.UTC(new Date(startTime).getUTCFullYear(), new Date(startTime).getUTCMonth(), 1));
+  let periods = 0;
+  while (cursor.getTime() <= endTime) {
+    const year = cursor.getUTCFullYear();
+    const month = cursor.getUTCMonth();
+    const monthStart = Date.UTC(year, month, 1);
+    const nextMonth = Date.UTC(year, month + 1, 1);
+    const monthEnd = nextMonth - 86400000;
+    const coveredStart = Math.max(startTime, monthStart);
+    const coveredEnd = Math.min(endTime, monthEnd);
+    if (coveredEnd >= coveredStart) {
+      periods += (Math.floor((coveredEnd - coveredStart) / 86400000) + 1) / ((nextMonth - monthStart) / 86400000);
+    }
+    cursor = new Date(nextMonth);
+  }
+  return periods;
+};
 
 export default function MachinerySection() {
   const router = useRouter();
-  const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
+  const routeParams = useLocalSearchParams<{ focusId?: string | string[]; machineId?: string | string[] }>();
   const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
+  const routeMachineId = Array.isArray(routeParams.machineId) ? routeParams.machineId[0] : routeParams.machineId;
   const { isLoaded, isSignedIn, getToken } = useAuth();
   const [member, setMember] = useState<Member | null>(null);
   const [machinery, setMachinery] = useState<Machinery[]>([]);
+  const [machineDetails, setMachineDetails] = useState<MachineDetails | null>(null);
   const [parts, setParts] = useState<SparePart[]>([]);
   const [search, setSearch] = useState("");
   const [partDateFrom, setPartDateFrom] = useState("");
@@ -78,7 +123,12 @@ export default function MachinerySection() {
   const [notice, setNotice] = useState("");
   const [machineFormOpen, setMachineFormOpen] = useState(false);
   const [partFormOpen, setPartFormOpen] = useState(false);
-  const [machineDraft, setMachineDraft] = useState({ code: "", name: "", category: "", notes: "" });
+  const [machineDraft, setMachineDraft] = useState({
+    code: "", name: "", category: "", notes: "", driverName: "",
+    driverMonthlySalary: "", driverStartDate: localDate(),
+  });
+  const [driverChangeOpen, setDriverChangeOpen] = useState(false);
+  const [driverDraft, setDriverDraft] = useState({ driverName: "", monthlySalary: "", startDate: localDate() });
   const [partDraft, setPartDraft] = useState({
     machineryId: "", name: "", quantity: "", buyPrice: "", supplier: "",
     invoiceNumber: "", installationDate: localDate(), stockQuantity: "", repairExpense: "0", notes: "",
@@ -105,9 +155,8 @@ export default function MachinerySection() {
       (!searchTerm || `${part.id} ${part.name} ${part.machinery_name} ${part.machinery_code} ${part.supplier} ${part.invoice_number} ${part.recorded_by_name} ${part.notes} ${part.installation_date ?? ""}`.toLocaleLowerCase().includes(searchTerm))),
     [focusId, partDateFrom, partDateTo, parts, selectedMachineId, searchTerm],
   );
-  const totalExpenses = parts.reduce(
-    (total, part) => total + numberValue(part.buy_price) * part.quantity + numberValue(part.repair_expense), 0,
-  );
+  const totalExpenses = machinery.reduce((total, machine) => total + numberValue(machine.total_expenses), 0);
+  const totalRepairRecords = machinery.reduce((total, machine) => total + Number(machine.repair_count || 0), 0);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
@@ -115,14 +164,18 @@ export default function MachinerySection() {
     setError("");
     try {
       const token = () => getToken();
-      const [me, machineResult, partResult] = await Promise.all([
+      const [me, machineResult, partResult, detailResult] = await Promise.all([
         apiRequest<{ member: Member }>("/me", token),
         apiRequest<{ items: Machinery[] }>("/machinery", token),
         apiRequest<{ items: SparePart[] }>(`/machinery/spare-parts${focusId ? `?focusId=${encodeURIComponent(focusId)}` : ""}`, token),
+        selectedMachineId
+          ? apiRequest<MachineDetails>(`/machinery/${selectedMachineId}/details`, token)
+          : Promise.resolve(null),
       ]);
       setMember(me.member);
       setMachinery(machineResult.items);
       setParts(partResult.items);
+      setMachineDetails(detailResult);
     } catch (caught) {
       const issue = caught as ApiError;
       setError(issue.message || "تعذر تحميل بيانات المركبات وقطع الغيار.");
@@ -130,18 +183,26 @@ export default function MachinerySection() {
     } finally {
       setLoading(false);
     }
-  }, [focusId, getToken, isSignedIn]);
+  }, [focusId, getToken, isSignedIn, selectedMachineId]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
     else if (isSignedIn) void refresh();
   }, [isLoaded, isSignedIn, refresh, router]);
 
+  useEffect(() => {
+    const id = routeMachineId ? Number(routeMachineId) : null;
+    if (id && Number.isSafeInteger(id) && id > 0) setSelectedMachineId(id);
+  }, [routeMachineId]);
+
   const changePartField = (key: keyof typeof partDraft, value: string) =>
     setPartDraft((current) => ({ ...current, [key]: value }));
 
   const saveMachinery = async () => {
-    if (!machineDraft.code.trim() || !machineDraft.name.trim()) {
+    if (!machineDraft.code.trim() || !machineDraft.name.trim() ||
+        (machineDraft.driverName.trim() && (!machineDraft.driverMonthlySalary.trim() ||
+          !Number.isFinite(Number(machineDraft.driverMonthlySalary)) || Number(machineDraft.driverMonthlySalary) < 0 ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(machineDraft.driverStartDate)))) {
       setError("أدخل الرقم التعريفي واسم المركبة أو الآلية.");
       return;
     }
@@ -156,14 +217,47 @@ export default function MachinerySection() {
           name: machineDraft.name.trim(),
           category: machineDraft.category.trim(),
           notes: machineDraft.notes.trim(),
+          driverName: machineDraft.driverName.trim(),
+          driverMonthlySalary: machineDraft.driverMonthlySalary,
+          driverStartDate: machineDraft.driverName.trim() ? machineDraft.driverStartDate : "",
         }),
       });
-      setMachineDraft({ code: "", name: "", category: "", notes: "" });
+      setMachineDraft({ code: "", name: "", category: "", notes: "", driverName: "", driverMonthlySalary: "", driverStartDate: localDate() });
       setMachineFormOpen(false);
       setNotice("تم تسجيل المركبة أو الآلية.");
       await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "تعذر تسجيل المركبة أو الآلية.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveDriverChange = async () => {
+    const machineId = selectedMachineId;
+    if (!machineId || !driverDraft.driverName.trim() || !driverDraft.monthlySalary.trim() ||
+        !Number.isFinite(Number(driverDraft.monthlySalary)) || Number(driverDraft.monthlySalary) < 0 ||
+        !/^\d{4}-\d{2}-\d{2}$/.test(driverDraft.startDate)) {
+      setError("أكمل اسم السائق وراتبه وتاريخ بداية العمل.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await apiRequest(`/machinery/${machineId}/driver`, () => getToken(), {
+        method: "PATCH",
+        body: JSON.stringify({
+          driverName: driverDraft.driverName.trim(),
+          monthlySalary: Number(driverDraft.monthlySalary),
+          startDate: driverDraft.startDate,
+        }),
+      });
+      setDriverDraft({ driverName: "", monthlySalary: "", startDate: localDate() });
+      setDriverChangeOpen(false);
+      setNotice("تم حفظ السائق الجديد مع الاحتفاظ بسجل السائق السابق.");
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "تعذر حفظ تعيين السائق.");
     } finally {
       setSaving(false);
     }
@@ -320,7 +414,7 @@ export default function MachinerySection() {
 
         <View style={styles.summaryRow}>
           <Summary label="المركبات والآليات" value={String(machinery.length)} icon={<Truck size={17} color={colors.blue} />} />
-          <Summary label="سجلات القطع والإصلاح" value={String(parts.length)} icon={<Wrench size={17} color={colors.blue} />} />
+          <Summary label="سجلات القطع والإصلاح" value={String(totalRepairRecords)} icon={<Wrench size={17} color={colors.blue} />} />
           <Summary label="إجمالي المصاريف" value={formatDzd(totalExpenses)} icon={<HardHat size={17} color={colors.blue} />} />
         </View>
 
@@ -365,6 +459,10 @@ export default function MachinerySection() {
             <Field label="الرقم التعريفي *" value={machineDraft.code} onChange={(value) => setMachineDraft((draft) => ({ ...draft, code: value }))} placeholder="مثال: TR-001" />
             <Field label="اسم المركبة أو الآلية *" value={machineDraft.name} onChange={(value) => setMachineDraft((draft) => ({ ...draft, name: value }))} placeholder="مثال: شاحنة نقل" />
             <Field label="الفئة أو النوع" value={machineDraft.category} onChange={(value) => setMachineDraft((draft) => ({ ...draft, category: value }))} placeholder="شاحنة، حفارة، سيارة..." />
+            <Text style={styles.cardTitle}>بيانات السائق الحالي (اختياري)</Text>
+            <Field label="اسم سائق الآلة" value={machineDraft.driverName} onChange={(value) => setMachineDraft((draft) => ({ ...draft, driverName: value }))} placeholder="اسم السائق" />
+            <Field label="راتب السائق الشهري (دج)" value={machineDraft.driverMonthlySalary} onChange={(value) => setMachineDraft((draft) => ({ ...draft, driverMonthlySalary: value }))} placeholder="0" numeric />
+            <Field label="تاريخ بداية العمل" value={machineDraft.driverStartDate} onChange={(value) => setMachineDraft((draft) => ({ ...draft, driverStartDate: value }))} placeholder="YYYY-MM-DD" />
             <Field label="ملاحظات حول الآلية" value={machineDraft.notes} onChange={(value) => setMachineDraft((draft) => ({ ...draft, notes: value }))} placeholder="معلومات إضافية عن الآلية" multiline />
             <SaveButton label="حفظ المركبة أو الآلية" saving={saving} onPress={() => void saveMachinery()} />
           </View>
@@ -384,6 +482,7 @@ export default function MachinerySection() {
                     <Text style={styles.machineName}>{machine.name}</Text>
                     <Text style={styles.machineMeta}>{machine.code}{machine.category ? ` · ${machine.category}` : ""}</Text>
                     <Text style={styles.machineMeta}>{machine.repair_count} سجل · {formatDzd(numberValue(machine.total_expenses))}</Text>
+                    {machine.driver_name ? <Text style={styles.machineMeta}>السائق: {machine.driver_name}</Text> : null}
                   </View>
                 </Pressable>
                 <RecordNotes entity="machinery" recordId={machine.id} initialNotes={machine.notes} editable={canEdit} />
@@ -394,6 +493,88 @@ export default function MachinerySection() {
             <View style={styles.emptyCard}><Text style={styles.emptyText}>لم تُسجل أي مركبة أو آلية بعد.</Text></View>
           ) : null}
         </View>
+
+        {selectedMachineId && machineDetails ? (
+          <View style={styles.card}>
+            <View style={styles.detailsHeading}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>تفاصيل الآلة: {machineDetails.machine.name}</Text>
+                <Text style={styles.machineMeta}>{machineDetails.machine.code}{machineDetails.machine.category ? ` · ${machineDetails.machine.category}` : ""}</Text>
+              </View>
+              {canEdit ? (
+                <Pressable onPress={() => setDriverChangeOpen((open) => !open)} style={styles.smallButton}>
+                  <Text style={styles.smallButtonText}>{driverChangeOpen ? "إغلاق" : "تغيير السائق"}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <View style={styles.detailGrid}>
+              <Detail label="إجمالي مصاريف الآلة" value={formatDzd(numberValue(machinery.find((item) => item.id === selectedMachineId)?.total_expenses))} />
+              <Detail label="تكلفة السائقين المسجلة" value={formatDzd(machineDetails.driverTotalCost)} />
+              <Detail label="السائق الحالي" value={machineDetails.driverHistory.find((driver) => !driver.end_date)?.driver_name ?? "غير مسجل"} />
+              <Detail label="راتب السائق الحالي" value={(() => {
+                const driver = machineDetails.driverHistory.find((item) => !item.end_date);
+                return driver ? formatDzd(numberValue(driver.monthly_salary)) : "—";
+              })()} />
+              <Detail label="بداية عمل السائق الحالي" value={dateLabel(machineDetails.driverHistory.find((item) => !item.end_date)?.start_date ?? null)} />
+            </View>
+
+            {driverChangeOpen && canEdit ? (
+              <View style={styles.driverForm}>
+                <Text style={styles.cardTitle}>تعيين سائق جديد</Text>
+                <Field label="اسم السائق *" value={driverDraft.driverName} onChange={(value) => setDriverDraft((draft) => ({ ...draft, driverName: value }))} placeholder="اسم السائق الجديد" />
+                <Field label="الراتب الشهري (دج) *" value={driverDraft.monthlySalary} onChange={(value) => setDriverDraft((draft) => ({ ...draft, monthlySalary: value }))} placeholder="0" numeric />
+                <Field label="تاريخ بداية العمل *" value={driverDraft.startDate} onChange={(value) => setDriverDraft((draft) => ({ ...draft, startDate: value }))} placeholder="YYYY-MM-DD" />
+                <SaveButton label="حفظ السائق الجديد" saving={saving} onPress={() => void saveDriverChange()} />
+              </View>
+            ) : null}
+
+            <View style={styles.historyBlock}>
+              <Text style={styles.cardTitle}>سجل السائقين</Text>
+              {machineDetails.driverHistory.length ? machineDetails.driverHistory.map((driver) => (
+                <View key={driver.id} style={styles.historyRow}>
+                  <Text style={styles.partName}>{driver.driver_name} · {formatDzd(numberValue(driver.monthly_salary))} شهرياً</Text>
+                  <Text style={styles.machineMeta}>من {dateLabel(driver.start_date)} إلى {dateLabel(driver.end_date)} · سجله {driver.created_by_name}</Text>
+                  <Text style={styles.machineMeta}>التكلفة المحتسبة: {formatDzd(numberValue(driver.monthly_salary) *
+                    salaryPeriodFraction(driver.start_date, driver.end_date))}</Text>
+                </View>
+              )) : <Text style={styles.emptyText}>لا يوجد سائق مسجل لهذه الآلة.</Text>}
+            </View>
+
+            <View style={styles.historyBlock}>
+              <Text style={styles.cardTitle}>عقود الكراء المرتبطة</Text>
+              {machineDetails.rentals.length ? machineDetails.rentals.map((rental) => (
+                <View key={rental.id} style={styles.historyRow}>
+                  <Text style={styles.partName}>{rental.client_or_owner} · {formatDzd(numberValue(rental.total_amount))}</Text>
+                  <Text style={styles.machineMeta}>{dateLabel(rental.start_date)} إلى {dateLabel(rental.end_date)} · مدفوع {formatDzd(numberValue(rental.paid_amount))}</Text>
+                  <Text style={styles.machineMeta}>سجله {rental.created_by_name || "سجل قديم"} · {dateLabel(rental.created_at)}</Text>
+                  {rental.attachments?.length ? <View style={styles.attachmentList}>{rental.attachments.map((attachment) => (
+                    <AttachmentActions key={attachment.id} attachment={attachment} section="machinery"
+                      url={`/api/machinery/related-attachments/rental/${attachment.id}?machineryId=${selectedMachineId}`}
+                      canDelete={false} onDeleted={() => undefined} />
+                  ))}</View> : null}
+                </View>
+              )) : <Text style={styles.emptyText}>لا توجد عقود كراء مرتبطة بهذه الآلة.</Text>}
+            </View>
+
+            <View style={styles.historyBlock}>
+              <Text style={styles.cardTitle}>المازوت وعمليات الميدان</Text>
+              {machineDetails.fieldExpenses.length ? machineDetails.fieldExpenses.map((expense) => (
+                <View key={expense.id} style={styles.historyRow}>
+                  <Text style={styles.partName}>{expense.category} · {formatDzd(numberValue(expense.amount))}</Text>
+                  <Text style={styles.machineMeta}>{expense.fuel_liters != null ? `${expense.fuel_liters} لتر · ` : ""}{expense.site_name}{expense.details ? ` · ${expense.details}` : ""}</Text>
+                  <Text style={styles.machineMeta}>سجله {expense.created_by_name} · {dateLabel(expense.created_at)}</Text>
+                  {expense.attachments?.length ? <View style={styles.attachmentList}>{expense.attachments.map((attachment) => (
+                    <AttachmentActions key={attachment.id} attachment={attachment} section="machinery"
+                      url={`/api/machinery/related-attachments/field/${attachment.id}?machineryId=${selectedMachineId}`}
+                      canDelete={false} onDeleted={() => undefined} />
+                  ))}</View> : null}
+                </View>
+              )) : <Text style={styles.emptyText}>لا توجد مصاريف ميدانية مرتبطة بهذه الآلة.</Text>}
+            </View>
+          </View>
+        ) : selectedMachineId && loading ? (
+          <View style={styles.loading}><ActivityIndicator color={colors.blue} /><Text style={styles.emptyText}>جارٍ تحميل تفاصيل الآلة...</Text></View>
+        ) : null}
 
         <View style={styles.sectionHead}>
           <View>
@@ -592,6 +773,10 @@ const styles = {
   machineChipTitleActive: { color: "#FFFFFF" },
   machineCard: { flexDirection: "column" as const, gap: 8, padding: 10, minWidth: 205, flexGrow: 1, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
   machineCardActive: { borderColor: colors.blue, backgroundColor: "#F2F7FD" },
+  detailsHeading: { flexDirection: "row" as const, justifyContent: "space-between" as const, alignItems: "center" as const, gap: 10 },
+  driverForm: { backgroundColor: "#F7FAFD", borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 13, gap: 9 },
+  historyBlock: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, gap: 9 },
+  historyRow: { borderWidth: 1, borderColor: colors.border, backgroundColor: "#FBFCFE", borderRadius: 10, padding: 10, gap: 4 },
   machinePress: { flexDirection: "row" as const, alignItems: "center" as const, gap: 9 },
   machineIcon: { width: 34, height: 34, borderRadius: 10, backgroundColor: "#EDF4FC", alignItems: "center" as const, justifyContent: "center" as const },
   machineName: { color: colors.ink, fontSize: 12, fontWeight: "900" as const, textAlign: "right" as const },
