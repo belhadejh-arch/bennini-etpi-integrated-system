@@ -7,3 +7,4 @@
 - [Schema initialization retries](schema-initialization-retries.md) — never leave a rejected lazy-schema promise cached; transient setup failures can otherwise disable related endpoints.
 - [Serial sign-in policy](serial-sign-in-policy.md) — keep serial-code sign-in free of attempt throttling and temporary lockouts, as explicitly requested.
 - [Serial-code recovery](serial-code-recovery.md) — keep code recovery encrypted and admin-only; rotating the stable session secret makes existing encrypted codes unreadable.
+- [Machinery reference policy](machinery-reference-policy.md) — one shared machinery register; retain history and distinguish accrued driver salary from payments.

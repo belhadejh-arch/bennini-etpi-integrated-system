@@ -257,6 +257,23 @@ export default function FieldExpensesSection() {
     }
   };
 
+  const linkMachinery = async (expense: FieldExpense, machineryId: string) => {
+    setSaving(true);
+    setError("");
+    try {
+      await apiRequest(`/field-expenses/${expense.id}/machinery`, () => getToken(), {
+        method: "PATCH",
+        body: JSON.stringify({ machineryId: Number(machineryId) }),
+      });
+      await refresh();
+      setSuccess("تم ربط العملية بالآلة مع الاحتفاظ ببيانات مسجلها ومرفقاتها.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "تعذر ربط العملية بالآلة.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const addAttachments = async (expense: FieldExpense) => {
     const available = 5 - expense.attachments.length;
     if (available <= 0) {
@@ -486,6 +503,9 @@ export default function FieldExpensesSection() {
               saving={saving} onReview={() => void changeReview(expense, expense.review_status === "pending" ? "reviewed" : "pending")}
               canAddAttachment={canAddAttachments} onAddAttachment={() => void addAttachments(expense)}
               canDeleteAttachment={hasPermission(member, "field", "delete")}
+              machineryOptions={machineryOptions}
+              canLinkMachinery={canEdit && ["admin", "finance"].includes(member?.role ?? "")}
+              onLinkMachinery={(id) => void linkMachinery(expense, id)}
               onDeletedAttachment={() => void refresh()} />
           ))
         ) : (
@@ -530,7 +550,7 @@ function FilterChip({ label, selected, onPress }: { label: string; selected: boo
   );
 }
 
-function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, canAddAttachment, canDeleteAttachment, saving, onReview, onAddAttachment, onDeletedAttachment }: {
+function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, canAddAttachment, canDeleteAttachment, saving, onReview, onAddAttachment, onDeletedAttachment, machineryOptions, canLinkMachinery, onLinkMachinery }: {
   expense: FieldExpense;
   isAdmin: boolean;
   canRecord: boolean;
@@ -542,8 +562,13 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, can
   onReview: () => void;
   onAddAttachment: () => void;
   onDeletedAttachment: (attachmentId: number) => void;
+  machineryOptions: MachineryOption[];
+  canLinkMachinery: boolean;
+  onLinkMachinery: (id: string) => void;
 }) {
   const isFuel = expense.category === "مازوت" && expense.fuel_liters != null;
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [machineId, setMachineId] = useState(expense.machinery_id ? String(expense.machinery_id) : "");
   return (
     <View style={[styles.expenseCard, expense.review_status === "pending" && styles.pendingCard]}>
       <View style={styles.expenseTop}>
@@ -567,6 +592,19 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, can
         </View>
       </View>
 
+      {canLinkMachinery ? (
+        <View style={{ gap: 8 }}>
+          <Pressable onPress={() => setLinkOpen((open) => !open)}>
+            <Text style={styles.expenseMachine}>{linkOpen ? "إغلاق اختيار الآلة" : expense.machinery_id ? "تعديل الآلة المرتبطة" : "ربط العملية القديمة بآلة"}</Text>
+          </Pressable>
+          {linkOpen ? <>
+            <MachineryPicker items={machineryOptions} value={machineId} onChange={setMachineId} label="الآلة المرتبطة بالعملية" />
+            <Pressable disabled={saving || !machineId} onPress={() => onLinkMachinery(machineId)} style={styles.reviewAction}>
+              <Text style={styles.reviewActionText}>حفظ ربط الآلة</Text>
+            </Pressable>
+          </> : null}
+        </View>
+      ) : null}
       <View style={styles.recordedLine}>
         <Text style={styles.recordedText}>سجلها: {expense.created_by_name}</Text>
         <Text style={styles.recordedText}>{recordedAt(expense.created_at)}</Text>

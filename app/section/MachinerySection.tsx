@@ -47,7 +47,7 @@ type MachineDetails = {
   }>;
   driverHistory: Array<{
     id: number; driver_name: string; monthly_salary: number | string; start_date: string;
-    end_date: string | null; created_by_name: string; created_at: string;
+    end_date: string | null; created_by_name: string; created_at: string; accrued_cost: number;
   }>;
   driverTotalCost: number;
 };
@@ -81,27 +81,6 @@ const numberValue = (value: string | number | null | undefined) => {
   return Number.isFinite(number) ? number : 0;
 };
 const dateLabel = (value: string | null) => value ? value.slice(0, 10) : "—";
-const salaryPeriodFraction = (start: string, end: string | null) => {
-  const startTime = Date.parse(`${start.slice(0, 10)}T00:00:00.000Z`);
-  const endTime = Date.parse(`${(end ?? localDate()).slice(0, 10)}T00:00:00.000Z`);
-  if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime < startTime) return 0;
-  let cursor = new Date(Date.UTC(new Date(startTime).getUTCFullYear(), new Date(startTime).getUTCMonth(), 1));
-  let periods = 0;
-  while (cursor.getTime() <= endTime) {
-    const year = cursor.getUTCFullYear();
-    const month = cursor.getUTCMonth();
-    const monthStart = Date.UTC(year, month, 1);
-    const nextMonth = Date.UTC(year, month + 1, 1);
-    const monthEnd = nextMonth - 86400000;
-    const coveredStart = Math.max(startTime, monthStart);
-    const coveredEnd = Math.min(endTime, monthEnd);
-    if (coveredEnd >= coveredStart) {
-      periods += (Math.floor((coveredEnd - coveredStart) / 86400000) + 1) / ((nextMonth - monthStart) / 86400000);
-    }
-    cursor = new Date(nextMonth);
-  }
-  return periods;
-};
 
 export default function MachinerySection() {
   const router = useRouter();
@@ -534,8 +513,7 @@ export default function MachinerySection() {
                 <View key={driver.id} style={styles.historyRow}>
                   <Text style={styles.partName}>{driver.driver_name} · {formatDzd(numberValue(driver.monthly_salary))} شهرياً</Text>
                   <Text style={styles.machineMeta}>من {dateLabel(driver.start_date)} إلى {dateLabel(driver.end_date)} · سجله {driver.created_by_name}</Text>
-                  <Text style={styles.machineMeta}>التكلفة المحتسبة: {formatDzd(numberValue(driver.monthly_salary) *
-                    salaryPeriodFraction(driver.start_date, driver.end_date))}</Text>
+                  <Text style={styles.machineMeta}>التكلفة المحتسبة: {formatDzd(driver.accrued_cost)}</Text>
                 </View>
               )) : <Text style={styles.emptyText}>لا يوجد سائق مسجل لهذه الآلة.</Text>}
             </View>

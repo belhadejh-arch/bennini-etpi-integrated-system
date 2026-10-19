@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import multer from "multer";
 import cors from "cors";
 import pg from "pg";
+import { driverCostsByMachinery } from "./machinery-costs";
 import { allSectionIds, type SectionId } from "../shared/sections";
 import {
   effectivePermissions,
@@ -434,45 +435,6 @@ function validIsoDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
-
-type DriverAssignmentCostRow = {
-  machinery_id: number | string;
-  monthly_salary: number | string;
-  start_date: string;
-  end_date: string | null;
-};
-
-function driverCostsByMachinery(rows: DriverAssignmentCostRow[], today = new Date().toISOString().slice(0, 10)) {
-  const totals = new Map<number, number>();
-  const todayMs = Date.parse(`${today}T00:00:00.000Z`);
-  for (const row of rows) {
-    const startMs = Date.parse(`${String(row.start_date).slice(0, 10)}T00:00:00.000Z`);
-    const endValue = row.end_date ? String(row.end_date).slice(0, 10) : today;
-    const endMs = Math.min(Date.parse(`${endValue}T00:00:00.000Z`), todayMs);
-    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) continue;
-    let cursor = new Date(Date.UTC(new Date(startMs).getUTCFullYear(), new Date(startMs).getUTCMonth(), 1));
-    let cost = 0;
-    while (cursor.getTime() <= endMs) {
-      const year = cursor.getUTCFullYear();
-      const month = cursor.getUTCMonth();
-      const monthStart = Date.UTC(year, month, 1);
-      const nextMonth = Date.UTC(year, month + 1, 1);
-      const monthEnd = nextMonth - 86400000;
-      const coveredStart = Math.max(startMs, monthStart);
-      const coveredEnd = Math.min(endMs, monthEnd);
-      if (coveredEnd >= coveredStart) {
-        const daysInMonth = (nextMonth - monthStart) / 86400000;
-        const daysCovered = Math.floor((coveredEnd - coveredStart) / 86400000) + 1;
-        cost += Number(row.monthly_salary) * daysCovered / daysInMonth;
-      }
-      cursor = new Date(nextMonth);
-    }
-    const machineId = Number(row.machinery_id);
-    totals.set(machineId, (totals.get(machineId) ?? 0) + cost);
-  }
-  for (const [id, total] of totals) totals.set(id, Math.round(total * 100) / 100);
-  return totals;
 }
 
 type RentalInput = {
@@ -1281,7 +1243,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
         )
         SELECT 'driver_month_anniversary' AS type, id AS record_id, machinery_id AS machine_id,
           driver_name AS label, machine_name AS detail,
-          due_date - CURRENT_DATE AS days_left, created_at
+          due_date - CURRENT_DATE AS days_left, due_date::text AS occurrence_date, created_at
         FROM anniversaries
         WHERE due_date - CURRENT_DATE = 5
         ORDER BY due_date, id
@@ -1346,7 +1308,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
           message = `المتبقي ${Number(row.stock_quantity)} من أصل ${Number(row.quantity)}.`;
       }
       return {
-        id: `${type}:${recordId}`,
+        id: `${type}:${recordId}${row.occurrence_date ? `:${String(row.occurrence_date)}` : ""}`,
         type,
         title,
         message,
@@ -1378,7 +1340,7 @@ app.post("/api/notifications/read", authenticate, async (req: AuthenticatedReque
   const member = req.member!;
   const notificationIds: unknown = req.body?.notificationIds;
   if (!Array.isArray(notificationIds) || notificationIds.length < 1 || notificationIds.length > 100 ||
-      notificationIds.some((id) => typeof id !== "string" || !/^[a-z_]+:\d+$/.test(id))) {
+      notificationIds.some((id) => typeof id !== "string" || !/^[a-z_]+:\d+(?::\d{4}-\d{2}-\d{2})?$/.test(id))) {
     return fail(res, 400, "قائمة الإشعارات غير صالحة.");
   }
   try {
@@ -2604,7 +2566,7 @@ app.get("/api/machinery/:id/details", requireMachinerySchema, authenticate, requ
         FROM field_expenses e WHERE e.machinery_id = $1 ORDER BY e.created_at DESC, e.id DESC LIMIT 300
       `, [id]),
       pool.query(`
-        SELECT id, driver_name, monthly_salary, start_date::text AS start_date, end_date::text AS end_date,
+        SELECT id, machinery_id, driver_name, monthly_salary, start_date::text AS start_date, end_date::text AS end_date,
           created_by_name, created_at
         FROM machinery_driver_assignments WHERE machinery_id = $1
         ORDER BY start_date DESC, id DESC
@@ -2616,7 +2578,10 @@ app.get("/api/machinery/:id/details", requireMachinerySchema, authenticate, requ
       machine: machine.rows[0],
       rentals: rentals.rows,
       fieldExpenses: fieldExpenses.rows,
-      driverHistory: drivers.rows,
+      driverHistory: drivers.rows.map((driver) => ({
+        ...driver,
+        accrued_cost: driverCostsByMachinery([driver]).get(id) ?? 0,
+      })),
       driverTotalCost,
     });
   } catch (error) {
@@ -3271,6 +3236,39 @@ app.post("/api/field-expenses", requireFieldExpenseSchema, authenticate, require
     await client.query("ROLLBACK");
     console.error("Field expense creation failed:", error);
     fail(res, 500, "تعذر حفظ المصروف الميداني.");
+  } finally {
+    client.release();
+  }
+});
+
+app.patch("/api/field-expenses/:id/machinery", requireFieldExpenseSchema, authenticate, requireSection("field"), requirePermission("field", "edit"), async (req: AuthenticatedRequest, res) => {
+  if (!["admin", "finance"].includes(req.member!.role)) return fail(res, 403, "ربط مصاريف الميدان بالآلات متاح للإدارة فقط.");
+  const id = Number(req.params.id);
+  const machineryId = Number(req.body?.machineryId);
+  if (!Number.isSafeInteger(id) || id <= 0 || !Number.isSafeInteger(machineryId) || machineryId <= 0) {
+    return fail(res, 400, "اختر آلة مسجلة لربط العملية بها.");
+  }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const machine = await client.query("SELECT id FROM machinery WHERE id = $1", [machineryId]);
+    if (!machine.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "الآلة المحددة غير موجودة.");
+    }
+    const result = await client.query("UPDATE field_expenses SET machinery_id = $1 WHERE id = $2 RETURNING id", [machineryId, id]);
+    if (!result.rowCount) {
+      await client.query("ROLLBACK");
+      return fail(res, 404, "عملية الميدان غير موجودة.");
+    }
+    await writeAuditWithClient(client, req.member!, "ربط مصروف ميداني بآلة", `ربط العملية ${id} بالآلة ${machineryId}.`,
+      { section: "field", eventType: "update", entityId: id, data: { machineryId } });
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Field expense machinery link failed:", error);
+    fail(res, 500, "تعذر ربط العملية بالآلة.");
   } finally {
     client.release();
   }

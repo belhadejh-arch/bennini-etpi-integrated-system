@@ -1,6 +1,6 @@
-import { Search, Truck, X } from "lucide-react-native";
+import { ChevronDown, Search, X } from "lucide-react-native";
 import { useMemo, useState } from "react";
-import { Pressable, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { colors } from "../../lib/theme";
 
 export type MachineryOption = { id: number; name: string; code: string };
@@ -21,6 +21,7 @@ export default function MachineryPicker({
   onAdd?: () => void;
 }) {
   const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
   const filtered = useMemo(() => {
     const term = search.trim().toLocaleLowerCase();
     return items.filter((machine) =>
@@ -32,6 +33,15 @@ export default function MachineryPicker({
   return (
     <View style={{ gap: 7 }}>
       <Text style={{ color: colors.ink, fontSize: 12, fontWeight: "700", textAlign: "right" }}>{label}</Text>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((current) => !current)}
+        style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 9, minHeight: 44, paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Text style={{ flex: 1, color: selected ? colors.ink : colors.muted, fontSize: 12, textAlign: "right" }}>
+          {selected ? `${selected.name} · ${selected.code}` : emptyLabel}
+        </Text>
+        <ChevronDown size={16} color={colors.muted} />
+      </Pressable>
+      {open ? <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 9, padding: 8, gap: 8, backgroundColor: "#FFFFFF" }}>
       <View style={{
         minHeight: 42, borderWidth: 1, borderColor: colors.border, borderRadius: 9,
         paddingHorizontal: 10, flexDirection: "row", alignItems: "center", gap: 7,
@@ -48,21 +58,11 @@ export default function MachineryPicker({
         />
         {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={15} color={colors.muted} /></Pressable> : null}
       </View>
-      {selected ? (
-        <View style={{
-          alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6,
-          backgroundColor: "#EAF1FA", borderRadius: 8, paddingHorizontal: 9, paddingVertical: 6,
-        }}>
-          <Truck size={13} color={colors.blue} />
-          <Text style={{ color: colors.blue, fontSize: 10, fontWeight: "800" }}>{selected.name} · {selected.code}</Text>
-          <Pressable onPress={() => onChange("")} accessibilityLabel="إزالة اختيار الآلية"><X size={13} color={colors.blue} /></Pressable>
-        </View>
-      ) : null}
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+      <ScrollView style={{ maxHeight: 220 }} nestedScrollEnabled keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6 }}>
         {filtered.map((machine) => {
           const active = String(machine.id) === value;
           return (
-            <Pressable key={machine.id} onPress={() => onChange(String(machine.id))} style={{
+            <Pressable key={machine.id} onPress={() => { onChange(String(machine.id)); setOpen(false); setSearch(""); }} style={{
               borderWidth: 1, borderColor: active ? colors.blue : colors.border,
               backgroundColor: active ? "#EAF1FA" : "#FFFFFF", borderRadius: 8,
               paddingHorizontal: 9, paddingVertical: 7,
@@ -74,12 +74,13 @@ export default function MachineryPicker({
           );
         })}
         {!filtered.length ? <Text style={{ color: colors.muted, fontSize: 10, paddingVertical: 7 }}>لا توجد آلة مطابقة.</Text> : null}
-      </View>
+      </ScrollView>
       {onAdd ? (
-        <Pressable onPress={onAdd} style={{ alignSelf: "flex-start", paddingVertical: 5 }}>
+        <Pressable onPress={() => { setOpen(false); onAdd(); }} style={{ alignSelf: "flex-start", paddingVertical: 5 }}>
           <Text style={{ color: colors.blue, fontSize: 11, fontWeight: "800" }}>+ إضافة آلة جديدة</Text>
         </Pressable>
       ) : null}
+      </View> : null}
     </View>
   );
 }
