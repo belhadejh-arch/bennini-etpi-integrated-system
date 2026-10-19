@@ -11,7 +11,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useGlobalSearchParams<{ view?: string | string[] }>();
-  const { isLoaded, isSignedIn, member, signOut } = useAuth();
+  const { isLoaded, isSignedIn, member, language } = useAuth();
   const { width } = useWindowDimensions();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -42,7 +42,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
     if (pathname === "/members") return "users";
     if (pathname === "/settings") return "settings";
     if (section === "inventory") return selectedView === "purchases" ? "purchases" : "inventory";
-    if (section === "machinery") return selectedView === "spare-parts" ? "spare-parts" : "machinery";
+    if (section === "machinery") return "machinery";
     return section ?? "";
   }, [pathname, section, selectedView]);
 
@@ -58,11 +58,11 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   return (
     <NotificationProvider>
       <SidebarProvider value={sidebarAction}>
-        <View style={[styles.shell, canShowSidebar && !compact && styles.desktopShell]}>
+        <View style={[styles.shell, canShowSidebar && !compact && styles.desktopShell, { backgroundColor: colors.background, direction: language === "ar" ? "rtl" : "ltr" }]}>
           {canShowSidebar && !compact ? (
             <AppSidebar member={visibleMember!} activeId={activeId} onNavigate={onNavigate} />
           ) : null}
-          <View style={styles.content}>{children}</View>
+          <View style={[styles.content, { direction: language === "ar" ? "rtl" : "ltr" }]}>{children}</View>
           {canShowSidebar && compact && drawerOpen ? (
             <>
               <SidebarBackdrop onPress={() => setDrawerOpen(false)} />
@@ -78,6 +78,6 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
 
 const styles = {
   shell: { flex: 1 as const, position: "relative" as const, backgroundColor: colors.background },
-  desktopShell: { flexDirection: "row" as const, direction: "rtl" as const },
+  desktopShell: { flexDirection: "row" as const },
   content: { flex: 1 as const, minWidth: 0 as const, minHeight: 0 as const },
 };

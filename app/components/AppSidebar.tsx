@@ -11,16 +11,17 @@ import {
   ShoppingCart,
   Truck,
   Wallet,
-  Wrench,
   X,
   Users,
 } from "lucide-react-native";
 import { Pressable, ScrollView, Text, View } from "react-native";
-import { colors } from "../../lib/theme";
+import { colors, makeStylesReactive } from "../../lib/theme";
 import type { Member } from "../../lib/api";
 import { hasPermission } from "../../shared/access";
 import type { SectionId } from "../../shared/sections";
 import { CompanyLogo } from "./CompanyLogo";
+import { useAuth } from "../../lib/auth";
+import { translate } from "../../lib/localization";
 
 type SidebarAction = { toggle: () => void; visible: boolean };
 const SidebarContext = createContext<SidebarAction | null>(null);
@@ -48,11 +49,10 @@ export const sidebarEntries: SidebarEntry[] = [
   { id: "cheques", label: "الشيكات", icon: ReceiptText, section: "cheques" },
   { id: "rentals", label: "الكراء", icon: Building2, section: "rentals" },
   { id: "machinery", label: "المركبات والآليات", icon: Truck, section: "machinery", view: "vehicles" },
-  { id: "spare-parts", label: "قطع الغيار", icon: Wrench, section: "machinery", view: "spare-parts" },
   { id: "field", label: "تطبيق / عمليات رئيس الأشغال", icon: HardHat, section: "field" },
   { id: "users", label: "المستخدمون والصلاحيات", icon: Users, section: "users", adminOnly: true },
   { id: "audit", label: "سجل العمليات", icon: History, section: "audit", adminOnly: true },
-  { id: "settings", label: "الإعدادات", icon: Settings, adminOnly: true },
+  { id: "settings", label: "الإعدادات", icon: Settings },
 ];
 
 export function AppSidebar({
@@ -68,13 +68,14 @@ export function AppSidebar({
   onClose?: () => void;
   drawer?: boolean;
 }) {
+  const { language } = useAuth();
   const isAdmin = member.role === "admin";
   const entries = sidebarEntries.filter((entry) =>
-    entry.adminOnly ? isAdmin : entry.section ? hasPermission(member, entry.section, "view") : false,
+    entry.id === "settings" ? true : entry.adminOnly ? isAdmin : entry.section ? hasPermission(member, entry.section, "view") : false,
   );
 
   return (
-    <View style={[styles.sidebar, drawer && styles.drawer]}>
+    <View style={[styles.sidebar, drawer && styles.drawer, { backgroundColor: colors.deepBlue, direction: language === "ar" ? "rtl" : "ltr" }]}>
       <View style={styles.brand}>
         <CompanyLogo width={104} height={56} framed />
         <View style={styles.brandCopy}>
@@ -106,9 +107,9 @@ export function AppSidebar({
               ]}
             >
               {selected ? <View style={styles.activeMark} /> : null}
-              <Icon size={18} color={selected ? colors.yellow : colors.lightBlue} />
-              <Text style={[styles.navLabel, selected && styles.navLabelSelected]} numberOfLines={1}>
-                {entry.label}
+              <Icon size={18} color={selected ? colors.onAccent : colors.lightBlue} />
+              <Text style={[styles.navLabel, selected && styles.navLabelSelected]}>
+                {translate(entry.label, language)}
               </Text>
             </Pressable>
           );
@@ -118,8 +119,8 @@ export function AppSidebar({
       <View style={styles.account}>
         <View style={styles.avatar}><Text style={styles.avatarText}>{member.name?.trim().charAt(0) || "م"}</Text></View>
         <View style={styles.accountCopy}>
-          <Text numberOfLines={1} style={styles.accountName}>{member.name || "عضو الفريق"}</Text>
-          <Text numberOfLines={1} style={styles.accountRole}>{member.role_name || roleLabel(member.role)}</Text>
+          <Text style={styles.accountName}>{member.name || "عضو الفريق"}</Text>
+          <Text style={styles.accountRole}>{member.role_name || translate(roleLabel(member.role), language)}</Text>
         </View>
       </View>
     </View>
@@ -187,11 +188,11 @@ const styles = {
     paddingHorizontal: 12,
     backgroundColor: "transparent",
   },
-  navItemSelected: { backgroundColor: "#0555A8" },
+  navItemSelected: { backgroundColor: colors.yellow },
   navItemPressed: { opacity: 0.76 },
-  activeMark: { position: "absolute" as const, right: 0, top: 10, bottom: 10, width: 3, borderRadius: 3, backgroundColor: colors.yellow },
+  activeMark: { position: "absolute" as const, right: 0, top: 10, bottom: 10, width: 3, borderRadius: 3, backgroundColor: colors.onAccent },
   navLabel: { flex: 1, color: "#E9F0F5", fontSize: 12, fontWeight: "600" as const, textAlign: "right" as const },
-  navLabelSelected: { color: "#FFFFFF", fontWeight: "800" as const },
+  navLabelSelected: { color: colors.onAccent, fontWeight: "800" as const },
   account: {
     minHeight: 60,
     flexDirection: "row" as const,
@@ -202,13 +203,14 @@ const styles = {
     paddingTop: 11,
     paddingHorizontal: 3,
   },
-  avatar: { width: 35, height: 35, borderRadius: 12, alignItems: "center" as const, justifyContent: "center" as const, backgroundColor: "#FFFFFF1A" },
-  avatarText: { color: colors.yellow, fontSize: 15, fontWeight: "800" as const },
+  avatar: { width: 35, height: 35, borderRadius: 12, alignItems: "center" as const, justifyContent: "center" as const, backgroundColor: colors.yellow },
+  avatarText: { color: colors.onAccent, fontSize: 15, fontWeight: "800" as const },
   accountCopy: { flex: 1, minWidth: 0 },
   accountName: { color: "#FFFFFF", fontSize: 11, fontWeight: "700" as const, textAlign: "right" as const },
   accountRole: { color: colors.lightBlue, fontSize: 10, marginTop: 4, textAlign: "right" as const },
   backdrop: { position: "absolute" as const, zIndex: 19, top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "#07152F80" },
 };
+makeStylesReactive(styles);
 
 function roleLabel(role: string) {
   return ({ admin: "مدير النظام", finance: "الإدارة المالية", field: "رئيس أشغال", supervisor: "مشرف", partner: "شريك", viewer: "عضو" } as Record<string, string>)[role] ?? "عضو";

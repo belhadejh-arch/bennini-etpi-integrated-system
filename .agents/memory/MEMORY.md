@@ -9,3 +9,4 @@
 - [Serial-code recovery](serial-code-recovery.md) — keep code recovery encrypted and admin-only; rotating the stable session secret makes existing encrypted codes unreadable.
 - [Machinery reference policy](machinery-reference-policy.md) — one shared machinery register; retain history and distinguish accrued driver salary from payments.
 - [Financial account rules](finance-account-policy.md) — separate customer/partner accounts, per-transaction interest, optional sale prices, and cheque settlement without cash changes.
+- [Interface accessibility](interface-accessibility-policy.md) — readable text app-wide; Arabic/light defaults, optional French and dark/system per account, user data never translated.

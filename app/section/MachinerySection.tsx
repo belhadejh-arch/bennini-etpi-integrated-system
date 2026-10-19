@@ -1,10 +1,9 @@
 import { useAuth } from "../../lib/auth";
-import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
-  ArrowRight, FilePlus2, HardHat, Plus, RefreshCw, Search, Truck, Wrench, X,
+  ArrowRight, HardHat, Plus, RefreshCw, Search, Truck, Wrench, X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -14,9 +13,9 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
-import { attachmentPickerTypes } from "../../lib/attachments";
-import { colors, formatDzd } from "../../lib/theme";
-import { canUploadFiles, hasPermission } from "../../shared/access";
+import { colors, formatDzd, formatDate, makeStylesReactive } from "../../lib/theme";
+import { translate } from "../../lib/localization";
+import { hasPermission } from "../../shared/access";
 
 type Machinery = {
   id: number;
@@ -26,6 +25,7 @@ type Machinery = {
   status: string;
   hours_worked: number;
   repair_count: number;
+  legacy_repair_count?: number;
   total_expenses: number | string;
   notes: string;
   driver_assignment_id: number | null;
@@ -69,7 +69,6 @@ type SparePart = {
   recorded_by_name: string;
   attachments: Attachment[];
 };
-type DocumentAsset = DocumentPicker.DocumentPickerAsset;
 type ApiError = Error & { status?: number; body?: { pending?: boolean } };
 
 const localDate = () => {
@@ -80,14 +79,15 @@ const numberValue = (value: string | number | null | undefined) => {
   const number = Number(value ?? 0);
   return Number.isFinite(number) ? number : 0;
 };
-const dateLabel = (value: string | null) => value ? value.slice(0, 10) : "—";
+const dateLabel = (value: string | null) => formatDate(value);
 
 export default function MachinerySection() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ focusId?: string | string[]; machineId?: string | string[] }>();
   const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
   const routeMachineId = Array.isArray(routeParams.machineId) ? routeParams.machineId[0] : routeParams.machineId;
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken, language } = useAuth();
+  const t = (text: string) => translate(text, language);
   const [member, setMember] = useState<Member | null>(null);
   const [machinery, setMachinery] = useState<Machinery[]>([]);
   const [machineDetails, setMachineDetails] = useState<MachineDetails | null>(null);
@@ -101,25 +101,17 @@ export default function MachinerySection() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [machineFormOpen, setMachineFormOpen] = useState(false);
-  const [partFormOpen, setPartFormOpen] = useState(false);
   const [machineDraft, setMachineDraft] = useState({
     code: "", name: "", category: "", notes: "", driverName: "",
     driverMonthlySalary: "", driverStartDate: localDate(),
   });
   const [driverChangeOpen, setDriverChangeOpen] = useState(false);
   const [driverDraft, setDriverDraft] = useState({ driverName: "", monthlySalary: "", startDate: localDate() });
-  const [partDraft, setPartDraft] = useState({
-    machineryId: "", name: "", quantity: "", buyPrice: "", supplier: "",
-    invoiceNumber: "", installationDate: localDate(), stockQuantity: "", repairExpense: "0", notes: "",
-  });
-  const [pickedDocuments, setPickedDocuments] = useState<DocumentAsset[]>([]);
 
   const isAdmin = member?.role === "admin";
   const canAccess = hasPermission(member, "machinery", "view");
   const canCreate = hasPermission(member, "machinery", "create");
   const canEdit = hasPermission(member, "machinery", "edit");
-  const canManage = canCreate || canEdit;
-  const canAddAttachments = canManage && canUploadFiles(member);
   const searchTerm = search.trim().toLocaleLowerCase();
   const filteredMachinery = useMemo(
     () => machinery.filter((machine) => !searchTerm || `${machine.id} ${machine.name} ${machine.code} ${machine.category} ${machine.status} ${machine.notes}`.toLocaleLowerCase().includes(searchTerm)),
@@ -136,6 +128,7 @@ export default function MachinerySection() {
   );
   const totalExpenses = machinery.reduce((total, machine) => total + numberValue(machine.total_expenses), 0);
   const totalRepairRecords = machinery.reduce((total, machine) => total + Number(machine.repair_count || 0), 0);
+  const totalLegacyRepairRecords = machinery.reduce((total, machine) => total + Number(machine.legacy_repair_count || 0), 0);
 
   const refresh = useCallback(async () => {
     if (!isSignedIn) return;
@@ -174,8 +167,12 @@ export default function MachinerySection() {
     if (id && Number.isSafeInteger(id) && id > 0) setSelectedMachineId(id);
   }, [routeMachineId]);
 
-  const changePartField = (key: keyof typeof partDraft, value: string) =>
-    setPartDraft((current) => ({ ...current, [key]: value }));
+  useEffect(() => {
+    if (!routeMachineId && focusId && parts.length) {
+      const historical = parts.find((part) => String(part.id) === focusId);
+      if (historical) setSelectedMachineId(historical.machinery_id);
+    }
+  }, [focusId, parts, routeMachineId]);
 
   const saveMachinery = async () => {
     if (!machineDraft.code.trim() || !machineDraft.name.trim() ||
@@ -242,99 +239,6 @@ export default function MachinerySection() {
     }
   };
 
-  const chooseDocuments = async () => {
-    const remaining = 5 - pickedDocuments.length;
-    if (remaining <= 0) {
-      setError("يمكن إرفاق خمسة ملفات كحد أقصى لكل سجل.");
-      return;
-    }
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        multiple: true,
-        copyToCacheDirectory: true,
-        type: [...attachmentPickerTypes],
-      });
-      if (!result.canceled && result.assets.length) {
-        setPickedDocuments((current) => [...current, ...result.assets].slice(0, remaining));
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "تعذر اختيار الملفات.");
-    }
-  };
-
-  const uploadDocuments = async (partId: number, documents: DocumentAsset[]) => {
-    const formData = new FormData();
-    documents.forEach((asset) => {
-      if (Platform.OS === "web" && asset.file) formData.append("files", asset.file, asset.name);
-      else formData.append("files", {
-        uri: asset.uri, name: asset.name, type: asset.mimeType || "application/octet-stream",
-      } as unknown as Blob);
-    });
-    await apiRequest(`/machinery/spare-parts/${partId}/attachments`, () => getToken(), {
-      method: "POST", body: formData,
-    });
-  };
-
-  const saveSparePart = async () => {
-    const quantity = Number(partDraft.quantity);
-    const stockQuantity = Number(partDraft.stockQuantity);
-    const buyPrice = Number(partDraft.buyPrice);
-    const repairExpense = Number(partDraft.repairExpense || 0);
-    if (!partDraft.machineryId || !partDraft.name.trim() ||
-        !Number.isSafeInteger(quantity) || quantity <= 0 ||
-        !Number.isSafeInteger(stockQuantity) || stockQuantity < 0 || stockQuantity > quantity ||
-        !Number.isFinite(buyPrice) || buyPrice < 0 ||
-        !Number.isFinite(repairExpense) || repairExpense < 0 ||
-        (partDraft.installationDate && !/^\d{4}-\d{2}-\d{2}$/.test(partDraft.installationDate))) {
-      setError("تحقق من الآلية والقطعة والكميات والأسعار وتاريخ التركيب.");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    setNotice("");
-    let savedId: number | null = null;
-    try {
-      const result = await apiRequest<{ id: number }>("/machinery/spare-parts", () => getToken(), {
-        method: "POST",
-        body: JSON.stringify({
-          ...partDraft,
-          machineryId: Number(partDraft.machineryId),
-          name: partDraft.name.trim(),
-          supplier: partDraft.supplier.trim(),
-          invoiceNumber: partDraft.invoiceNumber.trim(),
-          quantity,
-          buyPrice,
-          stockQuantity,
-          repairExpense,
-          notes: partDraft.notes.trim(),
-        }),
-      });
-      savedId = result.id;
-      if (pickedDocuments.length) await uploadDocuments(savedId, pickedDocuments);
-      setPartDraft({
-        machineryId: partDraft.machineryId, name: "", quantity: "", buyPrice: "", supplier: "",
-        invoiceNumber: "", installationDate: localDate(), stockQuantity: "", repairExpense: "0", notes: "",
-      });
-      setPickedDocuments([]);
-      setPartFormOpen(false);
-      setNotice("تم حفظ سجل قطعة الغيار والإصلاح.");
-      await refresh();
-    } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "تعذر حفظ سجل الصيانة.";
-      if (savedId) {
-        setNotice("");
-        setError(`تم حفظ السجل، لكن تعذر رفع المرفقات. ${message}`);
-        setPickedDocuments([]);
-        setPartFormOpen(false);
-        await refresh();
-      } else {
-        setError(message);
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const openAttachment = async (attachment: Attachment) => {
     try {
       const token = await getToken();
@@ -376,15 +280,15 @@ export default function MachinerySection() {
   return (
     <View style={styles.screen}>
       <AppHeader
-        title="المركبات والآليات وقطع الغيار"
+        title={t("المركبات والآليات")}
         leftAction={<HeaderAction label="رجوع" onPress={() => router.back()}><ArrowRight size={19} color="#FFFFFF" /></HeaderAction>}
         rightAction={<HeaderAction label="تحديث" onPress={() => void refresh()}><RefreshCw size={17} color="#FFFFFF" /></HeaderAction>}
       />
       <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
         <View style={styles.headingRow}>
           <View style={styles.intro}>
-            <Text style={styles.title}>المركبات والآليات وقطع الغيار</Text>
-            <Text style={styles.subtitle}>سجّل الأصول وتابع قطع الغيار والمخزون ومصاريف الإصلاح لكل آلية.</Text>
+            <Text style={styles.title}>{t("المركبات والآليات")}</Text>
+            <Text style={styles.subtitle}>{t("سجّل الأصول وتابع قطع الغيار والمخزون ومصاريف الإصلاح لكل آلية.")}</Text>
           </View>
         </View>
 
@@ -394,6 +298,7 @@ export default function MachinerySection() {
         <View style={styles.summaryRow}>
           <Summary label="المركبات والآليات" value={String(machinery.length)} icon={<Truck size={17} color={colors.blue} />} />
           <Summary label="سجلات القطع والإصلاح" value={String(totalRepairRecords)} icon={<Wrench size={17} color={colors.blue} />} />
+          <Summary label="سجلات قطع الغيار القديمة" value={String(totalLegacyRepairRecords)} icon={<Wrench size={17} color={colors.muted} />} />
           <Summary label="إجمالي المصاريف" value={formatDzd(totalExpenses)} icon={<HardHat size={17} color={colors.blue} />} />
         </View>
 
@@ -405,7 +310,7 @@ export default function MachinerySection() {
             style={styles.searchInput}
             placeholder="ابحث بالآلية أو القطعة أو المورد أو المستخدم"
             placeholderTextColor="#98A5B4"
-            accessibilityLabel="البحث في الآليات وقطع الغيار"
+            accessibilityLabel={t("البحث في الآليات")}
           />
           {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
         </View>
@@ -426,7 +331,7 @@ export default function MachinerySection() {
           </View>
           {canCreate ? (
             <Pressable onPress={() => { setMachineFormOpen((open) => !open); setError(""); }} style={styles.smallButton}>
-              {machineFormOpen ? <X size={15} color={colors.navy} /> : <Plus size={15} color={colors.navy} />}
+              {machineFormOpen ? <X size={15} color={colors.onAccent} /> : <Plus size={15} color={colors.onAccent} />}
               <Text style={styles.smallButtonText}>{machineFormOpen ? "إغلاق" : "إضافة آلية"}</Text>
             </Pressable>
           ) : null}
@@ -538,7 +443,7 @@ export default function MachinerySection() {
               <Text style={styles.cardTitle}>المازوت وعمليات الميدان</Text>
               {machineDetails.fieldExpenses.length ? machineDetails.fieldExpenses.map((expense) => (
                 <View key={expense.id} style={styles.historyRow}>
-                  <Text style={styles.partName}>{expense.category} · {formatDzd(numberValue(expense.amount))}</Text>
+                  <Text style={styles.partName}>{t(expense.category)} · {formatDzd(numberValue(expense.amount))}</Text>
                   <Text style={styles.machineMeta}>{expense.fuel_liters != null ? `${expense.fuel_liters} لتر · ` : ""}{expense.site_name}{expense.details ? ` · ${expense.details}` : ""}</Text>
                   <Text style={styles.machineMeta}>سجله {expense.created_by_name} · {dateLabel(expense.created_at)}</Text>
                   {expense.attachments?.length ? <View style={styles.attachmentList}>{expense.attachments.map((attachment) => (
@@ -554,79 +459,23 @@ export default function MachinerySection() {
           <View style={styles.loading}><ActivityIndicator color={colors.blue} /><Text style={styles.emptyText}>جارٍ تحميل تفاصيل الآلة...</Text></View>
         ) : null}
 
-        <View style={styles.sectionHead}>
+        {selectedMachineId !== null ? <View style={styles.sectionHead}>
           <View>
-            <Text style={styles.sectionTitle}>قطع الغيار والإصلاحات</Text>
+            <Text style={styles.sectionTitle}>سجلات قطع الغيار القديمة</Text>
             <Text style={styles.sectionHint}>
-              {selectedMachineId === null ? "السجل الكامل للمصاريف والإصلاحات." : `السجل المرتبط بـ ${machinery.find((item) => item.id === selectedMachineId)?.name ?? "الآلية المحددة"}.`}
+              السجلات التاريخية محفوظة للقراءة فقط. تُسجل القطع والإصلاحات الجديدة ضمن عمليات الميدان.
             </Text>
           </View>
-          {canCreate ? (
-            <Pressable
-              onPress={() => {
-                setPartFormOpen((open) => !open);
-                setError("");
-                setPartDraft((draft) => ({
-                  ...draft,
-                  machineryId: selectedMachineId ? String(selectedMachineId) : draft.machineryId,
-                }));
-              }}
-              disabled={!machinery.length}
-              style={[styles.smallButton, !machinery.length && styles.disabled]}
-            >
-              {partFormOpen ? <X size={15} color={colors.navy} /> : <Plus size={15} color={colors.navy} />}
-              <Text style={styles.smallButtonText}>{partFormOpen ? "إغلاق" : "تسجيل قطعة أو إصلاح"}</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        </View> : null}
 
-        {partFormOpen && canCreate ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>بيانات قطعة الغيار والإصلاح</Text>
-            <Text style={styles.fieldLabel}>المركبة أو الآلية *</Text>
-            <View style={styles.machinePicker}>
-              {machinery.map((machine) => {
-                const selected = partDraft.machineryId === String(machine.id);
-                return (
-                  <Pressable key={machine.id} onPress={() => changePartField("machineryId", String(machine.id))} style={[styles.machineOption, selected && styles.machineOptionSelected]}>
-                    <Text style={[styles.machineOptionText, selected && styles.machineOptionTextSelected]}>{machine.name} · {machine.code}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Field label="اسم قطعة الغيار *" value={partDraft.name} onChange={(value) => changePartField("name", value)} placeholder="مثال: فلتر زيت" />
-            <Field label="الكمية المشتراة *" value={partDraft.quantity} onChange={(value) => changePartField("quantity", value)} placeholder="0" numeric />
-            <Field label="سعر الشراء للوحدة (دج) *" value={partDraft.buyPrice} onChange={(value) => changePartField("buyPrice", value)} placeholder="0" numeric />
-            <Field label="المورد" value={partDraft.supplier} onChange={(value) => changePartField("supplier", value)} placeholder="اسم المورد" />
-            <Field label="رقم الفاتورة" value={partDraft.invoiceNumber} onChange={(value) => changePartField("invoiceNumber", value)} placeholder="اختياري" />
-            <Field label="تاريخ التركيب" value={partDraft.installationDate} onChange={(value) => changePartField("installationDate", value)} placeholder="YYYY-MM-DD" />
-            <Field label="الكمية الموجودة في المخزون *" value={partDraft.stockQuantity} onChange={(value) => changePartField("stockQuantity", value)} placeholder="أدخل الكمية المتبقية" numeric />
-            <Field label="مصاريف الإصلاح (دج)" value={partDraft.repairExpense} onChange={(value) => changePartField("repairExpense", value)} placeholder="0" numeric />
-            <Field label="ملاحظات" value={partDraft.notes} onChange={(value) => changePartField("notes", value)} placeholder="تفاصيل عن التركيب أو العطل" multiline />
-            {canAddAttachments ? (
-              <>
-                <Text style={styles.helper}>يُحفظ السجل ضمن تاريخ الآلية المختارة. أرفق صورة أو فاتورة أو وثيقة عند الحاجة (حتى 5 ملفات).</Text>
-                <Pressable onPress={() => void chooseDocuments()} style={styles.attachButton}>
-                  <FilePlus2 size={16} color={colors.blue} />
-                  <Text style={styles.attachText}>{pickedDocuments.length ? `إضافة مرفقات (${pickedDocuments.length})` : "اختيار صور أو مستندات"}</Text>
-                </Pressable>
-                {pickedDocuments.map((asset) => (
-                  <Text key={`${asset.name}-${asset.size}`} style={styles.fileName}>{asset.name}</Text>
-                ))}
-              </>
-            ) : null}
-            <SaveButton label="حفظ سجل قطعة الغيار" saving={saving} onPress={() => void saveSparePart()} />
-          </View>
-        ) : null}
-
-        {loading && filteredParts.length === 0 ? <View style={styles.loading}><ActivityIndicator color={colors.blue} /></View> : null}
-        {!loading && filteredParts.length === 0 ? (
+        {selectedMachineId !== null && loading && filteredParts.length === 0 ? <View style={styles.loading}><ActivityIndicator color={colors.blue} /></View> : null}
+        {selectedMachineId !== null && !loading && filteredParts.length === 0 ? (
           <View style={styles.emptyCard}>
             <Text style={styles.emptyText}>{search ? "لا توجد نتائج مطابقة للبحث." : `لا توجد قطع غيار أو إصلاحات مسجلة${selectedMachineId ? " لهذه الآلية" : ""}.`}</Text>
-            {canManage && !search ? <Text style={styles.emptyHint}>استخدم زر التسجيل لإضافة أول سجل.</Text> : null}
+            {!search ? <Text style={styles.emptyHint}>تُسجل القطع والإصلاحات الجديدة من عمليات الميدان.</Text> : null}
           </View>
         ) : null}
-        {filteredParts.map((part) => (
+        {selectedMachineId !== null && filteredParts.map((part) => (
           <View key={part.id} style={styles.partCard}>
             <View style={styles.partTop}>
               <View style={{ flex: 1 }}>
@@ -649,7 +498,7 @@ export default function MachinerySection() {
               <Text style={styles.costLabel}>تكلفة الشراء والإصلاح</Text>
               <Text style={styles.costValue}>{formatDzd(part.quantity * numberValue(part.buy_price) + numberValue(part.repair_expense))}</Text>
             </View>
-            <RecordNotes entity="machinerySparePart" recordId={part.id} initialNotes={part.notes} editable={canEdit} />
+            <RecordNotes entity="machinerySparePart" recordId={part.id} initialNotes={part.notes} editable={false} />
             <Text style={styles.recordedBy}>سجلها: {part.recorded_by_name}</Text>
             {part.attachments?.length ? (
               <View style={styles.attachmentBlock}>
@@ -658,8 +507,8 @@ export default function MachinerySection() {
                   {part.attachments.map((attachment) => (
                     <AttachmentActions key={attachment.id} attachment={attachment} section="machinery"
                       url={`/api/machinery/spare-part-attachments/${attachment.id}`}
-                      canDelete={hasPermission(member, "machinery", "delete")}
-                      onDeleted={() => void refresh()} />
+                      canDelete={false}
+                      onDeleted={() => undefined} />
                   ))}
                 </View>
               </View>
@@ -737,7 +586,7 @@ const styles = {
   sectionTitle: { color: colors.navy, fontSize: 16, fontWeight: "900" as const, textAlign: "right" as const },
   sectionHint: { color: colors.muted, fontSize: 10, marginTop: 4, textAlign: "right" as const, lineHeight: 15 },
   smallButton: { minHeight: 38, paddingHorizontal: 11, borderRadius: 10, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 5 },
-  smallButtonText: { color: colors.navy, fontSize: 10, fontWeight: "800" as const },
+  smallButtonText: { color: colors.onAccent, fontSize: 14, fontWeight: "600" as const },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 17, gap: 12 },
   cardTitle: { color: colors.navy, fontSize: 14, fontWeight: "900" as const, textAlign: "right" as const },
   field: { gap: 5 },
@@ -746,7 +595,7 @@ const styles = {
   multiline: { minHeight: 78, textAlignVertical: "top" as const },
   machineList: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 8 },
   machineChip: { paddingHorizontal: 13, minHeight: 39, borderRadius: 11, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, alignItems: "center" as const, justifyContent: "center" as const },
-  machineChipActive: { backgroundColor: colors.blue, borderColor: colors.blue },
+  machineChipActive: { backgroundColor: colors.action, borderColor: colors.action },
   machineChipTitle: { color: colors.muted, fontSize: 11, fontWeight: "800" as const },
   machineChipTitleActive: { color: "#FFFFFF" },
   machineCard: { flexDirection: "column" as const, gap: 8, padding: 10, minWidth: 205, flexGrow: 1, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
@@ -768,7 +617,7 @@ const styles = {
   attachButton: { minHeight: 40, borderWidth: 1, borderColor: "#B7CCE2", borderRadius: 10, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 7, backgroundColor: "#F7FAFD" },
   attachText: { color: colors.blue, fontSize: 11, fontWeight: "800" as const },
   fileName: { color: colors.muted, fontSize: 10, textAlign: "right" as const },
-  saveButton: { minHeight: 44, borderRadius: 11, backgroundColor: colors.blue, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 2 },
+  saveButton: { minHeight: 44, borderRadius: 11, backgroundColor: colors.action, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 2 },
   saveText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" as const },
   disabled: { opacity: 0.5 },
   loading: { padding: 20, alignItems: "center" as const },
@@ -801,3 +650,4 @@ const styles = {
   secondaryButton: { alignSelf: "center" as const, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
   secondaryText: { color: colors.navy, fontWeight: "800" as const },
 };
+makeStylesReactive(styles);

@@ -24,6 +24,8 @@ ALTER TABLE members ADD COLUMN IF NOT EXISTS role_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE members ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE members ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL
   DEFAULT '{"uploadFiles":true,"viewFinancialData":true,"manageOperations":true}'::jsonb;
+ALTER TABLE members ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'ar' CHECK (language IN ('ar', 'fr'));
+ALTER TABLE members ADD COLUMN IF NOT EXISTS appearance TEXT NOT NULL DEFAULT 'light' CHECK (appearance IN ('light', 'dark', 'system'));
 
 CREATE TABLE IF NOT EXISTS suppliers (
   id BIGSERIAL PRIMARY KEY,

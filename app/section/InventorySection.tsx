@@ -15,8 +15,9 @@ import RecordNotes from "../components/RecordNotes";
 import EntityPicker, { type FinanceEntity } from "../components/EntityPicker";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
-import { colors, formatDzd } from "../../lib/theme";
+import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
+import { translate } from "../../lib/localization";
 
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type InventoryItem = {
@@ -97,14 +98,14 @@ function profitLabel(value: number | string | null | undefined) {
 }
 
 function dateLabel(value: string) {
-  return value ? value.slice(0, 10) : "—";
+  return formatDate(value);
 }
 
 export default function InventorySection() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
   const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken, language } = useAuth();
   const { width } = useWindowDimensions();
   const wide = width >= 820;
   const [member, setMember] = useState<Member | null>(null);
@@ -412,7 +413,7 @@ export default function InventorySection() {
           </View>
           {canCreate ? (
             <Pressable onPress={purchaseOpen ? () => { setPurchaseOpen(false); setEditingItem(null); setPickedDocs([]); } : startNewPurchase} style={styles.primaryButton}>
-              {purchaseOpen ? <X size={17} color={colors.navy} /> : <Plus size={18} color={colors.navy} />}
+              {purchaseOpen ? <X size={17} color={colors.onAccent} /> : <Plus size={18} color={colors.onAccent} />}
               <Text style={styles.primaryButtonText}>{purchaseOpen ? "إغلاق النموذج" : "تسجيل عملية شراء"}</Text>
             </Pressable>
           ) : null}
@@ -514,7 +515,7 @@ export default function InventorySection() {
                   { value: "available", label: "متوفر" },
                   { value: "empty", label: "نفد" },
                 ].map((option) => (
-                  <FilterChip key={option.value} label={option.label} selected={draftFilters.stock === option.value} onPress={() => setFilterField("stock", option.value)} />
+                  <FilterChip key={option.value} label={translate(option.label, language)} selected={draftFilters.stock === option.value} onPress={() => setFilterField("stock", option.value)} />
                 ))}
               </View>
               <View style={styles.actionsRow}>
@@ -725,7 +726,7 @@ const styles = {
   title: { color: colors.navy, fontWeight: "900" as const, fontSize: 22, textAlign: "right" as const },
   subtitle: { color: colors.muted, fontSize: 12, marginTop: 5, textAlign: "right" as const, lineHeight: 19 },
   primaryButton: { minHeight: 44, borderRadius: 12, backgroundColor: colors.yellow, paddingHorizontal: 15, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
-  primaryButtonText: { color: colors.navy, fontWeight: "800" as const, fontSize: 12 },
+  primaryButtonText: { color: colors.onAccent, fontWeight: "600" as const, fontSize: 14, lineHeight: 22 },
   summaryGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 10 },
   summaryCard: { flexGrow: 1, flexBasis: 175, minWidth: 145, backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 14, padding: 15, overflow: "hidden" as const },
   summaryAccent: { width: 4, position: "absolute" as const, right: 0, top: 0, bottom: 0 },
@@ -749,18 +750,18 @@ const styles = {
   fileList: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7 },
   filePill: { maxWidth: "100%" as const, flexDirection: "row" as const, alignItems: "center" as const, gap: 7, padding: 8, borderRadius: 9, backgroundColor: "#F4F7FB" },
   fileName: { color: colors.ink, fontSize: 10, maxWidth: 240 },
-  saveButton: { minHeight: 45, borderRadius: 11, backgroundColor: colors.blue, alignItems: "center" as const, justifyContent: "center" as const, paddingHorizontal: 14 },
+  saveButton: { minHeight: 45, borderRadius: 11, backgroundColor: colors.action, alignItems: "center" as const, justifyContent: "center" as const, paddingHorizontal: 14 },
   saveText: { color: "#FFFFFF", fontWeight: "800" as const, fontSize: 12 },
   disabled: { opacity: 0.5 },
   sectionHeadingRow: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8 },
   sectionTitleRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
   smallOutlineButton: { minHeight: 34, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 10, alignItems: "center" as const, justifyContent: "center" as const },
   smallOutlineText: { color: colors.blue, fontSize: 10, fontWeight: "700" as const },
-  smallPrimaryButton: { minHeight: 36, backgroundColor: colors.blue, borderRadius: 9, paddingHorizontal: 14, alignItems: "center" as const, justifyContent: "center" as const },
+  smallPrimaryButton: { minHeight: 36, backgroundColor: colors.action, borderRadius: 9, paddingHorizontal: 14, alignItems: "center" as const, justifyContent: "center" as const },
   smallPrimaryText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" as const },
   chipRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7, alignItems: "center" as const },
   filterChip: { borderWidth: 1, borderColor: colors.border, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 7 },
-  filterChipSelected: { backgroundColor: colors.blue, borderColor: colors.blue },
+  filterChipSelected: { backgroundColor: colors.action, borderColor: colors.action },
   filterChipText: { color: colors.ink, fontSize: 10, fontWeight: "700" as const },
   filterChipTextSelected: { color: "#FFFFFF" },
   listHeader: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, marginTop: 4 },
@@ -804,3 +805,4 @@ const styles = {
   secondaryButton: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: "#FFFFFF", borderRadius: 10 },
   secondaryText: { color: colors.blue, fontWeight: "800" as const, fontSize: 12 },
 };
+makeStylesReactive(styles);

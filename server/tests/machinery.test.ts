@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import pg from "pg";
 import { driverCostsByMachinery, type DriverAssignmentCostRow } from "../machinery-costs";
@@ -34,6 +35,50 @@ test("costs stay isolated by stable machinery ID", () => {
   const costs = driverCostsByMachinery([assignment(), assignment({ machinery_id: "2", monthly_salary: "62000" })], "2026-01-31");
   assert.equal(costs.get(1), 31000);
   assert.equal(costs.get(2), 62000);
+});
+
+test("parts and repair counters use field records without losing legacy costs or double counting", {
+  skip: !(process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL),
+}, async () => {
+  const schema = `test_machinery_${randomUUID().replaceAll("-", "")}`;
+  const client = new pg.Client({ connectionString: process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL });
+  await client.connect();
+  try {
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(`SET search_path TO ${schema}, public`);
+    await client.query(readFileSync("server/schema.sql", "utf8"));
+    await client.query("INSERT INTO members(clerk_user_id,name) VALUES ('test','مستخدم')");
+    await client.query(`INSERT INTO machinery(code,name) VALUES ('A','الآلة الأولى'),('B','الآلة الثانية')`);
+    const machines = await client.query("SELECT id FROM machinery ORDER BY code");
+    const a = machines.rows[0].id, b = machines.rows[1].id;
+    await client.query(`INSERT INTO machinery_spare_parts
+      (machinery_id,name,quantity,buy_price,stock_quantity,repair_expense,recorded_by_id,recorded_by_name)
+      VALUES ($1,'سجل قديم',2,50,0,20,'test','مستخدم'),($1,'سجل قديم آخر',1,30,0,0,'test','مستخدم')`, [a]);
+    await client.query(`INSERT INTO field_expenses(machinery_id,category,amount,site_name,created_by_id,created_by_name)
+      VALUES ($1,'قطع غيار',200,'موقع','test','مستخدم'),($1,'إصلاح آلية',300,'موقع','test','مستخدم'),
+        ($1,'مازوت',100,'موقع','test','مستخدم'),($2,'قطع غيار',999,'موقع','test','مستخدم')`, [a, b]);
+    await client.query(`INSERT INTO rentals(machinery_id,equipment,client_or_owner,end_date,total_amount)
+      VALUES ($1,'الآلة الأولى','مؤجر','2026-12-31',400)`, [a]);
+    const source = readFileSync("server/index.ts", "utf8").slice(readFileSync("server/index.ts", "utf8").indexOf("async function loadMachineryFinancialSummary("));
+    const query = source.match(/SELECT m\.id, m\.code[\s\S]*?ORDER BY m\.code, m\.id/)?.[0];
+    assert.ok(query);
+    const result = await client.query(query);
+    const machineA = result.rows.find((row) => String(row.id) === String(a));
+    const machineB = result.rows.find((row) => String(row.id) === String(b));
+    assert.equal(machineA.repair_count, 2);
+    assert.equal(machineA.legacy_repair_count, 2);
+    assert.equal(Number(machineA.total_expenses), 1150);
+    assert.equal(machineB.repair_count, 1);
+    assert.equal(Number(machineB.total_expenses), 999);
+    // A rename cannot sever the ID-based operational history.
+    await client.query("UPDATE machinery SET name='اسم جديد' WHERE id=$1", [a]);
+    const renamed = (await client.query(query)).rows.find((row) => String(row.id) === String(a));
+    assert.equal(renamed.repair_count, 2);
+    assert.equal(Number(renamed.total_expenses), 1150);
+  } finally {
+    await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    await client.end();
+  }
 });
 
 test("aggregation and salary-alert queries are valid in PostgreSQL (read-only)", {

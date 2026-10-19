@@ -15,7 +15,8 @@ import MachineryPicker, { type MachineryOption } from "../components/MachineryPi
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
-import { colors, formatDzd } from "../../lib/theme";
+import { colors, formatDzd, formatDateTime, makeStylesReactive } from "../../lib/theme";
+import { displayValue, translate } from "../../lib/localization";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 
 type ReviewStatus = "pending" | "reviewed";
@@ -71,16 +72,15 @@ function localAmount(value: number | string | null | undefined) {
 
 function recordedAt(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleString("ar-DZ", { dateStyle: "medium", timeStyle: "short" });
+  return Number.isNaN(date.getTime()) ? value : formatDateTime(date);
 }
 
 export default function FieldExpensesSection() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
   const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken, language } = useAuth();
+  const t = (text: string) => translate(text, language);
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [items, setItems] = useState<FieldExpense[]>([]);
@@ -336,7 +336,7 @@ export default function FieldExpensesSection() {
   return (
     <View style={styles.screen}>
       <AppHeader
-        title={isAdmin ? "مراجعة مصاريف الميدان" : "صفحة رئيس الأشغال"}
+        title={t(isAdmin ? "مراجعة مصاريف الميدان" : "صفحة رئيس الأشغال")}
         leftAction={<HeaderAction label="رجوع" onPress={() => router.back()}><ArrowRight size={19} color="#FFFFFF" /></HeaderAction>}
         rightAction={<HeaderAction label="تحديث" onPress={() => void refresh()}><RefreshCw size={17} color="#FFFFFF" /></HeaderAction>}
       />
@@ -345,9 +345,9 @@ export default function FieldExpensesSection() {
           <View style={styles.headingRow}>
             <View style={styles.headingIcon}><HardHat size={20} color={colors.blue} /></View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.title}>{isAdmin ? "عمليات الميدان الواردة" : "تسجيل مصروف ميداني"}</Text>
+              <Text style={styles.title}>{t(isAdmin ? "عمليات الميدان الواردة" : "تسجيل مصروف ميداني")}</Text>
               <Text style={styles.subtitle}>
-                {isAdmin ? "تصل العمليات هنا مباشرة من رئيس الأشغال لمراجعتها دون إعادة إدخالها." : "أرسل المصاريف والمازوت والوثائق مباشرة إلى الإدارة."}
+                {t(isAdmin ? "تصل العمليات هنا مباشرة من رئيس الأشغال لمراجعتها دون إعادة إدخالها." : "أرسل المصاريف والمازوت والوثائق مباشرة إلى الإدارة.")}
               </Text>
             </View>
           </View>
@@ -355,14 +355,14 @@ export default function FieldExpensesSection() {
 
         {error ? (
           <View style={styles.error}>
-            <Text style={styles.errorText}>{error}</Text>
+            <Text style={styles.errorText}>{t(error)}</Text>
             <Pressable onPress={() => setError("")} accessibilityLabel="إغلاق التنبيه"><X size={17} color={colors.red} /></Pressable>
           </View>
         ) : null}
         {success ? (
           <View style={styles.success}>
             <Check size={16} color={colors.green} />
-            <Text style={styles.successText}>{success}</Text>
+            <Text style={styles.successText}>{t(success)}</Text>
             <Pressable onPress={() => setSuccess("")} accessibilityLabel="إغلاق رسالة النجاح"><X size={15} color={colors.green} /></Pressable>
           </View>
         ) : null}
@@ -371,8 +371,8 @@ export default function FieldExpensesSection() {
           <View style={styles.reviewSummary}>
             <View style={styles.reviewIcon}><ClipboardCheck size={20} color={colors.amber} /></View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.reviewTitle}>{pendingCount ? `${pendingCount} عملية بانتظار مراجعتك` : "لا توجد عمليات بانتظار المراجعة"}</Text>
-              <Text style={styles.reviewHint}>تظهر كل عملية مع بيانات مسجلها ووقت الإرسال ومرفقاتها.</Text>
+            <Text style={styles.reviewTitle}>{pendingCount ? `${pendingCount} ${language === "ar" ? "عملية بانتظار مراجعتك" : "opérations à valider"}` : t("لا توجد عمليات بانتظار المراجعة")}</Text>
+              <Text style={styles.reviewHint}>{t("تظهر كل عملية مع بيانات مسجلها ووقت الإرسال ومرفقاتها.")}</Text>
             </View>
           </View>
         ) : null}
@@ -380,14 +380,14 @@ export default function FieldExpensesSection() {
         {canRecord ? (
           <Pressable onPress={() => { setFormOpen((open) => !open); setError(""); setSuccess(""); }}
             disabled={saving} style={styles.addButton}>
-            {formOpen ? <X size={18} color={colors.navy} /> : <PlusIcon />}
-            <Text style={styles.addButtonText}>{formOpen ? "إغلاق النموذج" : "تسجيل عملية جديدة"}</Text>
+            {formOpen ? <X size={18} color={colors.onAccent} /> : <PlusIcon />}
+            <Text style={styles.addButtonText}>{t(formOpen ? "إغلاق النموذج" : "تسجيل عملية جديدة")}</Text>
           </Pressable>
         ) : null}
 
         {formOpen && canRecord ? (
           <View style={styles.formCard}>
-            <Text style={styles.formTitle}>ما نوع العملية؟</Text>
+            <Text style={styles.formTitle}>{t("ما نوع العملية؟")}</Text>
             <View style={styles.categoryGrid}>
               {quickCategories.map((category) => (
                 <Pressable key={category} onPress={() => setDraft((current) => ({
@@ -397,8 +397,8 @@ export default function FieldExpensesSection() {
                   fuelLiters: category === "مازوت" ? current.fuelLiters : "",
                 }))}
                   style={[styles.categoryChip, draft.category === category && styles.categoryChipSelected]}>
-                  {category === "مازوت" ? <Fuel size={15} color={draft.category === category ? colors.navy : colors.blue} /> : null}
-                  <Text style={[styles.categoryText, draft.category === category && styles.categoryTextSelected]}>{category}</Text>
+                  {category === "مازوت" ? <Fuel size={15} color={draft.category === category ? colors.onAccent : colors.blue} /> : null}
+                  <Text style={[styles.categoryText, draft.category === category && styles.categoryTextSelected]}>{displayValue(category, language)}</Text>
                 </Pressable>
               ))}
             </View>
@@ -407,8 +407,8 @@ export default function FieldExpensesSection() {
               <MachineryPicker
                 items={machineryOptions}
                 value={draft.machineryId}
-                label="الآلة المرتبطة بالعملية *"
-                emptyLabel="ابحث عن الآلة بالاسم أو الرقم"
+                label={t("الآلة المرتبطة بالعملية *")}
+                emptyLabel={t("ابحث عن الآلة بالاسم أو الرقم")}
                 onChange={(id) => setField("machineryId", id)}
               />
             ) : null}
@@ -419,17 +419,17 @@ export default function FieldExpensesSection() {
               ) : null}
               <Field label="الورشة / موقع العمل *" value={draft.siteName} onChange={(value) => setField("siteName", value)} placeholder="اسم الموقع أو الورشة" />
             </View>
-            <Text style={styles.fieldLabel}>{draft.category === "مازوت" ? "تفاصيل المازوت" : "تفاصيل العملية"}</Text>
+            <Text style={styles.fieldLabel}>{t(draft.category === "مازوت" ? "تفاصيل المازوت" : "تفاصيل العملية")}</Text>
             <TextInput style={[styles.input, styles.textArea]} value={draft.details} onChangeText={(value) => setField("details", value)}
-              placeholder={draft.category === "مازوت" ? "مثال: تزويد آلية الورشة بالوقود" : "مثال: قطعة الغيار أو نوع الإصلاح"} placeholderTextColor="#98A5B4" multiline />
-            <Text style={styles.fieldLabel}>ملاحظات</Text>
+              placeholder={draft.category === "مازوت" ? "مثال: تزويد آلية الورشة بالوقود" : "مثال: قطعة الغيار أو نوع الإصلاح"} placeholderTextColor={colors.placeholder} multiline />
+            <Text style={styles.fieldLabel}>{t("ملاحظات")}</Text>
             <TextInput style={[styles.input, styles.textArea]} value={draft.notes} onChangeText={(value) => setField("notes", value)}
-              placeholder="أضف أي معلومة للإدارة" placeholderTextColor="#98A5B4" multiline />
+              placeholder="أضف أي معلومة للإدارة" placeholderTextColor={colors.placeholder} multiline />
 
             {canUploadFiles(member) ? (
               <Pressable onPress={() => void chooseDocuments()} disabled={saving} style={styles.attachmentButton}>
                 <ImagePlus size={17} color={colors.blue} />
-                <Text style={styles.attachmentButtonText}>إضافة صور الفاتورة أو الوصل</Text>
+                <Text style={styles.attachmentButtonText}>{t("إضافة صور الفاتورة أو الوصل")}</Text>
                 <Text style={styles.attachmentCount}>{pickedDocs.length}/5</Text>
               </Pressable>
             ) : null}
@@ -445,29 +445,29 @@ export default function FieldExpensesSection() {
                 ))}
               </View>
             ) : null}
-            <Text style={styles.syncNote}>تُحفظ العملية باسم حسابك وتظهر فورًا في سجل الإدارة.</Text>
+            <Text style={styles.syncNote}>{t("تُحفظ العملية باسم حسابك وتظهر فورًا في سجل الإدارة.")}</Text>
             <Pressable onPress={() => void submitExpense()} disabled={saving} style={[styles.submitButton, saving && styles.disabled]}>
-              {saving ? <ActivityIndicator color="#FFFFFF" /> : <><Send size={17} color="#FFFFFF" /><Text style={styles.submitText}>إرسال إلى الإدارة</Text></>}
+              {saving ? <ActivityIndicator color="#FFFFFF" /> : <><Send size={17} color="#FFFFFF" /><Text style={styles.submitText}>{t("إرسال إلى الإدارة")}</Text></>}
             </Pressable>
           </View>
         ) : null}
 
         <View style={styles.listHeader}>
           <View>
-            <Text style={styles.listTitle}>{isAdmin ? "سجل العمليات الواردة" : "عملياتي الميدانية"}</Text>
-            <Text style={styles.listSubtitle}>{visibleItems.length} عملية مطابقة · {pendingCount} بانتظار المراجعة</Text>
+            <Text style={styles.listTitle}>{t(isAdmin ? "سجل العمليات الواردة" : "عملياتي الميدانية")}</Text>
+            <Text style={styles.listSubtitle}>{visibleItems.length} {language === "ar" ? "عملية مطابقة" : "résultats"} · {pendingCount} {t("بانتظار المراجعة")}</Text>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
-            <FilterChip label="الكل" selected={statusFilter === "all"} onPress={() => setStatusFilter("all")} />
-            <FilterChip label="بانتظار المراجعة" selected={statusFilter === "pending"} onPress={() => setStatusFilter("pending")} />
-            <FilterChip label="تمت المراجعة" selected={statusFilter === "reviewed"} onPress={() => setStatusFilter("reviewed")} />
+            <FilterChip label={t("الكل")} selected={statusFilter === "all"} onPress={() => setStatusFilter("all")} />
+            <FilterChip label={t("بانتظار المراجعة")} selected={statusFilter === "pending"} onPress={() => setStatusFilter("pending")} />
+            <FilterChip label={t("تمت المراجعة")} selected={statusFilter === "reviewed"} onPress={() => setStatusFilter("reviewed")} />
           </ScrollView>
           <View style={{ gap: 5 }}>
-            <Text style={{ color: colors.muted, fontSize: 10, fontWeight: "800", textAlign: "right" }}>نوع العملية</Text>
+            <Text style={{ color: colors.muted, fontSize: 14, fontWeight: "700", lineHeight: 22, textAlign: "right" }}>{t("نوع العملية")}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
               <FilterChip label="كل الأنواع" selected={categoryFilter === "all"} onPress={() => setCategoryFilter("all")} />
               {quickCategories.map((category) => (
-                <FilterChip key={category} label={category} selected={categoryFilter === category} onPress={() => setCategoryFilter(category)} />
+                <FilterChip key={category} label={displayValue(category, language)} selected={categoryFilter === category} onPress={() => setCategoryFilter(category)} />
               ))}
             </ScrollView>
           </View>
@@ -479,19 +479,19 @@ export default function FieldExpensesSection() {
             onChangeText={setSearch}
             style={styles.searchInput}
             placeholder="ابحث بالموقع أو النوع أو المسجل"
-            placeholderTextColor="#98A5B4"
+            placeholderTextColor={colors.placeholder}
             accessibilityLabel="البحث في مصاريف الميدان"
           />
           {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           <TextInput value={dateFrom} onChangeText={setDateFrom}
-            style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
-            placeholder="تاريخ التسجيل من" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية المصاريف من تاريخ" />
+            style={{ minWidth: 135, flex: 1, minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 14 }}
+            placeholder="تاريخ التسجيل من" placeholderTextColor={colors.placeholder} accessibilityLabel="تصفية المصاريف من تاريخ" />
           <TextInput value={dateTo} onChangeText={setDateTo}
-            style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
-            placeholder="تاريخ التسجيل إلى" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية المصاريف إلى تاريخ" />
-          {dateFrom || dateTo ? <Pressable onPress={() => { setDateFrom(""); setDateTo(""); }} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 8 }}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>مسح التاريخ</Text></Pressable> : null}
+            style={{ minWidth: 135, flex: 1, minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 14 }}
+            placeholder="تاريخ التسجيل إلى" placeholderTextColor={colors.placeholder} accessibilityLabel="تصفية المصاريف إلى تاريخ" />
+          {dateFrom || dateTo ? <Pressable onPress={() => { setDateFrom(""); setDateTo(""); }} style={{ minHeight: 42, justifyContent: "center", paddingHorizontal: 8 }}><Text style={{ color: colors.muted, fontSize: 14, fontWeight: "700" }}>مسح التاريخ</Text></Pressable> : null}
         </View>
 
         {loading && items.length === 0 ? (
@@ -527,17 +527,18 @@ export default function FieldExpensesSection() {
 }
 
 function PlusIcon() {
-  return <FilePlus2 size={18} color={colors.navy} />;
+  return <FilePlus2 size={18} color={colors.onAccent} />;
 }
 
 function Field({ label, value, onChange, placeholder, numeric }: {
   label: string; value: string; onChange: (value: string) => void; placeholder: string; numeric?: boolean;
 }) {
+  const { language } = useAuth();
   return (
     <View style={styles.field}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <TextInput style={styles.input} value={value} onChangeText={onChange} placeholder={placeholder}
-        placeholderTextColor="#98A5B4" keyboardType={numeric ? "decimal-pad" : "default"} />
+      <Text style={styles.fieldLabel}>{translate(label, language)}</Text>
+      <TextInput style={styles.input} value={value} onChangeText={onChange} placeholder={translate(placeholder, language)}
+        placeholderTextColor={colors.placeholder} keyboardType={numeric ? "decimal-pad" : "default"} />
     </View>
   );
 }
@@ -566,6 +567,8 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, can
   canLinkMachinery: boolean;
   onLinkMachinery: (id: string) => void;
 }) {
+  const { language } = useAuth();
+  const t = (text: string) => translate(text, language);
   const isFuel = expense.category === "مازوت" && expense.fuel_liters != null;
   const [linkOpen, setLinkOpen] = useState(false);
   const [machineId, setMachineId] = useState(expense.machinery_id ? String(expense.machinery_id) : "");
@@ -574,19 +577,19 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, can
       <View style={styles.expenseTop}>
         <View style={{ flex: 1 }}>
           <View style={styles.expenseHeading}>
-            <Text style={styles.expenseCategory}>{expense.category}</Text>
-            {isFuel ? <View style={styles.litersBadge}><Fuel size={12} color={colors.amber} /><Text style={styles.litersText}>{expense.fuel_liters} لتر</Text></View> : null}
+            <Text style={styles.expenseCategory}>{displayValue(expense.category, language)}</Text>
+            {isFuel ? <View style={styles.litersBadge}><Fuel size={12} color={colors.amber} /><Text style={styles.litersText}>{expense.fuel_liters} {language === "ar" ? "لتر" : "L"}</Text></View> : null}
           </View>
           <Text style={styles.expenseSite}>{expense.site_name}</Text>
           {expense.machinery_name ? (
-            <Text style={styles.expenseMachine}>الآلة: {expense.machinery_name}{expense.machinery_code ? ` · ${expense.machinery_code}` : ""}</Text>
+            <Text style={styles.expenseMachine}>{t("الآلة:")} {expense.machinery_name}{expense.machinery_code ? ` · ${expense.machinery_code}` : ""}</Text>
           ) : null}
         </View>
         <View style={styles.amountColumn}>
           <Text style={styles.expenseAmount}>{formatDzd(localAmount(expense.amount))}</Text>
           <View style={[styles.reviewBadge, expense.review_status === "reviewed" ? styles.reviewedBadge : styles.pendingBadge]}>
             <Text style={[styles.reviewBadgeText, expense.review_status === "reviewed" ? styles.reviewedText : styles.pendingText]}>
-              {expense.review_status === "reviewed" ? "تمت المراجعة" : "بانتظار المراجعة"}
+              {t(expense.review_status === "reviewed" ? "تمت المراجعة" : "بانتظار المراجعة")}
             </Text>
           </View>
         </View>
@@ -595,29 +598,29 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, can
       {canLinkMachinery ? (
         <View style={{ gap: 8 }}>
           <Pressable onPress={() => setLinkOpen((open) => !open)}>
-            <Text style={styles.expenseMachine}>{linkOpen ? "إغلاق اختيار الآلة" : expense.machinery_id ? "تعديل الآلة المرتبطة" : "ربط العملية القديمة بآلة"}</Text>
+            <Text style={styles.expenseMachine}>{t(linkOpen ? "إغلاق اختيار الآلة" : expense.machinery_id ? "تعديل الآلة المرتبطة" : "ربط العملية القديمة بآلة")}</Text>
           </Pressable>
           {linkOpen ? <>
-            <MachineryPicker items={machineryOptions} value={machineId} onChange={setMachineId} label="الآلة المرتبطة بالعملية" />
+            <MachineryPicker items={machineryOptions} value={machineId} onChange={setMachineId} label={t("الآلة المرتبطة بالعملية")} />
             <Pressable disabled={saving || !machineId} onPress={() => onLinkMachinery(machineId)} style={styles.reviewAction}>
-              <Text style={styles.reviewActionText}>حفظ ربط الآلة</Text>
+              <Text style={styles.reviewActionText}>{t("حفظ ربط الآلة")}</Text>
             </Pressable>
           </> : null}
         </View>
       ) : null}
       <View style={styles.recordedLine}>
-        <Text style={styles.recordedText}>سجلها: {expense.created_by_name}</Text>
+        <Text style={styles.recordedText}>{t("سجلها:")} {expense.created_by_name}</Text>
         <Text style={styles.recordedText}>{recordedAt(expense.created_at)}</Text>
       </View>
       {expense.details ? <Text style={styles.detailsText}>{expense.details}</Text> : null}
       <RecordNotes entity="fieldExpense" recordId={expense.id} initialNotes={expense.notes} editable={canEditNotes} />
       {expense.review_status === "reviewed" && expense.reviewed_by_name ? (
-        <Text style={styles.reviewedBy}>راجعها {expense.reviewed_by_name}{expense.reviewed_at ? ` · ${recordedAt(expense.reviewed_at)}` : ""}</Text>
+        <Text style={styles.reviewedBy}>{t("راجعها")} {expense.reviewed_by_name}{expense.reviewed_at ? ` · ${recordedAt(expense.reviewed_at)}` : ""}</Text>
       ) : null}
 
       {expense.attachments.length ? (
         <View style={styles.attachmentList}>
-          <Text style={styles.attachmentsLabel}>الفواتير والوصولات ({expense.attachments.length})</Text>
+          <Text style={styles.attachmentsLabel}>{t("الفواتير والوصولات")} ({expense.attachments.length})</Text>
           <View style={styles.attachmentChips}>
             {expense.attachments.map((attachment) => (
               <AttachmentActions key={attachment.id} attachment={attachment} section="field"
@@ -627,7 +630,7 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, can
             ))}
           </View>
         </View>
-      ) : <Text style={styles.noAttachments}>لا توجد فاتورة أو وصل مرفق.</Text>}
+      ) : <Text style={styles.noAttachments}>{t("لا توجد فاتورة أو وصل مرفق.")}</Text>}
 
       {(canReview || canRecord) ? (
         <View style={styles.actions}>
@@ -635,7 +638,7 @@ function ExpenseCard({ expense, isAdmin, canRecord, canReview, canEditNotes, can
             <Pressable onPress={onReview} disabled={saving} style={[styles.reviewAction, expense.review_status === "reviewed" && styles.returnAction]}>
               {expense.review_status === "pending" ? <Check size={15} color={colors.green} /> : <AlertTriangle size={15} color={colors.amber} />}
               <Text style={[styles.reviewActionText, expense.review_status === "reviewed" && { color: colors.amber }]}>
-                {expense.review_status === "pending" ? "تمت المراجعة" : "إعادة للمراجعة"}
+                {t(expense.review_status === "pending" ? "تمت المراجعة" : "إعادة للمراجعة")}
               </Text>
             </Pressable>
           ) : null}
@@ -658,93 +661,94 @@ const styles = {
   headingRow: { flexDirection: "row" as const, alignItems: "center" as const, gap: 10 },
   headingIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: "#EAF1FA", alignItems: "center" as const, justifyContent: "center" as const },
   title: { color: colors.navy, fontSize: 19, fontWeight: "900" as const, textAlign: "right" as const },
-  subtitle: { color: colors.muted, fontSize: 11, textAlign: "right" as const, lineHeight: 18, marginTop: 5 },
+  subtitle: { color: colors.muted, fontSize: 14, fontWeight: "500" as const, textAlign: "right" as const, lineHeight: 23, marginTop: 5 },
   error: { backgroundColor: colors.redSoft, borderRadius: 11, padding: 11, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8 },
-  errorText: { flex: 1, color: colors.red, fontSize: 10, lineHeight: 16, textAlign: "right" as const },
+  errorText: { flex: 1, color: colors.red, fontSize: 14, fontWeight: "600" as const, lineHeight: 23, textAlign: "right" as const },
   success: { backgroundColor: colors.greenSoft, borderRadius: 11, padding: 10, flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
-  successText: { flex: 1, color: colors.green, fontSize: 10, fontWeight: "800" as const, textAlign: "right" as const },
-  reviewSummary: { backgroundColor: "#FFF8E9", borderColor: "#F1D89C", borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: "row" as const, alignItems: "center" as const, gap: 10 },
-  reviewIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: "#FFF0C9", alignItems: "center" as const, justifyContent: "center" as const },
-  reviewTitle: { color: colors.navy, fontSize: 12, fontWeight: "900" as const, textAlign: "right" as const },
-  reviewHint: { color: colors.muted, fontSize: 9, lineHeight: 14, textAlign: "right" as const, marginTop: 3 },
+  successText: { flex: 1, color: colors.green, fontSize: 14, fontWeight: "700" as const, lineHeight: 23, textAlign: "right" as const },
+  reviewSummary: { backgroundColor: colors.amberSoft, borderColor: colors.border, borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: "row" as const, alignItems: "center" as const, gap: 10 },
+  reviewIcon: { width: 42, height: 42, borderRadius: 12, backgroundColor: colors.surface, alignItems: "center" as const, justifyContent: "center" as const },
+  reviewTitle: { color: colors.navy, fontSize: 15, fontWeight: "700" as const, lineHeight: 24, textAlign: "right" as const },
+  reviewHint: { color: colors.muted, fontSize: 14, fontWeight: "500" as const, lineHeight: 23, textAlign: "right" as const, marginTop: 3 },
   addButton: { minHeight: 48, borderRadius: 14, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
-  addButtonText: { color: colors.navy, fontSize: 12, fontWeight: "900" as const },
+  addButtonText: { color: colors.onAccent, fontSize: 15, fontWeight: "600" as const, lineHeight: 24 },
   formCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 17, gap: 12 },
   formTitle: { color: colors.navy, fontSize: 14, fontWeight: "900" as const, textAlign: "right" as const },
   categoryGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7 },
   categoryChip: { minHeight: 38, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: "#F8FAFC", paddingHorizontal: 11, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 6 },
-  categoryChipSelected: { backgroundColor: "#FFE9A9", borderColor: colors.yellow },
-  categoryText: { color: colors.ink, fontSize: 10, fontWeight: "800" as const },
-  categoryTextSelected: { color: colors.navy },
+  categoryChipSelected: { backgroundColor: colors.yellow, borderColor: colors.yellow },
+  categoryText: { color: colors.ink, fontSize: 14, fontWeight: "700" as const, lineHeight: 22 },
+  categoryTextSelected: { color: colors.onAccent },
   formGrid: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 10 },
   field: { flexGrow: 1, flexBasis: 190 },
-  fieldLabel: { color: colors.ink, fontSize: 12, fontWeight: "800" as const, textAlign: "right" as const, marginBottom: 5 },
-  input: { minHeight: 46, borderRadius: 11, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 12, fontSize: 13 },
+  fieldLabel: { color: colors.ink, fontSize: 14, fontWeight: "600" as const, lineHeight: 23, textAlign: "right" as const, marginBottom: 5 },
+  input: { minHeight: 48, borderRadius: 11, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 12, fontSize: 15 },
   textArea: { minHeight: 64, textAlignVertical: "top" as const, paddingTop: 10 },
   attachmentButton: { minHeight: 44, borderRadius: 11, borderWidth: 1, borderColor: "#C9D9EA", backgroundColor: "#F5F9FE", paddingHorizontal: 11, flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
-  attachmentButtonText: { flex: 1, color: colors.blue, fontSize: 10, fontWeight: "800" as const, textAlign: "right" as const },
-  attachmentCount: { color: colors.muted, fontSize: 9 },
+  attachmentButtonText: { flex: 1, color: colors.blue, fontSize: 14, fontWeight: "600" as const, lineHeight: 22, textAlign: "right" as const },
+  attachmentCount: { color: colors.muted, fontSize: 14, fontWeight: "600" as const },
   pickedList: { backgroundColor: "#F6F8FB", borderRadius: 10, paddingHorizontal: 9 },
   pickedRow: { minHeight: 32, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
-  pickedName: { flex: 1, color: colors.ink, fontSize: 10, textAlign: "right" as const },
-  syncNote: { color: colors.muted, fontSize: 9, textAlign: "right" as const, lineHeight: 14 },
-  submitButton: { minHeight: 48, borderRadius: 12, backgroundColor: colors.blue, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
-  submitText: { color: "#FFFFFF", fontSize: 12, fontWeight: "900" as const },
+  pickedName: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: "500" as const, textAlign: "right" as const, lineHeight: 22 },
+  syncNote: { color: colors.muted, fontSize: 14, fontWeight: "500" as const, textAlign: "right" as const, lineHeight: 23 },
+  submitButton: { minHeight: 48, borderRadius: 12, backgroundColor: colors.action, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
+  submitText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700" as const, lineHeight: 24 },
   disabled: { opacity: 0.55 },
   listHeader: { gap: 8, marginTop: 3 },
   listTitle: { color: colors.navy, fontSize: 15, fontWeight: "900" as const, textAlign: "right" as const },
-  listSubtitle: { color: colors.muted, fontSize: 9, textAlign: "right" as const, marginTop: 2 },
+  listSubtitle: { color: colors.muted, fontSize: 14, fontWeight: "500" as const, lineHeight: 22, textAlign: "right" as const, marginTop: 2 },
   searchBox: { minHeight: 44, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 11, flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
-  searchInput: { flex: 1, minWidth: 0, color: colors.ink, fontSize: 12, textAlign: "right" as const, writingDirection: "rtl" as const },
+  searchInput: { flex: 1, minWidth: 0, color: colors.ink, fontSize: 14, fontWeight: "500" as const, lineHeight: 22, textAlign: "right" as const, writingDirection: "rtl" as const },
   filters: { flexDirection: "row" as const, gap: 6 },
   filterChip: { minHeight: 31, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, paddingHorizontal: 10, alignItems: "center" as const, justifyContent: "center" as const },
   filterSelected: { backgroundColor: "#E7F0FB", borderColor: "#A9C5E6" },
-  filterText: { color: colors.muted, fontSize: 9, fontWeight: "800" as const },
+  filterText: { color: colors.muted, fontSize: 14, fontWeight: "600" as const, lineHeight: 22 },
   filterTextSelected: { color: colors.blue },
   loading: { minHeight: 120, alignItems: "center" as const, justifyContent: "center" as const, gap: 9, backgroundColor: colors.surface, borderRadius: 14 },
-  loadingText: { color: colors.muted, fontSize: 10 },
+  loadingText: { color: colors.muted, fontSize: 14, fontWeight: "500" as const, lineHeight: 23 },
   expenseCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 16, gap: 11 },
   pendingCard: { borderColor: "#EDCF8E" },
   expenseTop: { flexDirection: "row" as const, alignItems: "flex-start" as const, gap: 10 },
   expenseHeading: { flexDirection: "row" as const, alignItems: "center" as const, flexWrap: "wrap" as const, gap: 7 },
-  expenseCategory: { color: colors.navy, fontSize: 13, fontWeight: "900" as const, textAlign: "right" as const },
+  expenseCategory: { color: colors.navy, fontSize: 15, fontWeight: "700" as const, textAlign: "right" as const, lineHeight: 24 },
   litersBadge: { minHeight: 24, borderRadius: 8, backgroundColor: colors.amberSoft, paddingHorizontal: 7, flexDirection: "row" as const, alignItems: "center" as const, gap: 4 },
-  litersText: { color: colors.amber, fontSize: 9, fontWeight: "800" as const },
-  expenseSite: { color: colors.muted, fontSize: 10, textAlign: "right" as const, marginTop: 4 },
-  expenseMachine: { color: colors.blue, fontSize: 10, fontWeight: "800" as const, textAlign: "right" as const, marginTop: 4 },
+  litersText: { color: colors.amber, fontSize: 14, fontWeight: "600" as const, lineHeight: 22 },
+  expenseSite: { color: colors.muted, fontSize: 14, fontWeight: "500" as const, textAlign: "right" as const, marginTop: 4, lineHeight: 22 },
+  expenseMachine: { color: colors.blue, fontSize: 14, fontWeight: "600" as const, textAlign: "right" as const, marginTop: 4, lineHeight: 22 },
   amountColumn: { alignItems: "flex-start" as const, gap: 5 },
-  expenseAmount: { color: colors.blue, fontSize: 13, fontWeight: "900" as const },
+  expenseAmount: { color: colors.blue, fontSize: 16, fontWeight: "700" as const, lineHeight: 25 },
   reviewBadge: { borderRadius: 7, paddingHorizontal: 7, paddingVertical: 4 },
-  pendingBadge: { backgroundColor: "#FFF2D3" },
+  pendingBadge: { backgroundColor: colors.amberSoft },
   reviewedBadge: { backgroundColor: colors.greenSoft },
-  reviewBadgeText: { fontSize: 8, fontWeight: "900" as const },
+  reviewBadgeText: { fontSize: 14, fontWeight: "700" as const, lineHeight: 22 },
   pendingText: { color: colors.amber },
   reviewedText: { color: colors.green },
   recordedLine: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 7, flexDirection: "row" as const, flexWrap: "wrap" as const, justifyContent: "space-between" as const, gap: 5 },
-  recordedText: { color: colors.muted, fontSize: 9, textAlign: "right" as const },
-  detailsText: { color: colors.ink, fontSize: 12, textAlign: "right" as const, lineHeight: 19 },
-  notesText: { color: colors.muted, backgroundColor: "#F8FAFC", borderRadius: 8, padding: 8, fontSize: 9, textAlign: "right" as const, lineHeight: 14 },
-  reviewedBy: { color: colors.green, fontSize: 9, textAlign: "right" as const },
+  recordedText: { color: colors.muted, fontSize: 14, fontWeight: "500" as const, textAlign: "right" as const, lineHeight: 23 },
+  detailsText: { color: colors.ink, fontSize: 14, fontWeight: "500" as const, textAlign: "right" as const, lineHeight: 23 },
+  notesText: { color: colors.muted, backgroundColor: colors.background, borderRadius: 8, padding: 8, fontSize: 14, fontWeight: "500" as const, textAlign: "right" as const, lineHeight: 23 },
+  reviewedBy: { color: colors.green, fontSize: 14, fontWeight: "600" as const, textAlign: "right" as const, lineHeight: 23 },
   attachmentList: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8, gap: 6 },
-  attachmentsLabel: { color: colors.ink, fontSize: 9, fontWeight: "800" as const, textAlign: "right" as const },
+  attachmentsLabel: { color: colors.ink, fontSize: 14, fontWeight: "600" as const, textAlign: "right" as const, lineHeight: 22 },
   attachmentChips: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 6 },
   attachmentChip: { maxWidth: 240, minHeight: 30, borderRadius: 8, borderWidth: 1, borderColor: "#D6E3F2", backgroundColor: "#F3F7FC", paddingHorizontal: 8, flexDirection: "row" as const, alignItems: "center" as const, gap: 5 },
-  attachmentName: { flexShrink: 1, color: colors.blue, fontSize: 9, fontWeight: "700" as const },
-  noAttachments: { color: colors.muted, fontSize: 9, textAlign: "right" as const },
+  attachmentName: { flexShrink: 1, color: colors.blue, fontSize: 14, fontWeight: "600" as const, lineHeight: 22 },
+  noAttachments: { color: colors.muted, fontSize: 14, fontWeight: "500" as const, textAlign: "right" as const, lineHeight: 23 },
   actions: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8 },
   reviewAction: { minHeight: 32, borderRadius: 8, borderWidth: 1, borderColor: "#B8E1CC", backgroundColor: colors.greenSoft, paddingHorizontal: 9, flexDirection: "row" as const, alignItems: "center" as const, gap: 5 },
-  returnAction: { borderColor: "#F1D89C", backgroundColor: "#FFF8E9" },
-  reviewActionText: { color: colors.green, fontSize: 9, fontWeight: "800" as const },
+  returnAction: { borderColor: colors.border, backgroundColor: colors.amberSoft },
+  reviewActionText: { color: colors.green, fontSize: 14, fontWeight: "600" as const, lineHeight: 22 },
   addAttachmentAction: { minHeight: 32, borderRadius: 8, borderWidth: 1, borderColor: "#C9D9EA", backgroundColor: "#F5F9FE", paddingHorizontal: 9, flexDirection: "row" as const, alignItems: "center" as const, gap: 5 },
-  addAttachmentText: { color: colors.blue, fontSize: 9, fontWeight: "800" as const },
+  addAttachmentText: { color: colors.blue, fontSize: 14, fontWeight: "600" as const, lineHeight: 22 },
   emptyCard: { minHeight: 160, alignItems: "center" as const, justifyContent: "center" as const, gap: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 16 },
   emptyIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: "#EAF1FA", alignItems: "center" as const, justifyContent: "center" as const },
-  emptyTitle: { color: colors.navy, fontSize: 13, fontWeight: "900" as const },
-  emptyText: { color: colors.muted, fontSize: 9, textAlign: "center" as const, lineHeight: 15 },
+  emptyTitle: { color: colors.navy, fontSize: 15, fontWeight: "700" as const, lineHeight: 24 },
+  emptyText: { color: colors.muted, fontSize: 14, fontWeight: "500" as const, textAlign: "center" as const, lineHeight: 23 },
   center: { flex: 1, alignItems: "center" as const, justifyContent: "center" as const, gap: 13, backgroundColor: colors.background, padding: 24 },
-  denied: { color: colors.red, textAlign: "center" as const, lineHeight: 21, fontSize: 12 },
+  denied: { color: colors.red, textAlign: "center" as const, lineHeight: 23, fontSize: 14, fontWeight: "600" as const },
   secondaryButton: { minHeight: 41, borderRadius: 11, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, justifyContent: "center" as const, paddingHorizontal: 13 },
-  secondaryButtonText: { color: colors.blue, fontSize: 10, fontWeight: "800" as const },
+  secondaryButtonText: { color: colors.blue, fontSize: 14, fontWeight: "600" as const, lineHeight: 22 },
   footer: { minHeight: 43, backgroundColor: colors.surface, paddingHorizontal: 14, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, borderTopWidth: 1, borderTopColor: colors.border },
-  footerText: { color: colors.muted, fontSize: 8 },
+  footerText: { color: colors.muted, fontSize: 14, fontWeight: "500" as const, lineHeight: 22 },
 };
+makeStylesReactive(styles);

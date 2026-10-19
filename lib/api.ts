@@ -2,6 +2,20 @@ import Constants from "expo-constants";
 import { Platform } from "react-native";
 import type { MemberCapabilities, MemberPermissions } from "../shared/access";
 import type { SectionId } from "../shared/sections";
+import { apiErrorFrench } from "../shared/api-error-translations";
+let responseLanguage: "ar" | "fr" = "ar";
+export function setResponseLanguage(language: "ar" | "fr") { responseLanguage = language; }
+const knownErrors: Record<string, string> = {
+  ...apiErrorFrench,
+  "تعذر الاتصال بالخادم.": "Impossible de contacter le serveur.",
+  "يلزم إعداد عنوان الخادم قبل تشغيل تطبيق الهاتف.": "L’adresse du serveur doit être configurée avant de lancer l’application mobile.",
+  "انتهت جلسة الدخول.": "Votre session a expiré.",
+  "لا تملك صلاحية الوصول إلى هذا القسم.": "Vous n’avez pas l’autorisation d’accéder à cette section.",
+  "الحساب غير مفعل.": "Ce compte n’est pas activé.",
+};
+export function localizeApiError(message: string, language: "ar" | "fr" = responseLanguage) {
+  return language === "fr" ? (knownErrors[message] ?? message) : message;
+}
 
 const configuredApiUrl = Constants.expoConfig?.extra?.apiUrl as string | undefined;
 const configuredWebApiUrl = Constants.expoConfig?.extra?.webApiUrl as string | undefined;
@@ -35,7 +49,7 @@ export async function apiRequest<T>(
   const isJson = response.headers.get("content-type")?.includes("application/json");
   const body = (isJson ? await response.json().catch(() => ({})) : {}) as T & { error?: string };
   if (!response.ok) {
-    const error = new Error(body.error || "تعذر الاتصال بالخادم.") as Error & { status?: number; body?: unknown };
+    const error = new Error(localizeApiError(body.error || "تعذر الاتصال بالخادم.")) as Error & { status?: number; body?: unknown };
     error.status = response.status;
     error.body = body;
     throw error;
@@ -56,7 +70,12 @@ export type Member = {
   permissions?: MemberPermissions;
   capabilities?: MemberCapabilities;
   notes?: string;
+  language?: "ar" | "fr";
+  appearance?: "light" | "dark" | "system";
 };
+
+export type Language = "ar" | "fr";
+export type Appearance = "light" | "dark" | "system";
 
 export type AppNotification = {
   id: string;

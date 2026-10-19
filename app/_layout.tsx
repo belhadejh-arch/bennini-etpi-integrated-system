@@ -1,13 +1,15 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { AuthProvider } from "../lib/auth";
-import { colors } from "../lib/theme";
 import { WorkspaceShell } from "./components/WorkspaceShell";
+import { useAuth } from "../lib/auth";
+import { palettes } from "../lib/theme";
+import { useColorScheme } from "react-native";
 
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <StatusBar style="light" backgroundColor={colors.navy} />
+      <AdaptiveStatusBar />
       <WorkspaceShell>
         <Stack screenOptions={{ headerShown: false, animation: "fade" }}>
           <Stack.Screen name="index" />
@@ -21,4 +23,11 @@ export default function RootLayout() {
       </WorkspaceShell>
     </AuthProvider>
   );
+}
+
+function AdaptiveStatusBar() {
+  const { appearance } = useAuth();
+  const system = useColorScheme();
+  const dark = appearance === "dark" || (appearance === "system" && system === "dark");
+  return <StatusBar style={dark ? "light" : "dark"} backgroundColor={dark ? palettes.dark.background : palettes.light.background} />;
 }

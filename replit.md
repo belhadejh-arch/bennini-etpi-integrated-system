@@ -16,6 +16,14 @@ After the database and environment variables are configured, open `/setup` direc
 
 All other accounts are created by an administrator from the Users and Permissions dashboard. Their six-digit serial is displayed once at creation. Users sign in with that serial; email is not used for authentication.
 
+## Interface language, appearance, and readability
+
+- Arabic and light appearance are the account defaults. Every signed-in role can choose Arabic/French and light/dark/system in Settings; the sign-in screen also offers language selection.
+- Preferences are stored on the authenticated member, with a device preference for the sign-in screen. Native system appearance support uses `expo-system-ui`; an updated native build is needed for native configuration changes.
+- Interface localization uses explicit dictionaries and the Babel plugin in `lib/babel-plugin-localize-jsx.cjs`. Keep user-written names, notes, and API enum payloads out of translation calls.
+- Check all interface translation keys with `node scripts/verify-ui-localization.cjs`. Run `node --import tsx --test server/tests/*.test.ts` for preference ownership, financial links, machinery aggregation, theme contrast, and translation tests.
+- New spare-part/repair entries belong in field operations with a registered machine. Historical standalone part records remain readable; do not copy them into field expenses and double-count their costs.
+
 ## Split production hosting (Render API + Vercel web app)
 
 - `render.yaml` deploys only the Express API. It runs `npm ci && npm run typecheck` then `npm start`, uses `/api/health` for health checks, and disables serving the web build.

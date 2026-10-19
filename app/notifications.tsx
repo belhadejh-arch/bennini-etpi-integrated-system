@@ -21,7 +21,8 @@ import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 
 import { AppHeader, HeaderAction } from "./components/AppHeader";
 import { useNotificationBadge } from "./components/NotificationContext";
 import { apiRequest, type AppNotification, type NotificationsResult } from "../lib/api";
-import { colors } from "../lib/theme";
+import { colors, formatDateTime, makeStylesReactive } from "../lib/theme";
+import { translate } from "../lib/localization";
 
 const icons = {
   cheque_due: ReceiptText,
@@ -36,14 +37,12 @@ const icons = {
 
 function timeLabel(value: string) {
   const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleString("ar-DZ", { dateStyle: "medium", timeStyle: "short" });
+  return Number.isNaN(date.getTime()) ? value : formatDateTime(date);
 }
 
 export default function NotificationsScreen() {
   const router = useRouter();
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken, language } = useAuth();
   const { refresh: refreshBadge } = useNotificationBadge();
   const [items, setItems] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -66,7 +65,7 @@ export default function NotificationsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [getToken, isSignedIn]);
+  }, [getToken, isSignedIn, language]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
@@ -104,10 +103,10 @@ export default function NotificationsScreen() {
     router.push({
       pathname: "/section/[section]",
       params: {
-        section: item.section,
+        section: item.type === "low_spare_part" ? "machinery" : item.section,
         ...(item.type === "driver_month_anniversary" ? {} : { focusId: String(item.recordId) }),
         ...(item.machineId ? { machineId: String(item.machineId) } : {}),
-        ...(item.view ? { view: item.view } : {}),
+        ...(item.type === "low_spare_part" ? { view: "legacy-history" } : item.view ? { view: item.view } : {}),
       },
     });
   };
@@ -180,7 +179,7 @@ export default function NotificationsScreen() {
             ].map((option) => (
               <Pressable key={option.value} onPress={() => setReadFilter(option.value)}
                 style={{ minHeight: 32, justifyContent: "center", paddingHorizontal: 11, borderRadius: 9, borderWidth: 1, borderColor: readFilter === option.value ? colors.blue : colors.border, backgroundColor: readFilter === option.value ? "#E7F0FB" : "#FFFFFF" }}>
-                <Text style={{ color: readFilter === option.value ? colors.blue : colors.muted, fontSize: 10, fontWeight: "800" }}>{option.label}</Text>
+                <Text style={{ color: readFilter === option.value ? colors.blue : colors.muted, fontSize: 14, fontWeight: "600", lineHeight: 22 }}>{translate(option.label, language)}</Text>
               </Pressable>
             ))}
           </View>
@@ -263,3 +262,4 @@ const styles = {
   stateText: { color: colors.muted, fontSize: 11, textAlign: "center" as const, lineHeight: 18 },
   error: { padding: 12, borderRadius: 10, backgroundColor: "#FDEBEC", color: colors.red, textAlign: "right" as const, fontSize: 11 },
 };
+makeStylesReactive(styles);

@@ -18,6 +18,8 @@ import cors from "cors";
 import pg from "pg";
 import { driverCostsByMachinery } from "./machinery-costs";
 import { registerFinanceRoutes } from "./finance-routes";
+import { registerPreferencesRoutes } from "./preferences-routes";
+import { frenchNotificationCopy } from "./notification-copy";
 import { FinanceError, prepareFinanceSchema, positiveId, ensureCustomerInvoice, synchronizeChequeInvoices, resolveTransactionAccount } from "./finance-data";
 import { allSectionIds, type SectionId } from "../shared/sections";
 import {
@@ -72,6 +74,8 @@ export type Member = {
   role_name?: string;
   permissions?: MemberPermissions;
   capabilities?: MemberCapabilities;
+  language?: "ar" | "fr";
+  appearance?: "light" | "dark" | "system";
 };
 
 export type AuthenticatedRequest = Request & {
@@ -256,6 +260,8 @@ function ensureMemberSchema() {
         DEFAULT '{"uploadFiles":true,"viewFinancialData":true,"manageOperations":true}'::jsonb;
       ALTER TABLE members ADD COLUMN IF NOT EXISTS serial_encrypted TEXT;
       ALTER TABLE members ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+      ALTER TABLE members ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'ar' CHECK (language IN ('ar', 'fr'));
+      ALTER TABLE members ADD COLUMN IF NOT EXISTS appearance TEXT NOT NULL DEFAULT 'light' CHECK (appearance IN ('light', 'dark', 'system'));
     `),
   );
 }
@@ -317,7 +323,7 @@ async function loadMember(req: AuthenticatedRequest, res: Response): Promise<Mem
   }
 
   const result = await pool.query<Member>(
-    "SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities FROM members WHERE clerk_user_id = $1 AND deleted_at IS NULL",
+    "SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities, language, appearance FROM members WHERE clerk_user_id = $1 AND deleted_at IS NULL",
     [memberId],
   );
 
@@ -346,7 +352,8 @@ async function authenticate(req: AuthenticatedRequest, res: Response, next: Next
         ["/api/transactions", "/api/dashboard", "/api/notifications"].includes(req.path)
       );
       const readNotification = req.method === "POST" && req.path === "/api/notifications/read";
-      if (!ownRead && !readNotification) return fail(res, 403, "حساب الشريك مخصص للاطلاع على حساباته فقط.");
+      const ownPreferences = req.method === "PATCH" && req.path === "/api/me/preferences";
+      if (!ownRead && !readNotification && !ownPreferences) return fail(res, 403, "حساب الشريك مخصص للاطلاع على حساباته فقط.");
     }
     next();
   } catch (error) {
@@ -1086,7 +1093,7 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
     const validFormat = /^\d{6}$/.test(serial);
     const result = validFormat
       ? await pool.query<Member & { serial_hash: string }>(
-        `SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities, serial_hash
+        `SELECT clerk_user_id, email, name, role, active, allowed_sections, role_name, permissions, capabilities, language, appearance, serial_hash
          FROM members WHERE serial_lookup = $1 LIMIT 1`,
         [serialLookup(serial)],
       )
@@ -1160,6 +1167,8 @@ app.get("/api/me", async (req: AuthenticatedRequest, res) => {
     fail(res, 500, "تعذر تحميل بيانات العضو.");
   }
 });
+
+registerPreferencesRoutes(app, pool, authenticate);
 
 app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, res) => {
   const member = req.member!;
@@ -1241,7 +1250,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
     }
     if (canSeeMachinery) {
       sources.push(pool.query(`
-        SELECT 'low_spare_part' AS type, id AS record_id, name AS label,
+        SELECT 'low_spare_part' AS type, id AS record_id, machinery_id AS machine_id, name AS label,
           stock_quantity, quantity, created_at
         FROM machinery_spare_parts
         WHERE quantity > 0 AND stock_quantity <= GREATEST(1, CEIL(quantity * 0.2))
@@ -1330,9 +1339,12 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
           break;
         default:
           section = "machinery";
-          view = "spare-parts";
+          view = "legacy-history";
           title = `انخفاض مخزون قطعة ${String(row.label)}`;
           message = `المتبقي ${Number(row.stock_quantity)} من أصل ${Number(row.quantity)}.`;
+      }
+      if (member.language === "fr") {
+        ({ title, message } = frenchNotificationCopy(row));
       }
       return {
         id: `${type}:${recordId}${row.occurrence_date ? `:${String(row.occurrence_date)}` : ""}`,
@@ -2500,10 +2512,11 @@ async function loadMachineryFinancialSummary() {
     await Promise.all([ensureRentalSchema(), ensureFieldExpenseSchema()]);
     const result = await pool.query(`
       SELECT m.id, m.code, m.name, m.category, m.status, m.hours_worked, m.notes,
-        COUNT(p.id)::int + COALESCE((
+        COALESCE((
           SELECT COUNT(*)::int FROM field_expenses e
           WHERE e.machinery_id = m.id AND e.category IN ('قطع غيار', 'إصلاح آلية')
-        ), 0) AS repair_count,
+        ), 0)::int AS repair_count,
+        COUNT(p.id)::int AS legacy_repair_count,
         COALESCE(SUM(p.quantity * p.buy_price + p.repair_expense), 0)
           + COALESCE((SELECT SUM(e.amount) FROM field_expenses e WHERE e.machinery_id = m.id), 0)
           + COALESCE((SELECT SUM(r.total_amount) FROM rentals r WHERE r.machinery_id = m.id), 0)
@@ -2758,65 +2771,9 @@ app.get("/api/machinery/spare-parts", requireMachinerySchema, authenticate, requ
   }
 });
 
-app.post("/api/machinery/spare-parts", requireMachinerySchema, authenticate, requireSection("machinery"), requirePermission("machinery", "create"), async (req: AuthenticatedRequest, res) => {
-  const body = req.body ?? {};
-  const machineryId = Number(body.machineryId);
-  const name = typeof body.name === "string" ? body.name.trim() : "";
-  const supplier = typeof body.supplier === "string" ? body.supplier.trim() : "";
-  const invoiceNumber = typeof body.invoiceNumber === "string" ? body.invoiceNumber.trim() : "";
-  const notes = typeof body.notes === "string" ? body.notes.trim() : "";
-  const quantity = Number(body.quantity);
-  const buyPrice = Number(body.buyPrice);
-  const stockQuantity = Number(body.stockQuantity);
-  const repairExpense = Number(body.repairExpense ?? 0);
-  const installationDate = body.installationDate === "" || body.installationDate == null ? null : body.installationDate;
-  const maxAmount = 99999999999999;
-  if (!Number.isSafeInteger(machineryId) || machineryId <= 0 ||
-      !name || name.length > 200 || supplier.length > 200 || invoiceNumber.length > 120 ||
-      (invoiceNumber && !supplier) || notes.length > 5000 ||
-      !Number.isSafeInteger(quantity) || quantity <= 0 || quantity > 1000000 ||
-      !Number.isFinite(buyPrice) || buyPrice < 0 || buyPrice > maxAmount ||
-      !Number.isSafeInteger(stockQuantity) || stockQuantity < 0 || stockQuantity > quantity ||
-      !Number.isFinite(repairExpense) || repairExpense < 0 || repairExpense > maxAmount ||
-      (installationDate !== null && !validIsoDate(installationDate))) {
-    return fail(res, 400, "تحقق من اسم القطعة والكميات والأسعار والتاريخ.");
-  }
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const machine = await client.query("SELECT id, name FROM machinery WHERE id = $1", [machineryId]);
-    if (!machine.rowCount) {
-      await client.query("ROLLBACK");
-      return fail(res, 404, "المركبة أو الآلية المحددة غير موجودة.");
-    }
-    const member = req.member!;
-    const links = await ensureSupplierInvoice(
-      client,
-      supplier,
-      invoiceNumber,
-      null,
-      member,
-    );
-    const result = await client.query(
-      `INSERT INTO machinery_spare_parts
-        (machinery_id, name, quantity, buy_price, supplier, invoice_number, supplier_id, invoice_id,
-         installation_date, stock_quantity, repair_expense, notes, recorded_by_id, recorded_by_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-       RETURNING id`,
-      [machineryId, name, quantity, buyPrice, supplier, invoiceNumber, links.supplierId, links.invoiceId,
-        installationDate, stockQuantity, repairExpense, notes, member.clerk_user_id, member.name],
-    );
-    await writeAuditWithClient(client, member, "تسجيل قطعة غيار أو إصلاح", `${name} لآلية ${machine.rows[0].name}.`,
-      { section: "machinery", eventType: "create", entityId: result.rows[0].id, data: { machineryId, machineName: machine.rows[0].name, name, quantity, supplier, totalCost: quantity * buyPrice + repairExpense } });
-    await client.query("COMMIT");
-    res.status(201).json({ id: result.rows[0].id });
-  } catch (error) {
-    await client.query("ROLLBACK");
-    console.error("Machinery spare part creation failed:", error);
-    fail(res, 500, "تعذر تسجيل قطعة الغيار أو الإصلاح.");
-  } finally {
-    client.release();
-  }
+// Kept as an explicit response for older clients; historical records remain readable.
+app.post("/api/machinery/spare-parts", authenticate, requireSection("machinery"), requirePermission("machinery", "create"), (_req, res) => {
+  return fail(res, 410, "سجّل قطع الغيار والإصلاح من عمليات رئيس الأشغال مع اختيار الآلة.");
 });
 
 app.post("/api/machinery/spare-parts/:id/attachments", requireMachinerySchema, authenticate, requireSection("machinery"), requireAnyPermission("machinery", "create", "edit"), requireFileUpload, uploadFiles, async (req: AuthenticatedRequest, res) => {

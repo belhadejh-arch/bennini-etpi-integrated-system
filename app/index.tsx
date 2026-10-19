@@ -28,7 +28,8 @@ import { AppHeader, HeaderAction } from "./components/AppHeader";
 import RecordNotes from "./components/RecordNotes";
 import { CompanyLogo } from "./components/CompanyLogo";
 import { apiRequest, type DashboardData } from "../lib/api";
-import { colors, formatDzd } from "../lib/theme";
+import { colors, formatDzd, makeStylesReactive } from "../lib/theme";
+import { sectionName, translate } from "../lib/localization";
 import { sections, type SectionId } from "../shared/sections";
 import { hasPermission } from "../shared/access";
 
@@ -49,7 +50,7 @@ const icons: Record<string, typeof Wallet> = {
 export default function HomeScreen() {
   const router = useRouter();
   const { width: viewportWidth } = useWindowDimensions();
-  const { isLoaded: authLoaded, isSignedIn, getToken, signOut, member } = useAuth();
+  const { isLoaded: authLoaded, isSignedIn, getToken, signOut, member, language } = useAuth();
   const { user } = useUser();
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -129,7 +130,7 @@ export default function HomeScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>
+    <View style={{ flex: 1, backgroundColor: colors.background, direction: language === "ar" ? "rtl" : "ltr" }}>
       <AppHeader
         title="لوحة القيادة"
         rightAction={
@@ -144,7 +145,7 @@ export default function HomeScreen() {
             <Text style={styles.eyebrow}>BENNINI ETPI · النظام الموحد</Text>
             <Text style={styles.welcomeTitle}>مرحباً، {member?.name || user?.firstName || "عضو الفريق"}</Text>
             <Text style={styles.welcomeSubtitle}>مساحة عملك الموحدة، مع الأقسام والمؤشرات المتاحة لحسابك.</Text>
-            <View style={styles.rolePill}><Text style={styles.rolePillText}>{member?.role_name || roleLabel(member?.role)}</Text></View>
+            <View style={styles.rolePill}><Text style={styles.rolePillText}>{member?.role_name || translate(roleLabel(member?.role), language)}</Text></View>
           </View>
           <View style={styles.welcomeMark}><CompanyLogo width={91} height={48} /></View>
         </View>
@@ -161,13 +162,13 @@ export default function HomeScreen() {
                   <Pressable
                     key={section.id}
                     accessibilityRole="button"
-                    accessibilityLabel={`فتح قسم ${section.label}`}
+                    accessibilityLabel={`${language === "ar" ? "فتح قسم" : "Open section"} ${sectionName(section.id, language)}`}
                     onPress={() => goToSection(section.id)}
                     style={({ pressed }) => [styles.quickAccessCard, { width: compact ? "100%" : "31.7%" }, pressed && { opacity: 0.78 }]}
                   >
                     <View style={styles.quickAccessIcon}><Icon size={19} color={colors.blue} /></View>
                     <View style={styles.quickAccessText}>
-                      <Text style={styles.quickAccessTitle} numberOfLines={1}>{section.label}</Text>
+                      <Text style={styles.quickAccessTitle}>{sectionName(section.id, language)}</Text>
                       <Text style={styles.quickAccessHint}>فتح القسم</Text>
                     </View>
                     <ChevronLeft size={16} color="#A6B2C1" />
@@ -229,7 +230,7 @@ export default function HomeScreen() {
                         <Text style={[styles.activityAmount, { color: item.type === "income" ? colors.green : colors.red }]}>
                           {item.type === "income" ? "+" : "−"}{formatDzd(Number(item.amount))}
                         </Text>
-                        <Text style={styles.activityDate}>{formatDate(item.date)}</Text>
+                        <Text style={styles.activityDate}>{formatDate(item.date, language)}</Text>
                       </View>
                     </View>
                     <RecordNotes entity="transaction" recordId={item.id} initialNotes={item.notes}
@@ -247,7 +248,7 @@ export default function HomeScreen() {
                     <View style={styles.activityRow}>
                       <View style={[styles.activityIcon, { backgroundColor: colors.amberSoft }]}><HardHat size={18} color={colors.amber} /></View>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.activityTitle}>{item.category}</Text>
+                        <Text style={styles.activityTitle}>{translate(item.category, language)}</Text>
                         <Text style={styles.activityDetail} numberOfLines={1}>
                           {item.site_name} · {item.created_by_name}
                           {item.fuel_liters ? ` · ${item.fuel_liters} لتر` : ""}
@@ -256,7 +257,7 @@ export default function HomeScreen() {
                       </View>
                       <View style={{ alignItems: "flex-start" }}>
                          {item.amount == null ? null : <Text style={styles.activityAmount}>{formatDzd(Number(item.amount))}</Text>}
-                        <Text style={styles.activityDate}>{formatDate(item.created_at)}</Text>
+                        <Text style={styles.activityDate}>{formatDate(item.created_at, language)}</Text>
                       </View>
                     </View>
                     <RecordNotes entity="fieldExpense" recordId={item.id} initialNotes={item.notes}
@@ -340,14 +341,16 @@ function roleLabel(role?: string) {
   return ({ admin: "مدير النظام", finance: "الإدارة المالية", field: "رئيس أشغال", supervisor: "مشرف", partner: "شريك", viewer: "عضو" } as Record<string, string>)[role ?? ""] ?? "عضو";
 }
 
-function formatDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("ar-DZ", { day: "numeric", month: "short" }).format(date);
+function formatDate(value: string, language: "ar" | "fr") {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10)))
+    : new Date(value);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(language === "ar" ? "ar-DZ" : "fr-DZ", { day: "numeric", month: "short" }).format(date);
 }
 
 const styles = {
   page: { width: "100%" as const, maxWidth: 1120, alignSelf: "center" as const, padding: 20, paddingBottom: 34, gap: 20 },
-  welcome: { minHeight: 156, borderRadius: 20, padding: 22, backgroundColor: colors.navy, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, overflow: "hidden" as const, borderWidth: 1, borderColor: "#17365D" },
+  welcome: { minHeight: 156, borderRadius: 20, padding: 22, backgroundColor: colors.deepBlue, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, overflow: "hidden" as const, borderWidth: 1, borderColor: colors.deepBlue },
   welcomeCopy: { flex: 1, alignItems: "flex-start" as const },
   eyebrow: { color: colors.yellow, fontSize: 10, fontWeight: "800" as const, letterSpacing: 0.3 },
   welcomeTitle: { color: "#FFFFFF", fontSize: 23, fontWeight: "800" as const, marginTop: 11, textAlign: "right" as const },
@@ -395,3 +398,4 @@ const styles = {
   outlineButtonText: { color: colors.blue, fontWeight: "700" as const },
   errorBox: { borderRadius: 12, backgroundColor: colors.redSoft, padding: 13, gap: 10, flexDirection: "row" as const, alignItems: "center" as const },
 };
+makeStylesReactive(styles);

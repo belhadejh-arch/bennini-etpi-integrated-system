@@ -16,8 +16,9 @@ import MachineryPicker, { type MachineryOption } from "../components/MachineryPi
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
-import { colors, formatDzd } from "../../lib/theme";
+import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
+import { translate, translateTemplate } from "../../lib/localization";
 
 type Status = "active" | "completed" | "cancelled";
 type RatePeriod = "daily" | "monthly";
@@ -84,7 +85,7 @@ function emptyDraft(): Draft {
 }
 
 function dateLabel(value: string) {
-  return value ? value.slice(0, 10) : "—";
+  return formatDate(value);
 }
 
 function amount(value: string | number | null | undefined) {
@@ -112,7 +113,7 @@ export default function RentalsSection() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
   const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken, language } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [items, setItems] = useState<Rental[]>([]);
@@ -483,7 +484,7 @@ export default function RentalsSection() {
 
         {canCreate ? (
           <Pressable onPress={formOpen ? closeForm : startCreate} disabled={saving} style={styles.addButton}>
-            {formOpen ? <X size={17} color={colors.navy} /> : <Plus size={18} color={colors.navy} />}
+            {formOpen ? <X size={17} color={colors.onAccent} /> : <Plus size={18} color={colors.onAccent} />}
             <Text style={styles.addButtonText}>{formOpen ? "إغلاق النموذج" : "تسجيل عملية كراء"}</Text>
           </Pressable>
         ) : null}
@@ -528,7 +529,7 @@ export default function RentalsSection() {
               <Field label="اسم المستأجر / المؤجر *" value={draft.clientOrOwner} onChange={(value) => setField("clientOrOwner", value)} placeholder="الاسم أو الجهة" />
               <Field label="تاريخ بداية الكراء *" value={draft.startDate} onChange={(value) => setField("startDate", value)} placeholder="YYYY-MM-DD" />
               <Field label="تاريخ نهاية الكراء *" value={draft.endDate} onChange={(value) => setField("endDate", value)} placeholder="YYYY-MM-DD" />
-              <Field label={`السعر ${rateLabels[draft.ratePeriod]} (دج) *`} value={draft.rentalRate} onChange={(value) => setField("rentalRate", value)} placeholder="0" numeric />
+              <Field label={translateTemplate("السعر {{0}} (دج) *", [translate(rateLabels[draft.ratePeriod], language)])} value={draft.rentalRate} onChange={(value) => setField("rentalRate", value)} placeholder="0" numeric />
               <Field label="المبلغ المدفوع (دج)" value={draft.paidAmount} onChange={(value) => setField("paidAmount", value)} placeholder="0" numeric />
             </View>
 
@@ -550,7 +551,7 @@ export default function RentalsSection() {
             <Text style={styles.fieldLabel}>حالة الكراء</Text>
             <View style={styles.choiceRow}>
               {(["active", "completed", "cancelled"] as const).map((status) => (
-                <Choice key={status} label={statusLabels[status]} selected={draft.status === status}
+                <Choice key={status} label={translate(statusLabels[status], language)} selected={draft.status === status}
                   onPress={() => setField("status", status)} />
               ))}
             </View>
@@ -604,7 +605,7 @@ export default function RentalsSection() {
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow}>
             {statusOptions.map((option) => (
-              <Choice key={option.value || "all"} label={option.label} selected={statusFilter === option.value}
+              <Choice key={option.value || "all"} label={translate(option.label, language)} selected={statusFilter === option.value}
                 onPress={() => setStatusFilter(option.value as Status | "")} />
             ))}
           </ScrollView>
@@ -640,7 +641,7 @@ export default function RentalsSection() {
                   <View style={styles.amountStatus}>
                     <Text style={styles.totalAmount}>{formatDzd(amount(rental.total_amount))}</Text>
                     <View style={[styles.statusBadge, rentalStatusTone(rental.status)]}>
-                      <Text style={styles.statusText}>{statusLabels[rental.status]}</Text>
+                      <Text style={styles.statusText}>{translate(statusLabels[rental.status], language)}</Text>
                     </View>
                   </View>
                 </View>
@@ -648,7 +649,7 @@ export default function RentalsSection() {
                   <Detail label="بداية الكراء" value={dateLabel(rental.start_date)} />
                   <Detail label="نهاية الكراء" value={dateLabel(rental.end_date)} highlight={isDueSoon} />
                   <Detail label="مدة الكراء" value={`${rental.duration} ${rental.rate_period === "monthly" ? "شهر" : "يوم"}`} />
-                  <Detail label={`السعر ${rateLabels[rental.rate_period]}`} value={formatDzd(amount(rental.rental_rate))} />
+                  <Detail label={`${translate("السعر", language)} ${translate(rateLabels[rental.rate_period], language)}`} value={formatDzd(amount(rental.rental_rate))} />
                   <Detail label="المبلغ المدفوع" value={formatDzd(amount(rental.paid_amount))} />
                   <Detail label="المبلغ المتبقي" value={formatDzd(amount(rental.remaining))} highlight={amount(rental.remaining) > 0} />
                   {isDueSoon ? (
@@ -767,7 +768,7 @@ const styles = {
   alertMeta: { color: colors.red, fontSize: 10, marginTop: 3, textAlign: "right" as const },
   alertMore: { color: "#81393B", fontSize: 10, textAlign: "right" as const, paddingTop: 3 },
   addButton: { minHeight: 48, borderRadius: 13, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
-  addButtonText: { color: colors.navy, fontWeight: "900" as const, fontSize: 13 },
+  addButtonText: { color: colors.onAccent, fontWeight: "600" as const, fontSize: 14, lineHeight: 22 },
   formCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 18 },
   machineAddCard: { backgroundColor: "#F7FAFD", borderWidth: 1, borderColor: "#C8D9EC", borderRadius: 12, padding: 12, gap: 9 },
   formHeading: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10, marginBottom: 12 },
@@ -797,7 +798,7 @@ const styles = {
   pickedList: { borderRadius: 10, backgroundColor: "#F6F8FB", paddingHorizontal: 10, marginBottom: 8 },
   pickedRow: { minHeight: 34, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
   pickedName: { flex: 1, color: colors.ink, fontSize: 10, textAlign: "right" as const },
-  saveButton: { minHeight: 45, borderRadius: 11, backgroundColor: colors.blue, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 6 },
+  saveButton: { minHeight: 45, borderRadius: 11, backgroundColor: colors.action, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 6 },
   saveText: { color: "#FFFFFF", fontSize: 12, fontWeight: "900" as const },
   disabled: { opacity: 0.5 },
   searchCard: { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 14, padding: 10, gap: 10 },
@@ -837,7 +838,7 @@ const styles = {
   emptyIcon: { width: 45, height: 45, borderRadius: 14, backgroundColor: "#EAF1FA", alignItems: "center" as const, justifyContent: "center" as const },
   emptyTitle: { color: colors.navy, fontSize: 14, fontWeight: "900" as const },
   emptyText: { color: colors.muted, fontSize: 10, textAlign: "center" as const, lineHeight: 16 },
-  emptyAddButton: { minHeight: 37, borderRadius: 10, backgroundColor: colors.blue, paddingHorizontal: 12, flexDirection: "row" as const, alignItems: "center" as const, gap: 6, marginTop: 4 },
+  emptyAddButton: { minHeight: 37, borderRadius: 10, backgroundColor: colors.action, paddingHorizontal: 12, flexDirection: "row" as const, alignItems: "center" as const, gap: 6, marginTop: 4 },
   emptyAddText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" as const },
   error: { backgroundColor: colors.redSoft, borderRadius: 11, padding: 12, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 9 },
   errorText: { flex: 1, color: colors.red, fontSize: 11, lineHeight: 17, textAlign: "right" as const },
@@ -849,3 +850,4 @@ const styles = {
   footer: { minHeight: 47, backgroundColor: colors.surface, paddingHorizontal: 16, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, borderTopWidth: 1, borderTopColor: colors.border },
   footerText: { color: colors.muted, fontSize: 9 },
 };
+makeStylesReactive(styles);

@@ -6,7 +6,8 @@ import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Switch, Text
 import { AppHeader, HeaderAction } from "./components/AppHeader";
 import RecordNotes from "./components/RecordNotes";
 import { apiRequest, type Member } from "../lib/api";
-import { colors } from "../lib/theme";
+import { colors, formatDateTime, makeStylesReactive } from "../lib/theme";
+import { sectionName, translate } from "../lib/localization";
 import { sections, type SectionId } from "../shared/sections";
 import { hasPermission, permissionActions, type MemberCapabilities, type MemberPermissions, type PermissionAction } from "../shared/access";
 
@@ -23,7 +24,7 @@ type MemberActivityResponse = { items: MemberActivityItem[]; total: number; page
 
 export default function MembersScreen() {
   const router = useRouter();
-  const { isLoaded, isSignedIn, getToken, signOut, member } = useAuth();
+  const { isLoaded, isSignedIn, getToken, signOut, member, language } = useAuth();
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState("");
@@ -286,7 +287,7 @@ export default function MembersScreen() {
                   { value: "partner", label: "شريك" },
                 ].map((option) => (
                   <Pressable key={option.value} onPress={() => setNewRole(option.value)} style={[styles.permissionChip, newRole === option.value && styles.chipActive]}>
-                    <Text style={[styles.chipText, newRole === option.value && styles.chipTextActive]}>{option.label}</Text>
+                    <Text style={[styles.chipText, newRole === option.value && styles.chipTextActive]}>{translate(option.label, language)}</Text>
                   </Pressable>
                 ))}
               </View>
@@ -327,7 +328,7 @@ export default function MembersScreen() {
             ].map((option) => (
               <Pressable key={option.value} onPress={() => setActiveFilter(option.value)}
                 style={[styles.permissionChip, activeFilter === option.value && styles.chipActive]}>
-                <Text style={[styles.chipText, activeFilter === option.value && styles.chipTextActive]}>{option.label}</Text>
+                <Text style={[styles.chipText, activeFilter === option.value && styles.chipTextActive]}>{translate(option.label, language)}</Text>
               </Pressable>
             ))}
           </View>
@@ -345,7 +346,7 @@ export default function MembersScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.name}>{item.name || "عضو جديد"}</Text>
                     <Text style={styles.email}>{item.has_serial ? "رقم دخول مخصص" : "لا يوجد رقم دخول"}</Text>
-                    <Text style={styles.role}>{item.role_name || roleLabel(item.role)}{item.role === "pending" ? " · بانتظار التفعيل" : ""}</Text>
+                    <Text style={styles.role}>{item.role_name || translate(roleLabel(item.role), language)}{item.role === "pending" ? ` · ${translate("بانتظار التفعيل", language)}` : ""}</Text>
                   </View>
                   <View style={{ alignItems: "center", gap: 3 }}>
                     <Switch
@@ -438,9 +439,9 @@ export default function MembersScreen() {
                         ) : activityItems.map((activity) => (
                           <View key={activity.id} style={styles.activityRow}>
                             <View style={{ flex: 1 }}>
-                              <Text style={styles.activityTitle}>{activity.action} · {activitySectionLabel(activity.section)}</Text>
+                      <Text style={styles.activityTitle}>{translate(activity.action, language)} · {activitySectionLabel(activity.section)}</Text>
                               {activity.details ? <Text style={styles.activityDetails}>{activity.details}</Text> : null}
-                              <Text style={styles.activityDate}>{formatActivityDate(activity.created_at)}</Text>
+                              <Text style={styles.activityDate}>{formatDateTime(activity.created_at, language)}</Text>
                             </View>
                           </View>
                         ))}
@@ -490,7 +491,7 @@ export default function MembersScreen() {
                     </Text>
                     {sections.filter((section) => section.id !== "dashboard").map((section) => (
                       <View key={section.id} style={styles.permissionRow}>
-                        <Text style={styles.permissionSectionTitle}>{section.shortLabel}</Text>
+                        <Text style={styles.permissionSectionTitle}>{sectionName(section.id, language)}</Text>
                         <View style={styles.permissionActions}>
                           {actionsForSection(section.id).map((action) => {
                             const checked = item.permissions?.[section.id]?.[action] === true;
@@ -504,12 +505,12 @@ export default function MembersScreen() {
                                 ]}
                               >
                                 <Text style={[styles.permissionToggleLabel, checked && styles.permissionToggleLabelOn]}>
-                                  {actionLabel(action)}
+                                  {translate(actionLabel(action), language)}
                                 </Text>
                                 <Switch
                                   value={checked}
                                   disabled={isSelf || savingId === item.clerk_user_id}
-                                  accessibilityLabel={`${actionLabel(action)} في ${section.shortLabel}`}
+                                  accessibilityLabel={`${translate(actionLabel(action), language)} · ${sectionName(section.id, language)}`}
                                   onValueChange={(enabled) => {
                                     const updated: MemberPermissions = {
                                       ...item.permissions,
@@ -544,14 +545,14 @@ export default function MembersScreen() {
                     {capabilityRows(item.capabilities).map((capability) => (
                       <View key={capability.key} style={styles.capabilityRow}>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.permissionSection}>{capability.label}</Text>
+                          <Text style={styles.permissionSection}>{translate(capability.label, language)}</Text>
                           <Text style={styles.permissionLegend}>{capability.description}</Text>
                         </View>
                         <View style={styles.capabilityControl}>
                           <Switch
                             value={capability.value}
                             disabled={isSelf || savingId === item.clerk_user_id}
-                            accessibilityLabel={capability.label}
+                            accessibilityLabel={translate(capability.label, language)}
                             onValueChange={(value) => void patchMember(item, {
                               capabilities: { ...capabilityValues(item.capabilities), [capability.key]: value },
                             })}
@@ -592,10 +593,6 @@ function activitySectionLabel(section: string) {
   return sections.find((item) => item.id === section)?.shortLabel ?? (section === "system" ? "النظام" : section);
 }
 
-function formatActivityDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("ar-DZ");
-}
 
 function actionLabel(action: PermissionAction) {
   return ({ view: "عرض", create: "إضافة", edit: "تعديل", delete: "حذف" } as Record<PermissionAction, string>)[action];
@@ -686,8 +683,9 @@ const styles = {
   error: { backgroundColor: colors.redSoft, borderRadius: 11, padding: 12 },
   center: { flex: 1, alignItems: "center" as const, justifyContent: "center" as const, padding: 24 },
   notice: { color: colors.muted, textAlign: "center" as const },
-  action: { backgroundColor: colors.blue, borderRadius: 11, padding: 13, marginTop: 12 },
+  action: { backgroundColor: colors.action, borderRadius: 11, padding: 13, marginTop: 12 },
   actionText: { color: "#FFFFFF", fontWeight: "700" as const },
   logout: { alignSelf: "center" as const, borderWidth: 1, borderColor: colors.border, borderRadius: 11, paddingHorizontal: 18, paddingVertical: 11 },
   logoutText: { color: colors.blue, fontWeight: "700" as const, fontSize: 11 },
 };
+makeStylesReactive(styles);

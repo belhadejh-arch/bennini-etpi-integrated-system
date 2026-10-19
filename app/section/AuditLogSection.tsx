@@ -6,9 +6,10 @@ import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, type Member } from "../../lib/api";
-import { colors, formatDzd } from "../../lib/theme";
+import { colors, formatDzd, formatDateTime, makeStylesReactive } from "../../lib/theme";
 import { sections, type SectionId } from "../../shared/sections";
 import { hasPermission } from "../../shared/access";
+import { sectionName, translate } from "../../lib/localization";
 
 type AuditType = "create" | "update" | "delete" | "review" | "attachment" | "permissions" | "note" | "setup" | "other";
 type AuditItem = {
@@ -62,28 +63,35 @@ function eventLabel(type: AuditType) {
     ({ setup: "تهيئة", note: "ملاحظة", other: "أخرى" } as Record<string, string>)[type] ?? "أخرى";
 }
 
-function sectionLabel(section: string) {
-  return sections.find((item) => item.id === section)?.label ?? (section === "system" ? "النظام" : section);
+function sectionLabel(section: string, language: "ar" | "fr") {
+  const known = sections.find((item) => item.id === section);
+  return known ? sectionName(known.id, language) : section === "system" ? translate("النظام", language) : section;
 }
 
-function timestamp(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleString("ar-DZ", { dateStyle: "medium", timeStyle: "short" });
+function timestamp(value: string, language: "ar" | "fr") {
+  return formatDateTime(value, language);
 }
 
-function dataValue(key: string, value: unknown) {
+function dataValue(key: string, value: unknown, language: "ar" | "fr") {
   if (value == null || value === "") return null;
   if (key.toLowerCase().includes("amount") || key === "totalCost") return formatDzd(Number(value));
   if (typeof value === "object") return null;
-  if (typeof value === "boolean") return value ? "نعم" : "لا";
-  return String(value);
+  if (typeof value === "boolean") return translate(value ? "نعم" : "لا", language);
+  const text = String(value);
+  if (["party", "supplier", "beneficiary", "clientOrOwner", "machineName", "itemName", "siteName", "email"].includes(key)) return text;
+  if (key === "status") {
+    const statuses: Record<string, string> = {
+      pending: "قيد الانتظار", paid: "مدفوع", cancelled: "ملغى", active: "جاري",
+      completed: "منتهٍ", reviewed: "تمت المراجعة", approved: "مقبول", rejected: "مرفوض",
+    };
+    return translate(statuses[text] ?? text, language);
+  }
+  return text;
 }
 
 export default function AuditLogSection() {
   const router = useRouter();
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn, language } = useAuth();
   const [member, setMember] = useState<Member | null>(null);
   const [filters, setFilters] = useState(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
@@ -187,14 +195,14 @@ export default function AuditLogSection() {
           <Text style={styles.filterLabel}>القسم</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
             {sectionFilters.map((item) => (
-              <FilterChip key={item.id || "all-sections"} label={item.label} selected={appliedFilters.section === item.id}
+              <FilterChip key={item.id || "all-sections"} label={item.id ? sectionName(item.id as SectionId, language) : translate(item.label, language)} selected={appliedFilters.section === item.id}
                 onPress={() => updateFilter("section", item.id)} />
             ))}
           </ScrollView>
           <Text style={styles.filterLabel}>نوع العملية</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
             {eventTypes.map((item) => (
-              <FilterChip key={item.value || "all-types"} label={item.label} selected={appliedFilters.type === item.value}
+              <FilterChip key={item.value || "all-types"} label={translate(item.label, language)} selected={appliedFilters.type === item.value}
                 onPress={() => updateFilter("type", item.value)} />
             ))}
           </ScrollView>
@@ -225,23 +233,23 @@ export default function AuditLogSection() {
           <View key={item.id} style={styles.entry}>
             <View style={styles.entryHeader}>
               <View style={styles.badgeRow}>
-                <Text style={styles.sectionBadge}>{sectionLabel(item.section)}</Text>
-                <Text style={styles.typeBadge}>{eventLabel(item.event_type)}</Text>
+                <Text style={styles.sectionBadge}>{sectionLabel(item.section, language)}</Text>
+                <Text style={styles.typeBadge}>{translate(eventLabel(item.event_type), language)}</Text>
               </View>
-              <Text style={styles.entryTitle}>{item.action}</Text>
+              <Text style={styles.entryTitle}>{translate(item.action, language)}</Text>
             </View>
             <Text style={styles.details}>{item.details}</Text>
             {item.entity_id ? <Text style={styles.linkedRecord}>السجل المرتبط: #{item.entity_id}</Text> : null}
-            {Object.entries(item.data ?? {}).filter(([key, value]) => dataLabels[key] && dataValue(key, value) != null).length ? (
+            {Object.entries(item.data ?? {}).filter(([key, value]) => dataLabels[key] && dataValue(key, value, language) != null).length ? (
               <View style={styles.dataRow}>
-                {Object.entries(item.data ?? {}).filter(([key, value]) => dataLabels[key] && dataValue(key, value) != null).map(([key, value]) => (
-                  <Text key={key} style={styles.dataPill}>{dataLabels[key]}: {dataValue(key, value)}</Text>
+                {Object.entries(item.data ?? {}).filter(([key, value]) => dataLabels[key] && dataValue(key, value, language) != null).map(([key, value]) => (
+                  <Text key={key} style={styles.dataPill}>{translate(dataLabels[key], language)}: {dataValue(key, value, language)}</Text>
                 ))}
               </View>
             ) : null}
             <View style={styles.entryFooter}>
               <Text style={styles.actor}>{item.performed_by_name || item.performed_by_id}</Text>
-              <Text style={styles.date}>{timestamp(item.created_at)}</Text>
+              <Text style={styles.date}>{timestamp(item.created_at, language)}</Text>
             </View>
             <RecordNotes entity="auditNote" recordId={String(item.id)} initialNotes={item.notes}
               editable={hasPermission(member, "audit", "edit")} />
@@ -349,3 +357,4 @@ const styles = {
   pageButtonText: { color: colors.blue, fontSize: 10, fontWeight: "800" as const },
   pageCount: { color: colors.muted, fontSize: 10 },
 };
+makeStylesReactive(styles);

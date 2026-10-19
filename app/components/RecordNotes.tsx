@@ -3,7 +3,7 @@ import { Pencil, Save, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { apiRequest } from "../../lib/api";
-import { colors } from "../../lib/theme";
+import { colors, makeStylesReactive } from "../../lib/theme";
 
 export type NoteEntity =
   | "transaction"
@@ -114,10 +114,11 @@ const styles = {
   noteText: { color: colors.ink, fontSize: 12, textAlign: "right" as const, lineHeight: 20 },
   input: { minHeight: 84, borderRadius: 9, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFFFFF", color: colors.ink, padding: 11, fontSize: 12, textAlign: "right" as const, textAlignVertical: "top" as const, writingDirection: "rtl" as const },
   actions: { flexDirection: "row" as const, gap: 7, justifyContent: "flex-start" as const },
-  saveButton: { minHeight: 34, paddingHorizontal: 10, borderRadius: 8, backgroundColor: colors.blue, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 5 },
+  saveButton: { minHeight: 40, paddingHorizontal: 10, borderRadius: 8, backgroundColor: colors.action, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 5 },
   saveText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" as const },
   cancelButton: { minHeight: 34, paddingHorizontal: 9, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FFFFFF", flexDirection: "row" as const, alignItems: "center" as const, gap: 4 },
   cancelText: { color: colors.muted, fontSize: 10, fontWeight: "700" as const },
   error: { color: colors.red, fontSize: 10, textAlign: "right" as const },
   disabled: { opacity: 0.55 },
 };
+makeStylesReactive(styles);

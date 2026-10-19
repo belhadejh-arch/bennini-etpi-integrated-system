@@ -16,7 +16,7 @@ export default function EntityPicker({
   label: string;
   disabled?: boolean;
 }) {
-  const { getToken } = useAuth();
+  const { getToken, language } = useAuth();
   const [query, setQuery] = useState(value?.name ?? "");
   const [results, setResults] = useState<FinanceEntity[]>([]);
   const [loading, setLoading] = useState(false);
@@ -39,26 +39,26 @@ export default function EntityPicker({
 
   return (
     <View style={{ gap: 6, position: "relative" }}>
-      <Text style={{ color: colors.ink, fontSize: 12, fontWeight: "700", textAlign: "right" }}>{label}</Text>
-      <View style={{ minHeight: 44, borderWidth: 1, borderColor: colors.border, backgroundColor: "#FBFCFE", borderRadius: 10, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10 }}>
+      <Text style={{ color: colors.ink, fontSize: 14, fontWeight: "600", lineHeight: 23, textAlign: language === "ar" ? "right" : "left" }}>{label}</Text>
+      <View style={{ minHeight: 48, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, borderRadius: 10, flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10 }}>
         {loading ? <ActivityIndicator size="small" color={colors.blue} /> : <Search size={15} color={colors.muted} />}
         <TextInput
           value={query} editable={!disabled && !value}
           onChangeText={(text) => { setQuery(text); if (value) onChange(null); }}
           placeholder="ابحث بالاسم أو رقم الهاتف"
-          placeholderTextColor="#98A5B4"
-          style={{ flex: 1, textAlign: "right", color: colors.ink, fontSize: 12 }}
+          placeholderTextColor={colors.placeholder}
+          style={{ flex: 1, textAlign: language === "ar" ? "right" : "left", color: colors.ink, fontSize: 14, lineHeight: 23 }}
           accessibilityLabel={label}
         />
         {value && !disabled ? <Pressable accessibilityRole="button" accessibilityLabel="إزالة الاختيار" onPress={() => { onChange(null); setQuery(""); }}><X size={15} color={colors.muted} /></Pressable> : null}
       </View>
-      {error ? <Text style={{ color: colors.red, fontSize: 10, textAlign: "right" }}>{error}</Text> : null}
+      {error ? <Text style={{ color: colors.red, fontSize: 14, fontWeight: "600", lineHeight: 23, textAlign: language === "ar" ? "right" : "left" }}>{error}</Text> : null}
       {results.length ? (
-        <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: "#FFFFFF", overflow: "hidden" }}>
+        <View style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 10, backgroundColor: colors.surface, overflow: "hidden" }}>
           {results.slice(0, 8).map((entity) => (
             <Pressable key={entity.id} onPress={() => { onChange(entity); setQuery(entity.name); setResults([]); }} style={{ padding: 11, borderBottomWidth: 1, borderBottomColor: "#EDF0F4" }}>
-              <Text style={{ color: colors.navy, textAlign: "right", fontSize: 12, fontWeight: "800" }}>{entity.name}</Text>
-              {entity.phone ? <Text style={{ color: colors.muted, textAlign: "right", fontSize: 10, marginTop: 3 }}>{entity.phone}</Text> : null}
+              <Text style={{ color: colors.navy, textAlign: language === "ar" ? "right" : "left", fontSize: 14, fontWeight: "600", lineHeight: 23 }}>{entity.name}</Text>
+              {entity.phone ? <Text style={{ color: colors.muted, textAlign: language === "ar" ? "right" : "left", fontSize: 14, fontWeight: "500", lineHeight: 22, marginTop: 3 }}>{entity.phone}</Text> : null}
             </Pressable>
           ))}
         </View>

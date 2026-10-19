@@ -2,10 +2,12 @@ import type { ReactNode } from "react";
 import { useRouter } from "expo-router";
 import { Pressable, Text, View, useWindowDimensions } from "react-native";
 import { Bell, Menu } from "lucide-react-native";
-import { colors } from "../../lib/theme";
+import { colors, makeStylesReactive } from "../../lib/theme";
 import { CompanyLogo } from "./CompanyLogo";
 import { useSidebarAction } from "./AppSidebar";
 import { useNotificationBadge } from "./NotificationContext";
+import { useAuth } from "../../lib/auth";
+import { translate } from "../../lib/localization";
 
 type AppHeaderProps = {
   title: string;
@@ -39,6 +41,7 @@ export function HeaderAction({
 }
 
 export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
+  const { language, isDark } = useAuth();
   const { width } = useWindowDimensions();
   const compact = width < 420;
   const sidebar = useSidebarAction();
@@ -48,27 +51,27 @@ export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
   const logoHeight = compact ? 31 : 37;
 
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, { backgroundColor: colors.action, direction: language === "ar" ? "rtl" : "ltr" }]}>
       <View style={styles.actionSlot}>
         {sidebar?.visible ? (
-          <HeaderAction label="فتح قائمة الأقسام" onPress={sidebar.toggle}>
+          <HeaderAction label={translate("فتح قائمة الأقسام", language)} onPress={sidebar.toggle}>
             <Menu size={20} color={colors.lightBeige} />
           </HeaderAction>
         ) : leftAction}
       </View>
       <View style={styles.brand}>
         <CompanyLogo width={logoWidth} height={logoHeight} framed />
-        <Text numberOfLines={1} style={styles.title}>{title}</Text>
+        <Text style={[styles.title, { textAlign: language === "ar" ? "right" : "left" }]}>{title}</Text>
       </View>
       <View style={[styles.actionSlot, styles.rightActions]}>
         {rightAction}
         <View style={styles.notificationWrap}>
-          <HeaderAction label={`الإشعارات${unreadCount ? `، ${unreadCount} غير مقروء` : ""}`} onPress={() => router.push("/notifications")}>
+          <HeaderAction label={`${language === "ar" ? "الإشعارات" : "Notifications"}${unreadCount ? `, ${unreadCount}` : ""}`} onPress={() => router.push("/notifications")}>
             <Bell size={19} color={colors.lightBeige} />
           </HeaderAction>
           {unreadCount > 0 ? (
             <View style={styles.badge}>
-              <Text style={styles.badgeText}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
+              <Text style={[styles.badgeText, { color: isDark ? colors.onAccent : colors.white }]}>{unreadCount > 9 ? "9+" : unreadCount}</Text>
             </View>
           ) : null}
         </View>
@@ -81,7 +84,7 @@ const styles = {
   header: {
     minHeight: 76,
     paddingHorizontal: 18,
-    backgroundColor: colors.blue,
+    backgroundColor: colors.action,
     flexDirection: "row" as const,
     alignItems: "center" as const,
     gap: 12,
@@ -102,19 +105,19 @@ const styles = {
   notificationWrap: { position: "relative" as const },
   badge: {
     position: "absolute" as const,
-    top: -4,
-    right: -4,
-    minWidth: 17,
-    height: 17,
-    paddingHorizontal: 3,
-    borderRadius: 9,
-    backgroundColor: "#E5484D",
+    top: -7,
+    right: -7,
+    minWidth: 24,
+    height: 24,
+    paddingHorizontal: 5,
+    borderRadius: 12,
+    backgroundColor: colors.red,
     alignItems: "center" as const,
     justifyContent: "center" as const,
     borderWidth: 1,
     borderColor: colors.blue,
   },
-  badgeText: { color: "#FFFFFF", fontSize: 8, fontWeight: "900" as const },
+  badgeText: { color: "#FFFFFF", fontSize: 14, lineHeight: 22, fontWeight: "900" as const, textAlign: "center" as const },
   action: {
     width: 42,
     height: 42,
@@ -139,3 +142,4 @@ const styles = {
     letterSpacing: 0.1,
   },
 };
+makeStylesReactive(styles);

@@ -20,8 +20,9 @@ import FieldExpensesSection from "./FieldExpensesSection";
 import MachinerySection from "./MachinerySection";
 import AuditLogSection from "./AuditLogSection";
 import { apiRequest, type Member } from "../../lib/api";
-import { colors, formatDzd } from "../../lib/theme";
+import { colors, formatDzd, makeStylesReactive } from "../../lib/theme";
 import { sections, type SectionId } from "../../shared/sections";
+import { sectionName, translate, translateTemplate } from "../../lib/localization";
 import { hasPermission } from "../../shared/access";
 
 type SectionResult = { items: Array<Record<string, unknown>> };
@@ -32,7 +33,7 @@ export default function SectionScreen() {
   const params = useLocalSearchParams<{ section: string; focusId?: string | string[] }>();
   const section = params.section as SectionId;
   const focusId = Array.isArray(params.focusId) ? params.focusId[0] : params.focusId;
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken, language } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
@@ -101,7 +102,7 @@ export default function SectionScreen() {
     }
   };
 
-  const title = sectionMeta?.label ?? "القسم";
+  const title = sectionName(section, language) ?? "القسم";
 
   if (section === "inventory") return <InventorySection />;
   if (section === "cheques") return <ChequesSection />;
@@ -134,7 +135,7 @@ export default function SectionScreen() {
 
         {canAdd ? (
           <Pressable onPress={() => setFormOpen((open) => !open)} style={styles.addButton}>
-            <Plus size={17} color={colors.navy} />
+            <Plus size={17} color={colors.onAccent} />
             <Text style={styles.addButtonText}>{formOpen ? "إغلاق النموذج" : section === "finance" ? "تسجيل عملية مالية" : "تسجيل مصروف ميداني"}</Text>
           </Pressable>
         ) : null}
@@ -174,11 +175,12 @@ export default function SectionScreen() {
             {canAdd ? <Text style={styles.emptyHint}>استخدم زر الإضافة لتسجيل أول عملية.</Text> : null}
           </View>
         ) : items.map((item) => (
-          <DataCard
+            <DataCard
             key={String(item.id)}
             item={item}
             section={section}
             editable={hasPermission(member, section, "edit")}
+              language={language}
           />
         ))}
       </ScrollView>
@@ -190,34 +192,40 @@ export default function SectionScreen() {
   );
 }
 
-function DataCard({ item, section, editable }: { item: Record<string, unknown>; section: SectionId; editable: boolean }) {
+function DataCard({ item, section, editable, language }: { item: Record<string, unknown>; section: SectionId; editable: boolean; language: "ar" | "fr" }) {
   let title = "";
   let subtitle = "";
   let amount: string | null = null;
   if (section === "finance") {
     title = String(item.party ?? "");
-    subtitle = `${String(item.reason || "عملية مالية")} · ${String(item.date ?? "")}`;
+    subtitle = `${String(item.reason || translate("عملية مالية", language))} · ${String(item.date ?? "")}`;
     amount = formatDzd(Number(item.amount));
   } else if (section === "inventory") {
     title = String(item.name ?? "");
-    subtitle = `${item.remaining_quantity} متبقي من ${item.quantity} · ${String(item.supplier || "دون مورد")}`;
+    subtitle = translateTemplate("{{0}} متبقي من {{1}} · {{2}}", [
+      item.remaining_quantity, item.quantity, item.supplier ? String(item.supplier) : translate("دون مورد", language),
+    ]);
     amount = formatDzd(Number(item.total_cost));
   } else if (section === "cheques") {
-    title = `شيك ${String(item.cheque_number ?? "")}`;
-    subtitle = `${String(item.beneficiary ?? "")} · الاستحقاق ${String(item.due_date ?? "")}`;
+    title = translateTemplate("شيك {{0}}", [String(item.cheque_number ?? "")]);
+    subtitle = translateTemplate("{{0}} · الاستحقاق {{1}}", [
+      String(item.beneficiary ?? ""), String(item.due_date ?? ""),
+    ]);
     amount = formatDzd(Number(item.amount));
   } else if (section === "rentals") {
     title = String(item.equipment ?? "");
-    subtitle = `${String(item.client_or_owner ?? "")} · متبقي ${formatDzd(Number(item.remaining))}`;
+    subtitle = translateTemplate("{{0}} · متبقي {{1}}", [
+      String(item.client_or_owner ?? ""), formatDzd(Number(item.remaining)),
+    ]);
     amount = formatDzd(Number(item.total_amount));
   } else if (section === "field") {
-    title = String(item.category ?? "");
+    title = translate(String(item.category ?? ""), language);
     subtitle = `${String(item.site_name ?? "")} · ${String(item.created_by_name ?? "")}`;
     amount = formatDzd(Number(item.amount));
   } else if (section === "machinery") {
     title = String(item.name ?? "");
     subtitle = `${String(item.code ?? "")} · ${String(item.category ?? "")}`;
-    amount = String(item.status ?? "");
+    amount = translate(String(item.status ?? ""), language);
   } else if (section === "audit") {
     title = String(item.action ?? "");
     subtitle = `${String(item.performed_by_name ?? "")} · ${String(item.created_at ?? "")}`;
@@ -245,7 +253,7 @@ const styles = {
   title: { color: colors.navy, fontWeight: "900" as const, fontSize: 21, textAlign: "right" as const },
   subtitle: { color: colors.muted, fontSize: 12, marginTop: 5, textAlign: "right" as const },
   addButton: { minHeight: 46, borderRadius: 13, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
-  addButtonText: { color: colors.navy, fontWeight: "800" as const },
+  addButtonText: { color: colors.onAccent, fontWeight: "600" as const },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 15, padding: 17, flexDirection: "row" as const, alignItems: "center" as const, gap: 13 },
   cardTitle: { color: colors.ink, fontSize: 14, fontWeight: "800" as const, textAlign: "right" as const },
   cardSubtitle: { color: colors.muted, fontSize: 11, marginTop: 6, textAlign: "right" as const, lineHeight: 17 },
@@ -261,8 +269,9 @@ const styles = {
   label: { color: colors.ink, fontSize: 12, fontWeight: "700" as const, textAlign: "right" as const, marginTop: 10 },
   input: { minHeight: 47, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, color: colors.ink, textAlign: "right" as const, writingDirection: "rtl" as const, paddingHorizontal: 12, marginTop: 6, fontSize: 13 },
   readonly: { borderRadius: 10, backgroundColor: colors.background, color: colors.muted, padding: 12, textAlign: "right" as const, marginTop: 6 },
-  saveButton: { height: 48, borderRadius: 12, backgroundColor: colors.blue, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 16 },
+  saveButton: { height: 48, borderRadius: 12, backgroundColor: colors.action, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 16 },
   saveText: { color: "#FFFFFF", fontWeight: "800" as const },
   footer: { minHeight: 52, backgroundColor: "#FFFFFF", paddingHorizontal: 16, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, borderTopWidth: 1, borderTopColor: colors.border },
   footerText: { color: colors.muted, fontSize: 10 },
 };
+makeStylesReactive(styles);

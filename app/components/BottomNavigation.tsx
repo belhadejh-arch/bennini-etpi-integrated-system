@@ -1,10 +1,13 @@
 import { useRouter } from "expo-router";
-import { Boxes, FileClock, LayoutDashboard, Wallet } from "lucide-react-native";
+import { Boxes, FileClock, LayoutDashboard, Settings, Wallet } from "lucide-react-native";
 import { Pressable, Text, View } from "react-native";
-import { colors } from "../../lib/theme";
+import { colors, makeStylesReactive } from "../../lib/theme";
 import { hasPermission } from "../../shared/access";
 import { sections, type SectionId } from "../../shared/sections";
 import type { Member } from "../../lib/api";
+import { useAuth } from "../../lib/auth";
+import { translate } from "../../lib/localization";
+import { sectionName } from "../../lib/localization";
 
 const sectionIcons = {
   finance: Wallet,
@@ -14,6 +17,7 @@ const sectionIcons = {
 
 export function BottomNavigation({ member, activeId }: { member: Member; activeId: string }) {
   const router = useRouter();
+  const { language } = useAuth();
   const tabs = (["finance", "inventory", "field"] as const)
     .filter((id) => hasPermission(member, id, "view"))
     .slice(0, 3);
@@ -28,19 +32,20 @@ export function BottomNavigation({ member, activeId }: { member: Member; activeI
 
   return (
     <View style={styles.bar}>
-      <Tab label="الرئيسية" selected={activeId === "dashboard"} icon={LayoutDashboard} onPress={() => navigate("dashboard")} />
+      <Tab label={translate("الرئيسية", language)} selected={activeId === "dashboard"} icon={LayoutDashboard} onPress={() => navigate("dashboard")} />
       {tabs.map((id) => {
         const section = sections.find((entry) => entry.id === id)!;
         return (
           <Tab
             key={id}
-            label={section.shortLabel}
+            label={sectionName(id, language)}
             selected={activeId === id}
             icon={sectionIcons[id]}
             onPress={() => navigate(id)}
           />
         );
       })}
+      <Tab label={translate("الإعدادات", language)} selected={activeId === "settings"} icon={Settings} onPress={() => router.push("/settings")} />
     </View>
   );
 }
@@ -62,9 +67,9 @@ function Tab({
       accessibilityState={{ selected }}
       accessibilityLabel={label}
       onPress={onPress}
-      style={({ pressed }) => [styles.tab, pressed && { opacity: 0.78 }]}
+      style={({ pressed }) => [styles.tab, selected && styles.tabSelected, pressed && { opacity: 0.78 }]}
     >
-      <Icon size={19} color={selected ? colors.yellow : "#D7E1EF"} />
+      <Icon size={19} color={selected ? colors.onAccent : "#D7E1EF"} />
       <Text style={[styles.label, selected && styles.selectedLabel]}>{label}</Text>
     </Pressable>
   );
@@ -73,7 +78,7 @@ function Tab({
 const styles = {
   bar: {
     minHeight: 62,
-    backgroundColor: colors.blue,
+    backgroundColor: colors.action,
     flexDirection: "row" as const,
     alignItems: "center" as const,
     justifyContent: "space-around" as const,
@@ -87,6 +92,8 @@ const styles = {
     gap: 4,
     minHeight: 55,
   },
-  label: { color: colors.lightBlue, fontSize: 9, fontWeight: "600" as const },
-  selectedLabel: { color: colors.yellow },
+  tabSelected: { backgroundColor: colors.yellow, borderRadius: 12, marginVertical: 4 },
+  label: { color: colors.lightBlue, fontSize: 14, fontWeight: "600" as const, lineHeight: 20 },
+  selectedLabel: { color: colors.onAccent },
 };
+makeStylesReactive(styles);

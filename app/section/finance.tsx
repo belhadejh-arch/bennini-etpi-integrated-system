@@ -11,8 +11,9 @@ import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
-import { colors, formatDzd } from "../../lib/theme";
+import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
+import { translate } from "../../lib/localization";
 import FinanceAccounts from "./FinanceAccounts";
 import FinanceMachinery from "./FinanceMachinery";
 
@@ -46,7 +47,7 @@ export default function FinanceSection() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ area?: string | string[] }>();
   const routeArea = Array.isArray(routeParams.area) ? routeParams.area[0] : routeParams.area;
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken, language } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -344,7 +345,7 @@ export default function FinanceSection() {
               }}
               style={styles.addButton}
             >
-              {formOpen ? <X size={16} color={colors.navy} /> : <Plus size={17} color={colors.navy} />}
+              {formOpen ? <X size={16} color={colors.onAccent} /> : <Plus size={17} color={colors.onAccent} />}
               <Text style={styles.addButtonText}>{formOpen ? "إغلاق" : "عملية جديدة"}</Text>
             </Pressable>
           ) : null}
@@ -402,7 +403,7 @@ export default function FinanceSection() {
             <View style={styles.chips}>
               {paymentMethods.map((method) => (
                 <Pressable key={method} onPress={() => setPaymentMethod(method)} style={[styles.chip, paymentMethod === method && styles.chipSelected]}>
-                  <Text style={[styles.chipText, paymentMethod === method && styles.chipTextSelected]}>{method}</Text>
+                  <Text style={[styles.chipText, paymentMethod === method && styles.chipTextSelected]}>{translate(method, language)}</Text>
                 </Pressable>
               ))}
             </View>
@@ -484,7 +485,7 @@ export default function FinanceSection() {
             <View style={styles.chips}>
               {["", ...paymentMethods].map((value) => (
                 <Pressable key={value || "all"} onPress={() => setFilterMethod(value)} style={[styles.chip, filterMethod === value && styles.chipSelected]}>
-                  <Text style={[styles.chipText, filterMethod === value && styles.chipTextSelected]}>{value || "الكل"}</Text>
+                  <Text style={[styles.chipText, filterMethod === value && styles.chipTextSelected]}>{value ? translate(value, language) : translate("الكل", language)}</Text>
                 </Pressable>
               ))}
             </View>
@@ -515,13 +516,13 @@ export default function FinanceSection() {
                 {transactions.map((item) => (
                   <View key={item.id}>
                     <View style={styles.tableRow}>
-                      <TableCell text={String(item.date).slice(0, 10)} width={100} />
+                      <TableCell text={formatDate(String(item.date), language)} width={100} />
                       <View style={[styles.tableCell, { width: 90 }]}>
                         <Text style={[styles.typeBadge, item.type === "income" ? styles.incomeBadge : styles.expenseBadge]}>{item.type === "income" ? "دخل" : "مصروف"}</Text>
                       </View>
                       <TableCell text={formatDzd(Number(item.amount))} width={135} strong />
                       <TableCell text={item.party} width={180} />
-                      <TableCell text={item.payment_method} width={110} />
+                      <TableCell text={translate(item.payment_method, language)} width={110} />
                       <TableCell text={item.reason || "—"} width={180} />
                       <TableCell text={item.recorded_by_name} width={125} />
                       <TableCell text={formatDzd(Number(item.cash_balance_after))} width={155} strong />
@@ -620,12 +621,12 @@ const styles = {
   subtitle: { color: colors.muted, fontSize: 12, marginTop: 5, textAlign: "right" as const },
   areaNav: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7 },
   areaChip: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 20, backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: colors.border },
-  areaChipActive: { backgroundColor: colors.navy, borderColor: colors.navy },
+  areaChipActive: { backgroundColor: colors.deepBlue, borderColor: colors.deepBlue },
   areaChipText: { color: colors.blue, fontSize: 11, fontWeight: "800" as const },
   areaChipTextActive: { color: "#FFFFFF" },
   addButton: { minHeight: 46, borderRadius: 12, paddingHorizontal: 16, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
-  addButtonText: { color: colors.navy, fontWeight: "800" as const, fontSize: 13 },
-  summary: { padding: 21, borderRadius: 17, backgroundColor: colors.navy, gap: 8, borderWidth: 1, borderColor: "#17365D" },
+  addButtonText: { color: colors.onAccent, fontWeight: "600" as const, fontSize: 14, lineHeight: 22 },
+  summary: { padding: 21, borderRadius: 17, backgroundColor: colors.deepBlue, gap: 8, borderWidth: 1, borderColor: colors.deepBlue },
   summaryLabel: { color: "#FFFFFFB8", fontSize: 13, textAlign: "right" as const },
   summaryAmount: { color: colors.yellow, fontSize: 29, fontWeight: "900" as const, textAlign: "right" as const },
   summaryHint: { color: "#FFFFFFA8", fontSize: 11, textAlign: "right" as const, lineHeight: 17 },
@@ -656,7 +657,7 @@ const styles = {
   pickedItem: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, backgroundColor: colors.background, borderRadius: 9, padding: 8 },
   pickedName: { flex: 1, textAlign: "right" as const, color: colors.ink, fontSize: 11 },
   cashHint: { padding: 9, borderRadius: 9, backgroundColor: "#F2F6FC", marginTop: 3 },
-  saveButton: { height: 45, borderRadius: 11, backgroundColor: colors.blue, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 8 },
+  saveButton: { height: 45, borderRadius: 11, backgroundColor: colors.action, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 8 },
   saveText: { color: "#FFFFFF", fontWeight: "800" as const, fontSize: 12 },
   toolbar: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10 },
   sectionTitle: { color: colors.navy, fontWeight: "900" as const, fontSize: 18, textAlign: "right" as const },
@@ -665,7 +666,7 @@ const styles = {
   filterCard: { backgroundColor: "#FFFFFF", borderRadius: 15, padding: 15, borderWidth: 1, borderColor: colors.border, gap: 5 },
   filterTitle: { color: colors.navy, fontSize: 14, fontWeight: "900" as const, textAlign: "right" as const },
   filterActions: { flexDirection: "row" as const, gap: 9, marginTop: 12 },
-  saveButtonSmall: { flex: 1, height: 40, borderRadius: 10, backgroundColor: colors.blue, alignItems: "center" as const, justifyContent: "center" as const },
+  saveButtonSmall: { flex: 1, height: 40, borderRadius: 10, backgroundColor: colors.action, alignItems: "center" as const, justifyContent: "center" as const },
   resetButton: { minWidth: 100, height: 40, borderRadius: 10, backgroundColor: colors.background, alignItems: "center" as const, justifyContent: "center" as const, paddingHorizontal: 12 },
   resetText: { color: colors.muted, fontSize: 11, fontWeight: "700" as const },
   table: { minWidth: 1325, backgroundColor: colors.surface, borderRadius: 14, overflow: "hidden" as const, borderWidth: 1, borderColor: colors.border },
@@ -707,3 +708,4 @@ const styles = {
   footer: { minHeight: 45, backgroundColor: "#FFFFFF", paddingHorizontal: 16, justifyContent: "center" as const, borderTopWidth: 1, borderTopColor: colors.border },
   footerText: { color: colors.muted, fontSize: 10, textAlign: "right" as const },
 };
+makeStylesReactive(styles);

@@ -5,7 +5,7 @@ import { Download, Eye, FileText, Trash2 } from "lucide-react-native";
 import { useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, Text, View } from "react-native";
 import { apiRequest, apiUrl } from "../../lib/api";
-import { colors } from "../../lib/theme";
+import { colors, makeStylesReactive } from "../../lib/theme";
 import type { SectionId } from "../../shared/sections";
 
 export type AttachmentFile = {
@@ -158,3 +158,4 @@ const styles = {
   deleteText: { color: colors.red, fontSize: 10, fontWeight: "700" as const },
   error: { color: colors.red, fontSize: 10, paddingHorizontal: 4 },
 };
+makeStylesReactive(styles);

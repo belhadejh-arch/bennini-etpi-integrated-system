@@ -16,8 +16,9 @@ import RecordNotes from "../components/RecordNotes";
 import EntityPicker, { type FinanceEntity } from "../components/EntityPicker";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
-import { colors, formatDzd } from "../../lib/theme";
+import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
+import { translate } from "../../lib/localization";
 
 type Status = "pending" | "paid" | "cancelled";
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
@@ -108,7 +109,7 @@ function emptyDraft(): Draft {
 }
 
 function dateLabel(value: string) {
-  return value ? value.slice(0, 10) : "—";
+  return formatDate(value);
 }
 
 function attachmentLabel(attachment: Attachment) {
@@ -119,7 +120,7 @@ export default function ChequesSection() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ focusId?: string | string[] }>();
   const focusId = Array.isArray(routeParams.focusId) ? routeParams.focusId[0] : routeParams.focusId;
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken, language } = useAuth();
   const { user } = useUser();
   const [member, setMember] = useState<Member | null>(null);
   const [items, setItems] = useState<Cheque[]>([]);
@@ -522,7 +523,7 @@ export default function ChequesSection() {
 
         {canCreate ? (
           <Pressable onPress={formOpen ? closeForm : beginCreate} style={styles.addButton} disabled={saving}>
-            {formOpen ? <X size={17} color={colors.navy} /> : <Plus size={18} color={colors.navy} />}
+            {formOpen ? <X size={17} color={colors.onAccent} /> : <Plus size={18} color={colors.onAccent} />}
             <Text style={styles.addButtonText}>{formOpen ? "إغلاق النموذج" : "تسجيل شيك جديد"}</Text>
           </Pressable>
         ) : null}
@@ -596,7 +597,7 @@ export default function ChequesSection() {
               {statusOptions.filter((option) => option.value).map((option) => (
                 <Choice
                   key={option.value}
-                  label={option.label}
+                  label={translate(option.label, language)}
                   selected={draft.status === option.value}
                   onPress={() => setField("status", option.value as Status)}
                 />
@@ -664,7 +665,7 @@ export default function ChequesSection() {
             {statusOptions.map((option) => (
               <Choice
                 key={option.value || "all"}
-                label={option.label}
+                  label={translate(option.label, language)}
                 selected={statusFilter === option.value}
                 onPress={() => { setPage(1); setStatusFilter(option.value as Status | ""); }}
               />
@@ -699,7 +700,7 @@ export default function ChequesSection() {
                   setError("");
                 } else setError("أدخل نطاقًا صحيحًا لتاريخ الاستحقاق بصيغة YYYY-MM-DD.");
               }}
-              style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 12, borderRadius: 9, backgroundColor: colors.blue }}
+              style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 12, borderRadius: 9, backgroundColor: colors.action }}
             >
               <Text style={{ color: "#FFFFFF", fontSize: 10, fontWeight: "800" }}>تطبيق التاريخ</Text>
             </Pressable>
@@ -851,8 +852,9 @@ function Choice({ label, selected, onPress }: { label: string; selected: boolean
 }
 
 function StatusBadge({ status }: { status: Status }) {
+  const { language } = useAuth();
   const tone = status === "paid" ? styles.statusPaid : status === "cancelled" ? styles.statusCancelled : styles.statusPending;
-  return <View style={[styles.statusBadge, tone]}><Text style={styles.statusText}>{statusLabels[status]}</Text></View>;
+  return <View style={[styles.statusBadge, tone]}><Text style={styles.statusText}>{translate(statusLabels[status], language)}</Text></View>;
 }
 
 function Detail({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
@@ -903,7 +905,7 @@ const styles = {
   alertAmount: { color: colors.navy, fontWeight: "900" as const, fontSize: 12 },
   alertMore: { color: "#81393B", fontSize: 10, textAlign: "right" as const, paddingTop: 3 },
   addButton: { minHeight: 48, borderRadius: 13, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "center" as const, gap: 8 },
-  addButtonText: { color: colors.navy, fontWeight: "900" as const, fontSize: 13 },
+  addButtonText: { color: colors.onAccent, fontWeight: "600" as const, fontSize: 14, lineHeight: 22 },
   formCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 16, padding: 18 },
   formHeading: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10, marginBottom: 12 },
   cardHeading: { color: colors.navy, fontSize: 15, fontWeight: "900" as const, textAlign: "right" as const },
@@ -927,7 +929,7 @@ const styles = {
   pickedList: { borderRadius: 10, backgroundColor: "#F6F8FB", paddingHorizontal: 10, marginBottom: 8 },
   pickedRow: { minHeight: 33, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
   pickedName: { flex: 1, color: colors.muted, fontSize: 10, textAlign: "right" as const },
-  saveButton: { height: 45, borderRadius: 11, backgroundColor: colors.blue, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 8 },
+  saveButton: { height: 45, borderRadius: 11, backgroundColor: colors.action, alignItems: "center" as const, justifyContent: "center" as const, marginTop: 8 },
   saveText: { color: "#FFFFFF", fontWeight: "900" as const, fontSize: 12 },
   searchCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: 14, padding: 11, gap: 9 },
   searchBox: { minHeight: 44, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, paddingHorizontal: 10, flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
@@ -964,7 +966,7 @@ const styles = {
   emptyIcon: { width: 48, height: 48, borderRadius: 16, alignItems: "center" as const, justifyContent: "center" as const, backgroundColor: "#EAF1FA" },
   emptyTitle: { color: colors.ink, fontSize: 13, fontWeight: "900" as const },
   emptyText: { maxWidth: 360, color: colors.muted, fontSize: 11, lineHeight: 18, textAlign: "center" as const },
-  emptyAddButton: { minHeight: 39, borderRadius: 10, backgroundColor: colors.blue, paddingHorizontal: 13, flexDirection: "row" as const, alignItems: "center" as const, gap: 6, marginTop: 3 },
+  emptyAddButton: { minHeight: 39, borderRadius: 10, backgroundColor: colors.action, paddingHorizontal: 13, flexDirection: "row" as const, alignItems: "center" as const, gap: 6, marginTop: 3 },
   emptyAddText: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" as const },
   loading: { paddingVertical: 32, alignItems: "center" as const, gap: 10 },
   muted: { color: colors.muted, fontSize: 11 },
@@ -983,3 +985,4 @@ const styles = {
   footer: { minHeight: 47, backgroundColor: colors.surface, paddingHorizontal: 16, flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, borderTopWidth: 1, borderTopColor: colors.border },
   footerText: { color: colors.muted, fontSize: 9 },
 };
+makeStylesReactive(styles);

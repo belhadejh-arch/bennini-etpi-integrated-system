@@ -8,7 +8,8 @@ import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
 import { apiRequest, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
-import { colors, formatDzd } from "../../lib/theme";
+import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
+import { translate } from "../../lib/localization";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 
 type Account = {
@@ -31,7 +32,8 @@ const blankDraft = (): Draft => ({ name: "", phone: "", address: "", notes: "", 
 const blankOperation = (): OperationDraft => ({ type: "income", amount: "", interestRate: "0", reason: "", paymentMethod: "نقداً", date: today(), notes: "" });
 
 export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "customer" | "partner"; member: Member | null; onNavigate: (area: string) => void }) {
-  const { getToken } = useAuth();
+  const { getToken, language } = useAuth();
+  const t = (text: string) => translate(text, language);
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ customerId?: string | string[] }>();
   const requestedCustomerId = Array.isArray(routeParams.customerId) ? routeParams.customerId[0] : routeParams.customerId;
@@ -178,11 +180,11 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
   };
   const filtered = accounts.filter((account) => account.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const total = (key: keyof Account) => accounts.reduce((sum, account) => sum + (Number(account[key]) || 0), 0);
-  const title = kind === "customer" ? "حسابات الزبائن" : "حسابات الشركاء";
+  const title = t(kind === "customer" ? "حسابات الزبائن" : "حسابات الشركاء");
   if (partnerViewer && kind !== "partner") return null;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background, direction: "rtl" }}>
+    <View style={{ flex: 1, backgroundColor: colors.background, direction: language === "ar" ? "rtl" : "ltr" }}>
       <AppHeader title={title} leftAction={<HeaderAction label="رجوع" onPress={() => router.back()}><ArrowRight size={19} color="#FFFFFF" /></HeaderAction>} rightAction={<HeaderAction label="تحديث" onPress={() => void refresh()}><RefreshCw size={17} color="#FFFFFF" /></HeaderAction>} />
       <ScrollView contentContainerStyle={{ width: "100%", maxWidth: 1180, alignSelf: "center", padding: 18, paddingBottom: 36, gap: 14 }} keyboardShouldPersistTaps="handled">
         {!partnerViewer ? <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7 }}>
@@ -191,10 +193,10 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
           <Pick label="الشركاء" active={kind === "partner"} onPress={() => onNavigate("partners")} />
           <Pick label="الآليات" active={false} onPress={() => onNavigate("machinery")} />
         </View> : null}
-        <View style={{ backgroundColor: colors.navy, borderRadius: 16, padding: 19, gap: 7 }}>
-          <Text style={{ color: colors.yellow, fontSize: 11, fontWeight: "900", textAlign: "right" }}>BENNINI ETPI · سجل مستقل</Text>
-          <Text style={{ color: "#FFFFFF", fontSize: 21, fontWeight: "900", textAlign: "right" }}>{title}</Text>
-          <Text style={{ color: "#D8E4F2", fontSize: 11, textAlign: "right", lineHeight: 19 }}>كل حساب يحتفظ بحركته ومستنداته ومستحقاته بصورة مستقلة.</Text>
+        <View style={{ backgroundColor: colors.deepBlue, borderRadius: 16, padding: 19, gap: 7 }}>
+          <Text style={{ color: colors.yellow, fontSize: 14, fontWeight: "700", lineHeight: 22, textAlign: language === "ar" ? "right" : "left" }}>BENNINI ETPI · سجل مستقل</Text>
+          <Text style={{ color: colors.white, fontSize: 21, fontWeight: "900", textAlign: language === "ar" ? "right" : "left" }}>{title}</Text>
+          <Text style={{ color: colors.lightBlue, fontSize: 14, fontWeight: "500", textAlign: language === "ar" ? "right" : "left", lineHeight: 23 }}>كل حساب يحتفظ بحركته ومستنداته ومستحقاته بصورة مستقلة.</Text>
         </View>
         {error ? <View style={{ padding: 12, borderRadius: 10, backgroundColor: colors.redSoft }}><Text style={{ color: colors.red, textAlign: "right" }}>{error}</Text></View> : null}
         {kind === "customer" ? (
@@ -211,7 +213,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
             <Summary label="إجمالي الفائدة" value={formatDzd(total("interest_total"))} green />
           </View>
         )}
-        {!partnerViewer && canCreate ? <Pressable onPress={() => beginEdit()} style={button}><Plus size={16} color={colors.navy} /><Text style={buttonText}>إضافة {kind === "customer" ? "زبون" : "شريك"}</Text></Pressable> : null}
+        {!partnerViewer && canCreate ? <Pressable onPress={() => beginEdit()} style={button}><Plus size={16} color={colors.onAccent} /><Text style={buttonText}>إضافة {kind === "customer" ? "زبون" : "شريك"}</Text></Pressable> : null}
         <TextInput value={search} onChangeText={setSearch} placeholder={`بحث في ${title}`} placeholderTextColor="#98A5B4" style={input} />
         {editing ? (
           <View style={card}>
@@ -293,8 +295,8 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                         <View key={invoice.id} style={line}>
                           <View style={{ flex: 1 }}>
                             <Text style={value}>فاتورة {invoice.invoice_number} · {formatDzd(Number(invoice.amount))}</Text>
-                            <Text style={hint}>{invoice.invoice_date?.slice(0, 10) || "—"} · {invoice.paid ? "مدفوعة" : "غير مدفوعة"}</Text>
-                            {invoice.cheque_id ? <Text style={hint}>شيك {invoice.cheque_number || invoice.cheque_id} · {invoice.cheque_date?.slice(0, 10) || "دون تاريخ"}</Text> : null}
+                            <Text style={hint}>{formatDate(invoice.invoice_date)} · {invoice.paid ? "مدفوعة" : "غير مدفوعة"}</Text>
+                            {invoice.cheque_id ? <Text style={hint}>شيك {invoice.cheque_number || invoice.cheque_id} · {formatDate(invoice.cheque_date)}</Text> : null}
                           </View>
                           {invoice.cheque_id ? <Pressable onPress={() => router.push(`/section/cheques?focusId=${invoice.cheque_id}`)} style={smallButton}><Text style={smallText}>عرض الشيك</Text></Pressable> : null}
                         </View>
@@ -307,7 +309,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                       <View key={transaction.id} style={line}>
                         <View style={{ flex: 1, gap: 4 }}>
                           <Text style={value}>{transaction.type === "income" ? "إيداع / دخل" : "سحب / مصروف"} · {formatDzd(Number(transaction.amount))}</Text>
-                          <Text style={hint}>{transaction.date.slice(0, 10)} · {transaction.reason} · {transaction.recorded_by_name || "—"} · {transaction.payment_method}</Text>
+                          <Text style={hint}>{formatDate(transaction.date)} · {transaction.reason} · {transaction.recorded_by_name || "—"} · {translate(transaction.payment_method, language)}</Text>
                           {transaction.notes ? <Text style={hint}>{transaction.notes}</Text> : null}
                           {transaction.attachments?.length ? <View style={{ gap: 5 }}>
                             {transaction.attachments.map((attachment) => (
@@ -322,7 +324,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                           {!partnerViewer && canManageFiles && (transaction.attachments?.length ?? 0) < 5 ? <Pressable onPress={() => void addAttachments(transaction)} style={smallButton}><FilePlus2 size={13} color={colors.blue} /><Text style={smallText}>إضافة مرفق</Text></Pressable> : null}
                           {!partnerViewer && hasPermission(member, "finance", "delete") ? <Pressable onPress={() => deleteTransaction(transaction)} style={smallButton}><Trash2 size={13} color={colors.red} /><Text style={[smallText, { color: colors.red }]}>حذف الحركة</Text></Pressable> : null}
                           {kind === "partner" ? <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                            <Text style={{ color: "#16834B", fontSize: 11, fontWeight: "800" }}>فائدة: {formatDzd(Number(transaction.interest_amount))}</Text>
+                            <Text style={{ color: colors.green, fontSize: 14, fontWeight: "600", lineHeight: 23 }}>فائدة: {formatDzd(Number(transaction.interest_amount))}</Text>
                             {!partnerViewer && canEdit ? <RateField value={String(transaction.interest_rate ?? 0)} onSave={(rate) => void updateInterest(transaction, rate)} /> : <Text style={hint}>النسبة {Number(transaction.interest_rate ?? 0)}%</Text>}
                             <Text style={value}>رأس المال: {formatDzd(Number(transaction.amount))}</Text>
                           </View> : null}
@@ -341,7 +343,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
 }
 
 function Summary({ label, value: content, green = false }: { label: string; value: string; green?: boolean }) {
-  return <View style={{ flexGrow: 1, flexBasis: 135, padding: 11, borderRadius: 10, backgroundColor: green ? "#E9F7EF" : "#F3F6FA" }}><Text style={hint}>{label}</Text><Text style={[value, green && { color: "#16834B" }]}>{content}</Text></View>;
+  return <View style={{ flexGrow: 1, flexBasis: 135, padding: 11, borderRadius: 10, backgroundColor: green ? colors.greenSoft : colors.background }}><Text style={hint}>{label}</Text><Text style={[value, green && { color: colors.green }]}>{content}</Text></View>;
 }
 function RateField({ value: initial, onSave }: { value: string; onSave: (value: string) => void }) {
   const [value, setValue] = useState(initial);
@@ -349,7 +351,7 @@ function RateField({ value: initial, onSave }: { value: string; onSave: (value: 
   return <TextInput value={value} onChangeText={setValue} onSubmitEditing={() => onSave(value)} onBlur={() => { if (value !== initial) onSave(value); }} keyboardType="decimal-pad" style={[input, { width: 95, minHeight: 34 }]} placeholder="النسبة %" />;
 }
 function Pick({ label: content, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return <Pressable onPress={onPress} style={{ borderRadius: 20, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: active ? "#EAF1FF" : "#F3F6FA", borderWidth: 1, borderColor: active ? colors.blue : colors.border }}><Text style={{ color: active ? colors.blue : colors.ink, fontSize: 11, fontWeight: "800" }}>{content}</Text></Pressable>;
+  return <Pressable onPress={onPress} style={{ borderRadius: 20, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: active ? colors.greenSoft : colors.background, borderWidth: 1, borderColor: active ? colors.green : colors.border }}><Text style={{ color: active ? colors.green : colors.ink, fontSize: 14, fontWeight: "600", lineHeight: 22 }}>{content}</Text></Pressable>;
 }
 const card = { backgroundColor: "#FFFFFF", borderRadius: 13, borderWidth: 1, borderColor: colors.border, padding: 14, gap: 10 } as const;
 const input = { minHeight: 42, borderRadius: 9, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, paddingHorizontal: 11, color: colors.ink, textAlign: "right" as const, fontSize: 12 };
@@ -360,8 +362,9 @@ const value = { color: colors.navy, fontSize: 12, fontWeight: "800" as const, te
 const rowBetween = { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10 };
 const line = { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "#EDF0F4" };
 const button = { alignSelf: "flex-start" as const, minHeight: 42, borderRadius: 10, paddingHorizontal: 14, backgroundColor: colors.yellow, flexDirection: "row" as const, alignItems: "center" as const, gap: 7 };
-const buttonText = { color: colors.navy, fontSize: 11, fontWeight: "900" as const };
-const primary = { minHeight: 42, borderRadius: 10, paddingHorizontal: 14, backgroundColor: colors.blue, alignItems: "center" as const, justifyContent: "center" as const };
+const buttonText = { color: colors.onAccent, fontSize: 14, fontWeight: "600" as const, lineHeight: 22 };
+const primary = { minHeight: 42, borderRadius: 10, paddingHorizontal: 14, backgroundColor: colors.action, alignItems: "center" as const, justifyContent: "center" as const };
 const primaryText = { color: "#FFFFFF", fontSize: 11, fontWeight: "900" as const };
 const smallButton = { minHeight: 30, borderRadius: 8, paddingHorizontal: 8, backgroundColor: "#EEF3FB", flexDirection: "row" as const, alignItems: "center" as const, gap: 5 };
 const smallText = { color: colors.blue, fontSize: 10, fontWeight: "800" as const };
+makeStylesReactive({ card, input, label, hint, heading, value, rowBetween, line, button, buttonText, primary, primaryText, smallButton, smallText });
