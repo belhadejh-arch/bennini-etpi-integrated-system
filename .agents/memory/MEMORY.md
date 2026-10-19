@@ -10,3 +10,4 @@
 - [Machinery reference policy](machinery-reference-policy.md) — one shared machinery register; retain history and distinguish accrued driver salary from payments.
 - [Financial account rules](finance-account-policy.md) — separate customer/partner accounts, per-transaction interest, optional sale prices, and cheque settlement without cash changes.
 - [Interface accessibility](interface-accessibility-policy.md) — readable text app-wide; Arabic/light defaults, optional French and dark/system per account, user data never translated.
+- [Portable dependencies](portable-dependencies.md) — inspect lockfile source hosts after package installation; external builders cannot use internal workspace URLs.
