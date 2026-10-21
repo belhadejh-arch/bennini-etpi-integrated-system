@@ -8,10 +8,12 @@
     "build:web": "expo export --platform web --output-dir dist",
     "start": "tsx server/index.ts",
     "dev": "npm run build:web && tsx server/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "setup:pdf-browser": "tsx scripts/setup-pdf-browser.ts"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.0",
+    "@puppeteer/browsers": "^2.13.2",
     "@types/compression": "^1.8.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.25",

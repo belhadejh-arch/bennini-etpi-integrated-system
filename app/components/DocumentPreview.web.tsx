@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { createPortal } from "react-dom";
 import type {PDFDocumentProxy,PDFDocumentLoadingTask,PDFPageProxy,RenderTask} from "pdfjs-dist/legacy/build/pdf.mjs";
 import {loadPdfJs} from "../../lib/pdfjs-loader.web";
+import {apiUrl} from "../../lib/api";
+import {absoluteDocumentUrl} from "../../lib/document-bridge";
 import { useAuth } from "../../lib/auth";
 import { formatDateTime, colors, appFontFamily } from "../../lib/theme";
 import { translate } from "../../lib/localization";
@@ -54,13 +56,13 @@ export default function DocumentPreview({ document: file, onClose, onDownload, o
     let task:PDFDocumentLoadingTask|undefined;
     void loadPdfJs().then((library)=>{
       if(!mounted)return;
-      library.GlobalWorkerOptions.workerSrc="/pdf-assets/pdf.worker.min.mjs";
+      library.GlobalWorkerOptions.workerSrc=apiUrl("/pdf-assets/pdf.worker.min.mjs");
       task = library.getDocument({
-      url: file.url,
-      cMapUrl: "/pdf-assets/cmaps/",
+      url: absoluteDocumentUrl(file).href,
+      cMapUrl: apiUrl("/pdf-assets/cmaps/"),
       cMapPacked: true,
-      standardFontDataUrl: "/pdf-assets/standard_fonts/",
-      wasmUrl: "/pdf-assets/wasm/",
+      standardFontDataUrl: apiUrl("/pdf-assets/standard_fonts/"),
+      wasmUrl: apiUrl("/pdf-assets/wasm/"),
       isEvalSupported: false,
     });
       return task.promise;
@@ -206,11 +208,11 @@ export default function DocumentPreview({ document: file, onClose, onDownload, o
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button className="doc-preview-action" type="button" aria-label={t("تنزيل")} onClick={() => void runAction("download")} disabled={!!busyAction} style={actionButtonStyle}>
-            <span aria-hidden="true">↓</span><span className="doc-preview-label">{t("تنزيل")}</span>
+          <button className="doc-preview-action" type="button" aria-label={t("حفظ وتنزيل PDF")} onClick={() => void runAction("download")} disabled={!!busyAction} style={actionButtonStyle}>
+            <span aria-hidden="true">↓</span><span className="doc-preview-label">{t("حفظ وتنزيل PDF")}</span>
           </button>
-          {onNativeOpen ? <button className="doc-preview-action" type="button" aria-label={t("طباعة أو فتح")} onClick={() => void runAction("native")} disabled={!!busyAction} style={secondaryButtonStyle}>
-            <span aria-hidden="true">▣</span><span className="doc-preview-label">{t("طباعة أو فتح")}</span>
+          {onNativeOpen ? <button className="doc-preview-action" type="button" aria-label={t("طباعة")} onClick={() => void runAction("native")} disabled={!!busyAction} style={secondaryButtonStyle}>
+            <span aria-hidden="true">▣</span><span className="doc-preview-label">{t("طباعة")}</span>
           </button> : null}
         </div>
       </header>

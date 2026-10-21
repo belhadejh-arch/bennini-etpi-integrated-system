@@ -1,3 +1,4 @@
+import {apiUrl} from "./api";
 type PdfJs=typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 let loading:Promise<PdfJs>|undefined;
 export function loadPdfJs():Promise<PdfJs>{
@@ -6,7 +7,7 @@ export function loadPdfJs():Promise<PdfJs>{
       const host=window as Window&{benniniPdfJs?:PdfJs};
       if(host.benniniPdfJs){resolve(host.benniniPdfJs);return;}
       const script=document.createElement("script");
-      script.type="module";script.src="/pdf-assets/viewer-loader.mjs";
+      script.type="module";script.src=apiUrl("/pdf-assets/viewer-loader.mjs");
       script.onload=()=>{
         if(host.benniniPdfJs)resolve(host.benniniPdfJs);
         else reject(new Error("تعذر تحميل عارض PDF."));

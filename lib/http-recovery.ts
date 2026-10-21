@@ -7,6 +7,10 @@ export class NetworkRequestError extends Error {
   }
 }
 
+export function requestTimeoutMs(url:string){
+  return /\/api\/print-document\/[^/?]+(?:\?|$)/.test(url)?120_000:25_000;
+}
+
 /** Retry reads only. Retrying a write after a timeout can duplicate a payment. */
 export async function fetchWithRecovery(
   url: string,
@@ -27,7 +31,10 @@ export async function fetchWithRecovery(
     let timedOut = false;
     const abort = () => controller.abort(options.signal?.reason);
     options.signal?.addEventListener("abort", abort, { once: true });
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, dependencies.timeoutMs ?? 25_000);
+    // Rendering a queued PDF is deliberately slower than an ordinary JSON read.
+    // Do not abort a valid document while Chromium is still preparing it.
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); },
+      dependencies.timeoutMs ?? requestTimeoutMs(url));
     let retry = false;
     try {
       const response = await fetcher(url, { ...options, signal: controller.signal });

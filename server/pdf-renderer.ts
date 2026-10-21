@@ -1,5 +1,5 @@
-import {execFileSync} from "node:child_process";
 import puppeteer from "puppeteer-core";
+import {findPdfBrowser} from "./pdf-browser";
 import type {PrintOptions} from "../shared/printing";
 import {FinanceError} from "./finance-data";
 
@@ -15,7 +15,8 @@ export async function renderPdf(html:string,options:PrintOptions):Promise<Buffer
   await before;
   let browser;
   try{
-    const executablePath=execFileSync("which",["chromium"],{encoding:"utf8"}).trim();
+    const executablePath=findPdfBrowser();
+    if(!executablePath)throw new Error("PDF browser missing; run npm run setup:pdf-browser during build.");
     browser=await puppeteer.launch({executablePath,headless:true,timeout:25000,
       args:["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-background-networking"]});
     const page=await browser.newPage();

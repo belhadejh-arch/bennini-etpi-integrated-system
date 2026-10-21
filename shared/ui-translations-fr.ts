@@ -958,4 +958,9 @@ export const uiFrench: Record<string, string> = {
   "معاينة المستند غير متاحة.": "L’aperçu du document n’est pas disponible.",
   "شركة البناء والأشغال العمومية والصناعية": "Entreprise de bâtiment et travaux publics et industriels",
   "معاً نبني المستقبل": "Ensemble, bâtissons l’avenir",
+  "حفظ وتنزيل PDF": "Enregistrer et télécharger le PDF",
+  "معاينة": "Aperçu",
+  "يتكوّن الرمز من ستة أرقام": "Le code se compose de six chiffres",
+  "سيتم إبطال الرمز السابق فور إصدار رمز جديد. احفظ الرمز الجديد في مكان آمن.": "L’ancien code sera invalidé dès l’émission du nouveau. Conservez le nouveau code en lieu sûr.",
+  "البناء يبدأ بخطوة آمنة": "Construire commence par une étape sûre",
 };

@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { fetchWithRecovery, NetworkRequestError } from "../../lib/http-recovery";
+import { fetchWithRecovery, NetworkRequestError, requestTimeoutMs } from "../../lib/http-recovery";
 import { shouldClearSavedSession } from "../../lib/session-policy";
 import { retryDatabaseRead } from "../read-recovery";
 import { memberLookupQuery, memberReadinessQuery } from "../member-queries";
@@ -9,6 +9,20 @@ import pg from "pg";
 
 const noWait = async () => undefined;
 const fetcher = (fn: () => Promise<Response>) => fn as typeof fetch;
+
+test("PDF preparation has its own bounded rendering budget, not a short JSON timeout",()=>{
+  assert.equal(requestTimeoutMs("/api/print-document/rentals"),120_000);
+  assert.equal(requestTimeoutMs("https://api.example.test/api/print-document/finance"),120_000);
+  assert.equal(requestTimeoutMs("/api/rentals"),25_000);
+  assert.equal(requestTimeoutMs("/api/transactions"),25_000);
+});
+
+test("CORS precedes rental maintenance and connectivity/auth/document routes stay independent",()=>{
+  const source=readFileSync("server/index.ts","utf8");
+  assert.ok(source.indexOf("app.use(cors(")<source.indexOf('await refreshOpenRentals();'));
+  assert.match(source,/auth\(\?:/);
+  assert.match(source,/document-files\\\//);
+});
 
 test("transient data-loading failures recover automatically with bounded retries", async () => {
   let calls = 0;

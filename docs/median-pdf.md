@@ -6,8 +6,8 @@ The mobile wrapper is generated with Median.co. Report/PDF preview must not depe
 
 - Preview reports and existing PDF attachments in the in-page PDF.js viewer.
 - Use page navigation, zoom, fit-width, and close/back without leaving the app.
-- “طباعة أو فتح” uses Median's native PDF viewer. The native viewer provides the system Print action.
-- “تنزيل” calls Median's native download/share flow. Desktop browsers download the actual PDF; browser printing uses the actual PDF in a same-origin frame.
+- “معاينة” opens the in-page preview; “طباعة” uses Median's native PDF viewer, which provides the system Print action.
+- “حفظ وتنزيل PDF” downloads the actual file without first opening the preview. In Median this calls the native download/share flow. Browser printing uses the actual PDF in a same-origin frame.
 - The Expo-native flow remains based on expo-print/expo-sharing.
 
 ## Median configuration
@@ -21,6 +21,12 @@ The device needs a printing service and a compatible printer. On iOS, the native
 ## Privacy and operational requirements
 
 PDFs are generated on this app's server using the Nix-managed Chromium dependency. There is no third-party document rendering service.
+
+For a separate Node/Render deployment, run `npm run setup:pdf-browser` during the build (included in render.yaml). It uses an available system browser or installs the matching Chrome build in an ignored generated-artifacts directory. The host must provide Chrome's supported Linux libraries. Browser binaries must not be committed.
+
+When the website and API are hosted separately, the viewer assets and protected document URLs follow the configured API address. The API's CORS allowlist must include the website's origin. Browser printing fetches the PDF into a local Blob frame to avoid cross-origin frame printing restrictions; Median always receives the real HTTPS URL, never a Blob.
+
+Preview, print and download reuse a prepared, unexpired PDF for the same selection/settings during the current print session. Reopening the report or changing selection/settings generates a fresh document. PDF creation has a longer bounded request timeout than ordinary JSON reads.
 
 Median downloads natively and does not forward the website's Bearer header. The app therefore creates a five-minute, unguessable document-scoped capability URL after checking the user's permissions. Only a hash of the token is stored. The URL stops working on expiry, account deactivation/deletion or permission changes, and responses are no-store/no-referrer. Expired temporary documents are periodically removed.
 

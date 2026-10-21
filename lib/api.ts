@@ -43,7 +43,8 @@ export async function apiRequest<T>(
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const method = (options.method ?? "GET").toUpperCase();
   const requestLanguage = responseLanguage;
-  const isWrite = !["GET", "HEAD", "OPTIONS"].includes(method);
+  const isDocumentRead = method === "POST" && /^\/(?:print-(?:preview|document)\/[a-zA-Z]+|attachment-document)$/.test(path);
+  const isWrite = !["GET", "HEAD", "OPTIONS"].includes(method) && !isDocumentRead;
   if (isWrite) requests.invalidate();
   const perform = async (): Promise<T> => {
     try {

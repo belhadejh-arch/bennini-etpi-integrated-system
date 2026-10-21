@@ -1,3 +1,4 @@
+import { useReconnectRefresh } from "../../lib/use-reconnect-refresh";
 import { useAuth, useUser } from "../../lib/auth";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowRight, Plus, RefreshCw } from "lucide-react-native";
@@ -47,9 +48,9 @@ export default function SectionScreen() {
   const [reason, setReason] = useState("");
 
   const sectionMeta = sections.find((entry) => entry.id === section);
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (background = false) => {
     if (!isSignedIn || !sectionMeta) return;
-    setLoading(true);
+    if (!background) setLoading(true);
     setError("");
     try {
       const token = () => getToken();
@@ -74,6 +75,7 @@ export default function SectionScreen() {
     else if (section !== "inventory" && section !== "cheques" && section !== "rentals" &&
       section !== "machinery" && section !== "field" && section !== "audit") void refresh();
   }, [isLoaded, isSignedIn, refresh, router, section]);
+  useReconnectRefresh(refresh, isSignedIn);
 
   const canSee = hasPermission(member, section, "view");
   const canAdd = useMemo(

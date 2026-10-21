@@ -1,3 +1,4 @@
+import { useReconnectRefresh } from "../../lib/use-reconnect-refresh";
 import { useAuth } from "../../lib/auth";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -150,9 +151,9 @@ export default function InventorySection() {
     return params.toString();
   }, [appliedFilters, focusId, page]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (background = false) => {
     if (!isSignedIn) return;
-    setLoading(true);
+    if (!background) setLoading(true);
     setError("");
     try {
       const token = () => getToken();
@@ -177,6 +178,7 @@ export default function InventorySection() {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
     else if (isSignedIn) void refresh();
   }, [isLoaded, isSignedIn, refresh, router]);
+  useReconnectRefresh(refresh, isSignedIn);
 
   const setPurchaseField = (key: keyof PurchaseDraft, value: string) =>
     setPurchase((current) => ({ ...current, [key]: value }));

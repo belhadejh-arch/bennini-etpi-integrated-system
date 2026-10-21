@@ -160,11 +160,15 @@ async function main() {
     })()`),"Changa is applied to rendered text");
     await evaluate(`(()=>{const buttons=[...document.querySelectorAll('[aria-label="طباعة"]')];buttons[buttons.length-1].click()})()`);
     await wait(`document.body.innerText.includes("الطباعة والتقارير")`);
+    for(const label of ["معاينة","طباعة","حفظ وتنزيل PDF"]){
+      assert.ok(await evaluate(`[...document.querySelectorAll('[role="button"]')].some(e=>e.textContent===${JSON.stringify(label)})`),
+        `Separate ${label} action`);
+    }
     await wait(`(() => {
-      const button=[...document.querySelectorAll('[role="button"]')].find(e=>e.textContent==="معاينة والطباعة");
+      const button=[...document.querySelectorAll('[role="button"]')].find(e=>e.textContent==="معاينة");
       return !!button && button.getAttribute("aria-disabled")!=="true" && !button.hasAttribute("disabled");
     })()`);
-    await clickText("معاينة والطباعة");
+    await clickText("معاينة");
     await wait(`!!document.querySelector('[role="dialog"][aria-label="معاينة المستند"] canvas')?.width &&
       !document.body.innerText.includes("جارٍ تحميل المستند...")&&!document.body.innerText.includes("جارٍ عرض الصفحة")`);
     const fileUrl=await evaluate(`performance.getEntriesByType('resource').map(x=>x.name).find(x=>x.includes('/api/document-files/'))`);
@@ -188,11 +192,11 @@ async function main() {
     }
     await cdp("Network.setUserAgentOverride",{userAgent:"Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 Chrome/138.0 Mobile Safari/537.36 MedianAndroid/1.0 median"});
     await evaluate(`window.__medianCalls=[];window.median={share:{downloadFile:(options)=>window.__medianCalls.push(options)}}`);
-    await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"] button[aria-label="طباعة أو فتح"]').click()`);
+    await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"] button[aria-label="طباعة"]').click()`);
     await wait("window.__medianCalls.length===1");
     assert.deepEqual(await evaluate("window.__medianCalls.map(x=>({open:x.open,https:x.url.startsWith('https://'),blob:x.url.startsWith('blob:')}))"),
       [{open:true,https:true,blob:false}]);
-    await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"] button[aria-label="تنزيل"]').click()`);
+    await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"] button[aria-label="حفظ وتنزيل PDF"]').click()`);
     await wait("window.__medianCalls.length===2");
     assert.equal(await evaluate("window.__medianCalls[1].open"),false);
     const formData=new FormData();
@@ -202,6 +206,18 @@ async function main() {
     assert.equal(uploaded.status,201,"Upload a real PDF attachment");
     await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"] button[aria-label="إغلاق"]').click()`);
     await wait(`document.body.innerText.includes("الطباعة والتقارير")`);
+    const generated=await evaluate(`performance.getEntriesByType("resource").filter(x=>x.name.includes("/api/print-document/")).length`);
+    await clickText("حفظ وتنزيل PDF");
+    await wait("window.__medianCalls.length===3");
+    assert.equal(await evaluate("window.__medianCalls[2].open"),false);
+    assert.ok(await evaluate("window.__medianCalls[2].url.includes('download=1')"));
+    await evaluate(`[...document.querySelectorAll('[role="button"]')].filter(e=>e.textContent==="طباعة").at(-1).click()`);
+    await wait("window.__medianCalls.length===4");
+    assert.equal(await evaluate("window.__medianCalls[3].open"),true);
+    assert.equal(await evaluate(`performance.getEntriesByType("resource").filter(x=>x.name.includes("/api/print-document/")).length`),generated,
+      "Preview, save/download and print reuse the same prepared PDF");
+    const download=await fetch(`${fileUrl}?download=1`);
+    assert.ok(download.headers.get("content-disposition")?.startsWith("attachment;"),"Save endpoint forces a real file download");
     await evaluate(`document.querySelector('[aria-label="إغلاق"]').click()`);
     await cdp("Page.navigate",{url:`${base}/section/rentals?focusId=${id}`});
     await wait(`!!document.querySelector('[aria-label="فتح verified.pdf"]')`);

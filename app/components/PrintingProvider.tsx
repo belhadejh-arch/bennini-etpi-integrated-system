@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Printer, X } from "lucide-react-native";
 import { useAuth } from "../../lib/auth";
@@ -41,12 +41,14 @@ export function PrintingProvider({children}:{children:ReactNode}) {
   const [paper,setPaper]=useState<PrintOptions["paper"]>("A4");
   const [landscape,setLandscape]=useState(false);
   const [documentFile,setDocumentFile]=useState<DocumentFile|null>(null);
+  const preparedDocument=useRef<{signature:string;file:DocumentFile}|null>(null);
   const t=(text:string)=>translate(text,language);
   const openPrint=(next:PrintRequest={})=>{
+    preparedDocument.current=null;
     setRequest(next);setKey(next.report??"dashboard");setSelected(next.ids??[]);
     setScope(next.ids?.length ? "selected":"all");setSearch("");setFrom("");setTo("");setPage(0);setError("");setReport(null);
   };
-  useEffect(()=>{if(!member){setRequest(null);setReport(null);setSelected([]);setDocumentFile(null);}},[member]);
+  useEffect(()=>{if(!member){preparedDocument.current=null;setRequest(null);setReport(null);setSelected([]);setDocumentFile(null);}},[member]);
   const openAttachment=async(url:string,download:boolean)=>{
     const file=await apiRequest<DocumentFile>("/attachment-document",getToken,{method:"POST",body:JSON.stringify({url})});
     if(download)await openDeviceDocument(file,true);
@@ -80,19 +82,23 @@ export function PrintingProvider({children}:{children:ReactNode}) {
   const validSelected=selected.filter((id)=>filteredIds.has(id));
   const hasFilter=!!(search.trim()||from||to);
   const count=scope==="selected"?validSelected.length:filtered.length;
-  const preview=async(pdf:boolean)=>{
+  const preview=async(action:"preview"|"print"|"save")=>{
     try {
       setError("");
       setBusy(true);
       const ids=scope==="selected"?validSelected:hasFilter?filtered.map((row)=>String(row.id)):undefined;
       const options={method:"POST",body:JSON.stringify({paper,landscape,ids,accountId:request?.accountId})};
       if(Platform.OS==="web"){
-        const file=await apiRequest<DocumentFile>(`/print-document/${key}`,getToken,options);
-        setDocumentFile(file);
-        if(pdf)await openDeviceDocument(file,true);
+        const signature=JSON.stringify([key,options.body,report,member?.clerk_user_id]);
+        const cached=preparedDocument.current;
+        const file=cached?.signature===signature&&Date.parse(cached.file.expiresAt)>Date.now()+10_000
+          ? cached.file : await apiRequest<DocumentFile>(`/print-document/${key}`,getToken,options);
+        preparedDocument.current={signature,file};
+        if(action==="preview")setDocumentFile(file);
+        else await openDeviceDocument(file,action==="save");
       }else{
         const result=await apiRequest<{html:string}>(`/print-preview/${key}`,getToken,options);
-        await outputPrintHtml(result.html,{paper,landscape},pdf);
+        await outputPrintHtml(result.html,{paper,landscape},action!=="print");
       }
     }catch(caught){setError(caught instanceof Error?caught.message:"تعذر إعداد مستند الطباعة.");}
     finally{setBusy(false);}
@@ -144,8 +150,8 @@ export function PrintingProvider({children}:{children:ReactNode}) {
         </ScrollView>
         <View style={{padding:16,borderTopWidth:1,borderColor:colors.border,flexDirection:"row",flexWrap:"wrap",gap:10}}>
           {busy?<ActivityIndicator color={colors.blue}/>:null}
-          {[{label:"معاينة والطباعة",pdf:false},{label:"حفظ PDF",pdf:true}].map((action)=><Pressable key={action.label} accessibilityRole="button"
-            disabled={busy||loading||!report||!count} onPress={()=>void preview(action.pdf)}
+          {([{label:"معاينة",action:"preview"},{label:"طباعة",action:"print"},{label:"حفظ وتنزيل PDF",action:"save"}] as const).map((action)=><Pressable key={action.label} accessibilityRole="button"
+            disabled={busy||loading||!report||!count} onPress={()=>void preview(action.action)}
             style={{flexGrow:1,minHeight:48,padding:12,borderRadius:10,backgroundColor:colors.action,alignItems:"center",justifyContent:"center",opacity:busy||loading||!count?0.5:1}}>
             <Text style={{color:"#fff",fontSize:14,fontWeight:"700"}}>{t(action.label)}</Text>
           </Pressable>)}

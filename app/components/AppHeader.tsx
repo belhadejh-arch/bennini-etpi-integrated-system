@@ -64,7 +64,7 @@ export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
         ) : leftAction}
       </View>
       <View style={[styles.brand,{gap:compact?5:12}]}>
-        <CompanyLogo width={logoWidth} height={logoHeight} />
+        <CompanyLogo width={logoWidth} height={logoHeight} framed />
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={[styles.title, { textAlign: language === "ar" ? "right" : "left" }]}>{title}</Text>
       </View>
       <View style={[styles.actionSlot, styles.rightActions]}>

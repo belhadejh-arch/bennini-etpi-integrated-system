@@ -1,3 +1,4 @@
+import { useReconnectRefresh } from "../../lib/use-reconnect-refresh";
 import { useAuth } from "../../lib/auth";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
@@ -130,9 +131,9 @@ export default function MachinerySection() {
   const totalRepairRecords = machinery.reduce((total, machine) => total + Number(machine.repair_count || 0), 0);
   const totalLegacyRepairRecords = machinery.reduce((total, machine) => total + Number(machine.legacy_repair_count || 0), 0);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (background = false) => {
     if (!isSignedIn) return;
-    setLoading(true);
+    if (!background) setLoading(true);
     setError("");
     try {
       const token = () => getToken();
@@ -161,6 +162,7 @@ export default function MachinerySection() {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
     else if (isSignedIn) void refresh();
   }, [isLoaded, isSignedIn, refresh, router]);
+  useReconnectRefresh(refresh, isSignedIn);
 
   useEffect(() => {
     const id = routeMachineId ? Number(routeMachineId) : null;

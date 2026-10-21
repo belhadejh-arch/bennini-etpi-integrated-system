@@ -1,3 +1,4 @@
+import { useReconnectRefresh } from "../../lib/use-reconnect-refresh";
 import { useAuth, useUser } from "../../lib/auth";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -157,9 +158,9 @@ export default function RentalsSection() {
     return matchesStatus && matchesSearch && matchesDateRange;
   }), [dateFrom, dateTo, items, search, statusFilter]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (background = false) => {
     if (!isSignedIn) return;
-    setLoading(true);
+    if (!background) setLoading(true);
     setError("");
     try {
       const token = () => getToken();
@@ -186,6 +187,7 @@ export default function RentalsSection() {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
     else if (isSignedIn) void refresh();
   }, [isLoaded, isSignedIn, refresh, router]);
+  useReconnectRefresh(refresh, isSignedIn);
 
   useEffect(() => {
     const updateToday = () => setToday(rentalToday());

@@ -54,15 +54,6 @@ const pool = new Pool({
 pool.on("error", (error) => console.error("Idle database connection failed:", error));
 const app = express();
 const refreshOpenRentals = openRentalRefresher(pool);
-app.use("/api", async (_req, res, next) => {
-  try {
-    await refreshOpenRentals();
-    next();
-  } catch (error) {
-    console.error("Open rental accrual refresh failed:", error);
-    fail(res, 503, "تعذر تحديث مبالغ الكراء الجارية. يرجى المحاولة لاحقاً.");
-  }
-});
 app.use((req, res, next) => {
   const requestId = randomUUID();
   res.set("X-Request-Id", requestId);
@@ -98,6 +89,20 @@ app.use(cors({
   },
 }));
 app.use(express.json({ limit: "1mb" }));
+// Set CORS before database-dependent middleware so a recoverable 503 is not
+// disguised as an unreachable server in hosted sites and WebViews.
+app.use("/api", async (req, res, next) => {
+  // Authentication, readiness and already-authorized document downloads do not
+  // need rental accruals. A rental database failure must not block these paths.
+  if (/^\/(?:auth(?:\/|$)|health(?:\/|$)|ready(?:\/|$)|document-files\/|attachment-document$)/.test(req.path)) return next();
+  try {
+    await refreshOpenRentals();
+    next();
+  } catch (error) {
+    console.error("Open rental accrual refresh failed:", error instanceof Error ? error.name : "unknown");
+    fail(res, 503, "تعذر تحديث مبالغ الكراء الجارية. يرجى المحاولة لاحقاً.");
+  }
+});
 app.use(express.urlencoded({ extended: true }));
 
 export type Member = {

@@ -1,3 +1,4 @@
+import { useReconnectRefresh } from "../lib/use-reconnect-refresh";
 import { useAuth, useUser } from "../lib/auth";
 import { Redirect, useRouter } from "expo-router";
 import {
@@ -57,9 +58,9 @@ export default function HomeScreen() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (background = false) => {
     if (!isSignedIn) return;
-    setLoading(true);
+    if (!background) setLoading(true);
     setError("");
     try {
       const data = await apiRequest<DashboardData>("/dashboard", () => getToken());
@@ -79,6 +80,7 @@ export default function HomeScreen() {
   useEffect(() => {
     if (authLoaded && isSignedIn) void refresh();
   }, [authLoaded, isSignedIn, refresh]);
+  useReconnectRefresh(refresh, isSignedIn);
 
   const canSeeFinancialData = hasPermission(member, "finance", "view");
   const permitted = useMemo(
@@ -147,7 +149,7 @@ export default function HomeScreen() {
             <Text style={styles.welcomeSubtitle}>مساحة عملك الموحدة، مع الأقسام والمؤشرات المتاحة لحسابك.</Text>
             <View style={styles.rolePill}><Text style={styles.rolePillText}>{member?.role_name || translate(roleLabel(member?.role), language)}</Text></View>
           </View>
-          <View style={styles.welcomeMark}><CompanyLogo width={91} height={48} /></View>
+          <View style={styles.welcomeMark}><CompanyLogo width={91} height={48} framed /></View>
         </View>
 
         {error ? <InlineError message={error} onRetry={() => void refresh()} /> : null}

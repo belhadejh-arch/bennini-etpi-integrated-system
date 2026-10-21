@@ -1,3 +1,4 @@
+import { useReconnectRefresh } from "../../lib/use-reconnect-refresh";
 import { useAuth, useUser } from "../../lib/auth";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -171,9 +172,9 @@ export default function ChequesSection() {
     ).slice(0, 8);
   }, [invoiceQuery, invoices, selectedInvoices]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (background = false) => {
     if (!isSignedIn) return;
-    setLoading(true);
+    if (!background) setLoading(true);
     setError("");
     try {
       const token = () => getToken();
@@ -199,6 +200,7 @@ export default function ChequesSection() {
     if (isLoaded && !isSignedIn) router.replace("/(auth)/sign-in");
     else if (isSignedIn) void refresh();
   }, [isLoaded, isSignedIn, refresh, router]);
+  useReconnectRefresh(refresh, isSignedIn);
 
   useEffect(() => {
     const timer = setTimeout(() => {
