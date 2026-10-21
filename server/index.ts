@@ -23,6 +23,7 @@ import { registerPreferencesRoutes } from "./preferences-routes";
 import { frenchNotificationCopy } from "./notification-copy";
 import { retryDatabaseRead } from "./read-recovery";
 import { memberLookupQuery, memberReadinessQuery } from "./member-queries";
+import { validRental, openRentalRefresher } from "./rental-data";
 import { FinanceError, prepareFinanceSchema, positiveId, ensureCustomerInvoice, synchronizeChequeInvoices, resolveTransactionAccount } from "./finance-data";
 import { allSectionIds, type SectionId } from "../shared/sections";
 import {
@@ -50,6 +51,16 @@ const pool = new Pool({
 // An idle PostgreSQL socket failure must not crash every user's API process.
 pool.on("error", (error) => console.error("Idle database connection failed:", error));
 const app = express();
+const refreshOpenRentals = openRentalRefresher(pool);
+app.use("/api", async (_req, res, next) => {
+  try {
+    await refreshOpenRentals();
+    next();
+  } catch (error) {
+    console.error("Open rental accrual refresh failed:", error);
+    fail(res, 503, "تعذر تحديث مبالغ الكراء الجارية. يرجى المحاولة لاحقاً.");
+  }
+});
 app.use((req, res, next) => {
   const requestId = randomUUID();
   res.set("X-Request-Id", requestId);
@@ -478,54 +489,6 @@ function validIsoDate(value: unknown): value is string {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
-type RentalInput = {
-  machineryId: number | null;
-  equipment: string;
-  clientOrOwner: string;
-  startDate: string;
-  endDate: string;
-  ratePeriod: "daily" | "monthly";
-  rentalRate: number;
-  duration: number;
-  totalAmount: number;
-  paidAmount: number;
-  status: (typeof rentalStatuses)[number];
-  notes: string;
-};
-
-function validRental(body: Record<string, unknown>, existing?: Partial<RentalInput>): RentalInput | null {
-  const rawMachineryId = body.machineryId === undefined ? existing?.machineryId : body.machineryId;
-  const machineryId = rawMachineryId == null || rawMachineryId === "" ? null : Number(rawMachineryId);
-  const equipment = String(body.equipment ?? existing?.equipment ?? "").trim();
-  const clientOrOwner = String(body.clientOrOwner ?? existing?.clientOrOwner ?? "").trim();
-  const startDate = body.startDate ?? existing?.startDate;
-  const endDate = body.endDate ?? existing?.endDate;
-  const ratePeriod = body.ratePeriod ?? existing?.ratePeriod ?? "daily";
-  const rentalRate = Number(body.rentalRate ?? existing?.rentalRate ?? 0);
-  const paidAmount = Number(body.paidAmount ?? existing?.paidAmount ?? 0);
-  const status = body.status ?? existing?.status ?? "active";
-  const notes = String(body.notes ?? existing?.notes ?? "").trim();
-  if ((machineryId !== null && (!Number.isSafeInteger(machineryId) || machineryId <= 0)) ||
-      !equipment || equipment.length > 200 || !clientOrOwner || clientOrOwner.length > 200 ||
-      !validIsoDate(startDate) || !validIsoDate(endDate) || endDate < startDate ||
-      !["daily", "monthly"].includes(String(ratePeriod)) ||
-      !Number.isFinite(rentalRate) || rentalRate < 0 ||
-      !Number.isFinite(paidAmount) || paidAmount < 0 ||
-      !rentalStatuses.includes(status as (typeof rentalStatuses)[number]) || notes.length > 5000) return null;
-  const days = Math.max(1, Math.round(
-    (new Date(`${endDate}T00:00:00Z`).getTime() - new Date(`${startDate}T00:00:00Z`).getTime()) / 86400000,
-  ));
-  const duration = ratePeriod === "monthly" ? Math.ceil(days / 30) : days;
-  const totalAmount = Math.round(duration * rentalRate * 100) / 100;
-  if (paidAmount > totalAmount) return null;
-  return {
-    machineryId, equipment, clientOrOwner, startDate, endDate,
-    ratePeriod: ratePeriod as RentalInput["ratePeriod"],
-    rentalRate, duration, totalAmount, paidAmount,
-    status: status as RentalInput["status"], notes,
-  };
-}
-
 let rentalSchemaPromise: Promise<void> | null = null;
 
 function ensureRentalSchema() {
@@ -558,7 +521,11 @@ function ensureRentalSchema() {
       ADD COLUMN IF NOT EXISTS duration INTEGER NOT NULL DEFAULT 1,
       ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '',
       ADD COLUMN IF NOT EXISTS created_by_id TEXT REFERENCES members(clerk_user_id),
-      ADD COLUMN IF NOT EXISTS created_by_name TEXT;
+      ADD COLUMN IF NOT EXISTS created_by_name TEXT,
+      ADD COLUMN IF NOT EXISTS daily_shifts JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE rentals ALTER COLUMN end_date DROP NOT NULL;
+    ALTER TABLE rentals DROP CONSTRAINT IF EXISTS rentals_rate_period_check;
+    ALTER TABLE rentals ADD CONSTRAINT rentals_rate_period_check CHECK (rate_period IN ('daily', 'monthly', 'shift'));
     UPDATE rentals r SET machinery_id = m.id
       FROM machinery m
       WHERE r.machinery_id IS NULL
@@ -2206,8 +2173,8 @@ app.get("/api/rentals", requireRentalSchema, authenticate, requireSection("renta
     const [items, alerts] = await Promise.all([
       pool.query(`
         SELECT r.id, r.machinery_id, COALESCE(m.name, r.equipment) AS equipment, r.client_or_owner, r.start_date::text, r.end_date::text,
-          r.total_amount, r.paid_amount, GREATEST(r.total_amount - r.paid_amount, 0) AS remaining,
-          r.status, r.rate_period, r.rental_rate, r.duration, r.notes, r.created_by_name, r.created_at,
+          r.total_amount, r.paid_amount, r.total_amount - r.paid_amount AS remaining,
+          r.status, r.rate_period, r.rental_rate, r.duration, r.daily_shifts, r.notes, r.created_by_name, r.created_at,
           COALESCE((
             SELECT json_agg(json_build_object(
               'id', a.id, 'file_name', a.file_name, 'mime_type', a.mime_type, 'file_size', a.file_size
@@ -2252,11 +2219,11 @@ app.post("/api/rentals", requireRentalSchema, authenticate, requireSection("rent
     const result = await client.query(
       `INSERT INTO rentals
         (machinery_id, equipment, client_or_owner, start_date, end_date, total_amount, paid_amount, status,
-         rate_period, rental_rate, duration, notes, created_by_id, created_by_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+         rate_period, rental_rate, duration, notes, created_by_id, created_by_name, daily_shifts)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb) RETURNING id`,
       [rental.machineryId, rental.equipment, rental.clientOrOwner, rental.startDate, rental.endDate, rental.totalAmount,
         rental.paidAmount, rental.status, rental.ratePeriod, rental.rentalRate, rental.duration, rental.notes,
-        req.member!.clerk_user_id, req.member!.name],
+        req.member!.clerk_user_id, req.member!.name, JSON.stringify(rental.dailyShifts)],
     );
     await writeAuditWithClient(client, req.member!, "تسجيل عقد كراء",
       `${rental.equipment} لصالح ${rental.clientOrOwner} بقيمة ${rental.totalAmount} دج.`,
@@ -2281,7 +2248,7 @@ app.patch("/api/rentals/:id", requireRentalSchema, authenticate, requireSection(
     const existing = await client.query(
       `SELECT machinery_id AS "machineryId", equipment, client_or_owner AS "clientOrOwner", start_date::text AS "startDate",
         end_date::text AS "endDate", rate_period AS "ratePeriod", rental_rate AS "rentalRate",
-        paid_amount AS "paidAmount", status, notes FROM rentals WHERE id = $1 FOR UPDATE`,
+        paid_amount AS "paidAmount", status, notes, daily_shifts AS "dailyShifts" FROM rentals WHERE id = $1 FOR UPDATE`,
       [id],
     );
     if (!existing.rowCount) {
@@ -2304,9 +2271,10 @@ app.patch("/api/rentals/:id", requireRentalSchema, authenticate, requireSection(
     await client.query(
       `UPDATE rentals SET machinery_id = $1, equipment = $2, client_or_owner = $3, start_date = $4, end_date = $5,
         total_amount = $6, paid_amount = $7, status = $8, rate_period = $9, rental_rate = $10,
-        duration = $11, notes = $12 WHERE id = $13`,
+        duration = $11, notes = $12, daily_shifts = $14::jsonb WHERE id = $13`,
       [rental.machineryId, rental.equipment, rental.clientOrOwner, rental.startDate, rental.endDate, rental.totalAmount,
-        rental.paidAmount, rental.status, rental.ratePeriod, rental.rentalRate, rental.duration, rental.notes, id],
+        rental.paidAmount, rental.status, rental.ratePeriod, rental.rentalRate, rental.duration, rental.notes, id,
+        JSON.stringify(rental.dailyShifts)],
     );
     await writeAuditWithClient(client, req.member!, "تعديل عقد كراء", `تحديث عقد الكراء رقم ${id}.`,
       { section: "rentals", eventType: "update", entityId: id, data: { equipment: rental.equipment, clientOrOwner: rental.clientOrOwner, totalAmount: rental.totalAmount, paidAmount: rental.paidAmount } });

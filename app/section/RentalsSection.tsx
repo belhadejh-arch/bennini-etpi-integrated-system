@@ -9,7 +9,7 @@ import {
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
 import MachineryPicker, { type MachineryOption } from "../components/MachineryPicker";
@@ -19,9 +19,12 @@ import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 import { translate, translateTemplate } from "../../lib/localization";
+import RentalDatePicker from "../components/RentalDatePicker";
+import RentalShiftDays from "../components/RentalShiftDays";
+import { rentalCalculation, rentalToday, validRentalDate } from "../../shared/rental-calculation";
+import type { DailyShift, RatePeriod } from "../../shared/rental-calculation";
 
 type Status = "active" | "completed" | "cancelled";
-type RatePeriod = "daily" | "monthly";
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type Rental = {
   id: number;
@@ -29,12 +32,13 @@ type Rental = {
   equipment: string;
   client_or_owner: string;
   start_date: string;
-  end_date: string;
+  end_date: string | null;
   total_amount: number | string;
   paid_amount: number | string;
   remaining: number | string;
   status: Status;
   rate_period: RatePeriod;
+  daily_shifts?: DailyShift[];
   rental_rate: number | string;
   duration: number;
   notes: string;
@@ -54,7 +58,9 @@ type Draft = {
   clientOrOwner: string;
   startDate: string;
   endDate: string;
+  ongoing: boolean;
   ratePeriod: RatePeriod;
+  dailyShifts: DailyShift[];
   rentalRate: string;
   paidAmount: string;
   status: Status;
@@ -64,7 +70,7 @@ type PickedDocument = DocumentPicker.DocumentPickerAsset;
 type ApiError = Error & { status?: number; body?: { pending?: boolean } };
 
 const statusLabels: Record<Status, string> = { active: "جاري", completed: "منتهٍ", cancelled: "ملغى" };
-const rateLabels: Record<RatePeriod, string> = { daily: "يومي", monthly: "شهري" };
+const rateLabels: Record<RatePeriod, string> = { daily: "يومي", monthly: "شهري", shift: "بالوردية" };
 const statusOptions: Array<{ value: Status | ""; label: string }> = [
   { value: "", label: "كل الحالات" },
   { value: "active", label: "جاري" },
@@ -72,20 +78,17 @@ const statusOptions: Array<{ value: Status | ""; label: string }> = [
   { value: "cancelled", label: "ملغى" },
 ];
 
-function localDate() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
+function localDate() { return rentalToday(); }
 
 function emptyDraft(): Draft {
   return {
-    machineryId: "", equipment: "", clientOrOwner: "", startDate: localDate(), endDate: localDate(),
-    ratePeriod: "daily", rentalRate: "", paidAmount: "0", status: "active", notes: "",
+    machineryId: "", equipment: "", clientOrOwner: "", startDate: localDate(), endDate: localDate(), ongoing: false,
+    ratePeriod: "daily", dailyShifts: [], rentalRate: "", paidAmount: "0", status: "active", notes: "",
   };
 }
 
-function dateLabel(value: string) {
-  return formatDate(value);
+function dateLabel(value: string | null | undefined) {
+  return value ? value.slice(0, 10) : "";
 }
 
 function amount(value: string | number | null | undefined) {
@@ -93,13 +96,8 @@ function amount(value: string | number | null | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function durationFor(start: string, end: string, period: RatePeriod) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) return 0;
-  const days = Math.max(1, Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000));
-  return period === "monthly" ? Math.ceil(days / 30) : days;
-}
-
-function daysUntil(value: string) {
+function daysUntil(value: string | null) {
+  if (!value) return Number.POSITIVE_INFINITY;
   return Math.round((Date.parse(`${dateLabel(value)}T00:00:00Z`) - Date.parse(`${localDate()}T00:00:00Z`)) / 86400000);
 }
 
@@ -135,6 +133,7 @@ export default function RentalsSection() {
   const [newMachine, setNewMachine] = useState({
     code: "", name: "", category: "", driverName: "", driverMonthlySalary: "", driverStartDate: localDate(),
   });
+  const [today, setToday] = useState(rentalToday());
 
   const isAdmin = member?.role === "admin";
   const canAccess = hasPermission(member, "rentals", "view");
@@ -143,14 +142,16 @@ export default function RentalsSection() {
   const canManage = canCreate || canEdit;
   const canCreateMachine = hasPermission(member, "machinery", "create");
   const canAddAttachments = canManage && canUploadFiles(member);
-  const duration = durationFor(draft.startDate, draft.endDate, draft.ratePeriod);
-  const totalAmount = Math.round(duration * amount(draft.rentalRate) * 100) / 100;
-  const remainingAmount = Math.max(0, totalAmount - amount(draft.paidAmount));
+  const calculation = useMemo(() => rentalCalculation(
+    draft.startDate, draft.ongoing ? null : draft.endDate || null, draft.ratePeriod, amount(draft.rentalRate), draft.dailyShifts, today,
+  ), [draft.startDate, draft.endDate, draft.ongoing, draft.ratePeriod, draft.rentalRate, draft.dailyShifts, today]);
+  const totalAmount = calculation.totalAmount;
+  const remainingAmount = totalAmount - amount(draft.paidAmount);
   const filteredItems = useMemo(() => items.filter((item) => {
     const matchesStatus = !statusFilter || item.status === statusFilter;
     const term = search.trim().toLowerCase();
     const matchesSearch = !term || `${item.id} ${item.equipment} ${item.client_or_owner} ${item.notes} ${item.status} ${item.start_date} ${item.end_date}`.toLowerCase().includes(term);
-    const matchesDateRange = (!dateFrom || item.end_date.slice(0, 10) >= dateFrom) &&
+    const matchesDateRange = (!dateFrom || !item.end_date || item.end_date.slice(0, 10) >= dateFrom) &&
       (!dateTo || item.start_date.slice(0, 10) <= dateTo);
     return matchesStatus && matchesSearch && matchesDateRange;
   }), [dateFrom, dateTo, items, search, statusFilter]);
@@ -185,10 +186,33 @@ export default function RentalsSection() {
     else if (isSignedIn) void refresh();
   }, [isLoaded, isSignedIn, refresh, router]);
 
+  useEffect(() => {
+    const updateToday = () => setToday(rentalToday());
+    const timer = setInterval(updateToday, 60_000);
+    const subscription = AppState.addEventListener("change", (state) => { if (state === "active") updateToday(); });
+    return () => { clearInterval(timer); subscription.remove(); };
+  }, []);
+
   const setField = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
 
   const closeForm = () => {
+    const dirty = !!editing || !!draft.clientOrOwner || !!draft.rentalRate || !!pickedDocs.length;
+    if (dirty) {
+      const message = "التعديلات غير محفوظة. هل تريد إغلاق النموذج؟";
+      if (Platform.OS === "web" && !window.confirm(message)) return;
+      if (Platform.OS !== "web") {
+        Alert.alert("تعديلات غير محفوظة", message, [
+          { text: "متابعة التعديل", style: "cancel" },
+          { text: "إغلاق دون حفظ", style: "destructive", onPress: () => closeFormNow() },
+        ]);
+        return;
+      }
+    }
+    closeFormNow();
+  };
+
+  const closeFormNow = () => {
     setFormOpen(false);
     setEditing(null);
     setPickedDocs([]);
@@ -214,7 +238,9 @@ export default function RentalsSection() {
       clientOrOwner: rental.client_or_owner,
       startDate: dateLabel(rental.start_date),
       endDate: dateLabel(rental.end_date),
+      ongoing: !rental.end_date,
       ratePeriod: rental.rate_period || "daily",
+      dailyShifts: rental.daily_shifts || [],
       rentalRate: String(rental.rental_rate ?? 0),
       paidAmount: String(rental.paid_amount),
       status: rental.status,
@@ -284,10 +310,9 @@ export default function RentalsSection() {
 
   const saveRental = async () => {
     if ((!draft.machineryId && !editing) || (!draft.equipment.trim() && !draft.machineryId) || !draft.clientOrOwner.trim() ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(draft.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(draft.endDate) ||
-        draft.endDate < draft.startDate || amount(draft.rentalRate) < 0 ||
+        !validRentalDate(draft.startDate) || (!draft.ongoing && (!validRentalDate(draft.endDate) || draft.endDate < draft.startDate)) || amount(draft.rentalRate) < 0 ||
         !Number.isFinite(Number(draft.rentalRate)) || amount(draft.paidAmount) < 0 ||
-        !Number.isFinite(Number(draft.paidAmount)) || amount(draft.paidAmount) > totalAmount) {
+        !Number.isFinite(Number(draft.paidAmount)) || (draft.ratePeriod !== "shift" && amount(draft.paidAmount) > totalAmount)) {
       setError("أكمل بيانات الكراء وتحقق من صحة التواريخ والمبلغ المدفوع.");
       return;
     }
@@ -297,6 +322,9 @@ export default function RentalsSection() {
     try {
       const payload = JSON.stringify({
         ...draft,
+        endDate: draft.ongoing ? null : draft.endDate,
+        status: draft.ongoing ? "active" : draft.status,
+        dailyShifts: draft.dailyShifts,
         machineryId: draft.machineryId ? Number(draft.machineryId) : undefined,
         equipment: machineryOptions.find((machine) => String(machine.id) === draft.machineryId)?.name || draft.equipment.trim(),
         clientOrOwner: draft.clientOrOwner.trim(),
@@ -312,12 +340,12 @@ export default function RentalsSection() {
         savedId = result.id;
       }
       if (pickedDocs.length && savedId) await uploadDocuments(savedId, pickedDocs);
-      closeForm();
+      closeFormNow();
       await refresh();
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "تعذر حفظ عملية الكراء.";
       if (savedId) {
-        closeForm();
+        closeFormNow();
         setError(`تم حفظ بيانات الكراء، لكن تعذر رفع المرفق. ${message}`);
         await refresh();
       } else {
@@ -334,8 +362,9 @@ export default function RentalsSection() {
       equipment: rental.equipment,
       clientOrOwner: rental.client_or_owner,
       startDate: dateLabel(rental.start_date),
-      endDate: dateLabel(rental.end_date),
+      endDate: dateLabel(rental.end_date) || null,
       ratePeriod: rental.rate_period,
+      dailyShifts: rental.daily_shifts || [],
       rentalRate: amount(rental.rental_rate),
       paidAmount: amount(rental.paid_amount),
       status,
@@ -482,7 +511,7 @@ export default function RentalsSection() {
           </View>
         ) : null}
 
-        {canCreate ? (
+        {canCreate || (formOpen && canEdit) ? (
           <Pressable onPress={formOpen ? closeForm : startCreate} disabled={saving} style={styles.addButton}>
             {formOpen ? <X size={17} color={colors.onAccent} /> : <Plus size={18} color={colors.onAccent} />}
             <Text style={styles.addButtonText}>{formOpen ? "إغلاق النموذج" : "تسجيل عملية كراء"}</Text>
@@ -520,37 +549,56 @@ export default function RentalsSection() {
                   </View>
                   <Field label="اسم السائق (اختياري)" value={newMachine.driverName} onChange={(value) => setNewMachine((current) => ({ ...current, driverName: value }))} placeholder="اسم السائق" />
                   <Field label="راتب السائق الشهري (دج)" value={newMachine.driverMonthlySalary} onChange={(value) => setNewMachine((current) => ({ ...current, driverMonthlySalary: value }))} placeholder="0" numeric />
-                  <Field label="تاريخ بداية عمل السائق" value={newMachine.driverStartDate} onChange={(value) => setNewMachine((current) => ({ ...current, driverStartDate: value }))} placeholder="YYYY-MM-DD" />
+                  <RentalDatePicker label="تاريخ بداية عمل السائق" value={newMachine.driverStartDate} onChange={(value) => setNewMachine((current) => ({ ...current, driverStartDate: value }))} />
                   <Pressable onPress={() => void saveNewMachine()} disabled={saving} style={styles.outlineButton}>
                     <Text style={styles.outlineButtonText}>{saving ? "جارٍ التسجيل..." : "حفظ الآلة واختيارها"}</Text>
                   </Pressable>
                 </View>
               ) : null}
               <Field label="اسم المستأجر / المؤجر *" value={draft.clientOrOwner} onChange={(value) => setField("clientOrOwner", value)} placeholder="الاسم أو الجهة" />
-              <Field label="تاريخ بداية الكراء *" value={draft.startDate} onChange={(value) => setField("startDate", value)} placeholder="YYYY-MM-DD" />
-              <Field label="تاريخ نهاية الكراء *" value={draft.endDate} onChange={(value) => setField("endDate", value)} placeholder="YYYY-MM-DD" />
-              <Field label={translateTemplate("السعر {{0}} (دج) *", [translate(rateLabels[draft.ratePeriod], language)])} value={draft.rentalRate} onChange={(value) => setField("rentalRate", value)} placeholder="0" numeric />
+              <RentalDatePicker label="تاريخ بداية الكراء *" value={draft.startDate} onChange={(value) => setField("startDate", value)} />
+              <RentalDatePicker label="تاريخ نهاية الكراء (اختياري)" value={draft.ongoing ? "" : draft.endDate} disabled={draft.ongoing}
+                onChange={(value) => setField("endDate", value)} />
+              <Field label={draft.ratePeriod === "shift" ? (language === "fr" ? "Tarif par poste (DA)" : "سعر الوردية (دج)") : translateTemplate("السعر {{0}} (دج) *", [translate(rateLabels[draft.ratePeriod], language)])} value={draft.rentalRate} onChange={(value) => setField("rentalRate", value)} placeholder="0" numeric />
               <Field label="المبلغ المدفوع (دج)" value={draft.paidAmount} onChange={(value) => setField("paidAmount", value)} placeholder="0" numeric />
             </View>
+            <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: draft.ongoing }} onPress={() => setDraft((current) => ({ ...current, ongoing: !current.ongoing, status: !current.ongoing ? "active" : current.status }))}
+              style={{ minHeight: 46, flexDirection: "row", alignItems: "center", justifyContent: "flex-start", gap: 10, marginTop: 8, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: draft.ongoing ? colors.blue : colors.border, backgroundColor: draft.ongoing ? colors.blueSoft : colors.surface }}>
+              <View style={{ width: 21, height: 21, borderRadius: 6, borderWidth: 1, borderColor: draft.ongoing ? colors.blue : colors.muted, backgroundColor: draft.ongoing ? colors.blue : colors.surface, alignItems: "center", justifyContent: "center" }}>
+                {draft.ongoing ? <Check size={14} color={colors.onAccent} /> : null}
+              </View>
+              <Text style={{ color: colors.ink, fontWeight: "800", fontSize: 12 }}>تاريخ الانتهاء غير محدد</Text>
+            </Pressable>
+            {draft.ongoing ? <Text style={styles.helper}>يظل العقد جارياً، ويُحتسب حتى تاريخ اليوم ويتجدد تلقائياً عند فتح التطبيق.</Text> : null}
 
             <Text style={styles.fieldLabel}>طريقة احتساب السعر</Text>
             <View style={styles.choiceRow}>
-              {(["daily", "monthly"] as const).map((period) => (
-                <Choice key={period} label={period === "daily" ? "يومي" : "شهري"} selected={draft.ratePeriod === period}
+              {(["daily", "monthly", "shift"] as const).map((period) => (
+                <Choice key={period} label={period === "daily" ? translate("يومي", language) : period === "monthly" ? translate("شهري", language) : language === "fr" ? "Par poste" : "بالوردية"} selected={draft.ratePeriod === period}
                   onPress={() => setField("ratePeriod", period)} />
               ))}
             </View>
-            <Text style={styles.helper}>الشهور تُحسب على أساس 30 يوماً، مع تقريب المدة الجزئية إلى شهر كامل.</Text>
-
+            {draft.ratePeriod === "monthly" ? <Text style={styles.helper}>الشهور تُحسب على أساس 30 يوماً، مع تقريب المدة الجزئية إلى شهر كامل.</Text> : null}
+            <Text style={styles.fieldLabel}>مدة الكراء: {draft.ratePeriod === "shift" ? `${calculation.days} يوم · ${calculation.totalShifts} وردية` : `${calculation.duration} ${draft.ratePeriod === "monthly" ? "شهر" : "يوم"}`}</Text>
             <View style={styles.calculationBox}>
-              <Calc label="مدة الكراء" value={duration ? `${duration} ${draft.ratePeriod === "daily" ? "يوم" : "شهر"}` : "تحقق من التواريخ"} />
-              <Calc label="المبلغ الإجمالي" value={formatDzd(totalAmount)} />
-              <Calc label="المبلغ المتبقي" value={formatDzd(remainingAmount)} highlight />
+              <Calc label="الأيام" value={`${calculation.days} يوم`} />
+              <Calc label="الورديات" value={draft.ratePeriod === "shift" ? `${calculation.totalShifts} وردية` : "—"} />
+              <Calc label={draft.ratePeriod === "shift" ? (language === "fr" ? "Tarif par poste (DA)" : "سعر الوردية (دج)") : `السعر ${translate(rateLabels[draft.ratePeriod], language)}`} value={formatDzd(amount(draft.rentalRate))} />
+              <Calc label="الإجمالي" value={formatDzd(totalAmount)} />
+              <Calc label="المدفوع" value={formatDzd(amount(draft.paidAmount))} />
+              <Calc label="المتبقي" value={formatDzd(remainingAmount)} highlight />
             </View>
+            {draft.ratePeriod === "shift" ? (
+              <RentalShiftDays rows={calculation.rows} onChange={(rows) => setDraft((current) => {
+                const updated = new Map(current.dailyShifts.map((row) => [row.date, row]));
+                rows.forEach((row) => updated.set(row.date, row));
+                return { ...current, dailyShifts: [...updated.values()] };
+              })} />
+            ) : null}
 
             <Text style={styles.fieldLabel}>حالة الكراء</Text>
             <View style={styles.choiceRow}>
-              {(["active", "completed", "cancelled"] as const).map((status) => (
+              {((draft.ongoing ? ["active"] : ["active", "completed", "cancelled"]) as Status[]).map((status) => (
                 <Choice key={status} label={translate(statusLabels[status], language)} selected={draft.status === status}
                   onPress={() => setField("status", status)} />
               ))}
@@ -589,8 +637,9 @@ export default function RentalsSection() {
                 ))}
               </View>
             ) : null}
-            <Pressable onPress={() => void saveRental()} disabled={saving || !duration || amount(draft.paidAmount) > totalAmount}
-              style={[styles.saveButton, (saving || !duration || amount(draft.paidAmount) > totalAmount) && styles.disabled]}>
+            <Text style={styles.helper}>تُحفظ التغييرات عند الضغط على زر الحفظ؛ إغلاق النموذج قبل ذلك يلغي التعديلات.</Text>
+            <Pressable onPress={() => void saveRental()} disabled={saving || !validRentalDate(draft.startDate) || (!draft.ongoing && (!validRentalDate(draft.endDate) || draft.endDate < draft.startDate))}
+              style={[styles.saveButton, (saving || !validRentalDate(draft.startDate) || (!draft.ongoing && (!validRentalDate(draft.endDate) || draft.endDate < draft.startDate))) && styles.disabled]}>
               {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveText}>{editing ? "حفظ التعديلات" : "حفظ عملية الكراء"}</Text>}
             </Pressable>
           </View>
@@ -603,19 +652,15 @@ export default function RentalsSection() {
               placeholder="ابحث عن المعدة أو المستأجر" placeholderTextColor="#98A5B4" accessibilityLabel="بحث في عقود الكراء" />
             {search ? <Pressable onPress={() => setSearch("")}><X size={17} color={colors.muted} /></Pressable> : null}
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow}>
+          <View style={styles.filtersRow}>
             {statusOptions.map((option) => (
               <Choice key={option.value || "all"} label={translate(option.label, language)} selected={statusFilter === option.value}
                 onPress={() => setStatusFilter(option.value as Status | "")} />
             ))}
-          </ScrollView>
+          </View>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            <TextInput value={dateFrom} onChangeText={setDateFrom}
-              style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
-              placeholder="تداخل مع تاريخ من" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية الكراء ابتداءً من تاريخ" />
-            <TextInput value={dateTo} onChangeText={setDateTo}
-              style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
-              placeholder="تداخل مع تاريخ إلى" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية الكراء حتى تاريخ" />
+            <RentalDatePicker label="تداخل مع تاريخ من" value={dateFrom} onChange={setDateFrom} />
+            <RentalDatePicker label="تداخل مع تاريخ إلى" value={dateTo} onChange={setDateTo} />
             {dateFrom || dateTo ? <Pressable onPress={() => { setDateFrom(""); setDateTo(""); }} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 8 }}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>مسح التاريخ</Text></Pressable> : null}
           </View>
         </View>
@@ -630,7 +675,10 @@ export default function RentalsSection() {
         ) : filteredItems.length ? (
           filteredItems.map((rental) => {
             const left = daysUntil(rental.end_date);
-            const isDueSoon = rental.status === "active" && left <= 7;
+            const isDueSoon = rental.status === "active" && !!rental.end_date && left <= 7;
+            const savedCalculation = rentalCalculation(dateLabel(rental.start_date), dateLabel(rental.end_date) || null, rental.rate_period, amount(rental.rental_rate), rental.daily_shifts || [], today);
+            const displayedTotal = rental.end_date ? amount(rental.total_amount) : savedCalculation.totalAmount;
+            const displayedRemaining = displayedTotal - amount(rental.paid_amount);
             return (
               <View key={rental.id} style={[styles.rentalCard, isDueSoon && styles.rentalCardDue]}>
                 <View style={styles.rentalHeader}>
@@ -639,7 +687,7 @@ export default function RentalsSection() {
                     <Text style={styles.rentalSubheading}>{rental.client_or_owner}</Text>
                   </View>
                   <View style={styles.amountStatus}>
-                    <Text style={styles.totalAmount}>{formatDzd(amount(rental.total_amount))}</Text>
+                    <Text style={styles.totalAmount}>{formatDzd(displayedTotal)}</Text>
                     <View style={[styles.statusBadge, rentalStatusTone(rental.status)]}>
                       <Text style={styles.statusText}>{translate(statusLabels[rental.status], language)}</Text>
                     </View>
@@ -647,11 +695,11 @@ export default function RentalsSection() {
                 </View>
                 <View style={styles.detailsGrid}>
                   <Detail label="بداية الكراء" value={dateLabel(rental.start_date)} />
-                  <Detail label="نهاية الكراء" value={dateLabel(rental.end_date)} highlight={isDueSoon} />
-                  <Detail label="مدة الكراء" value={`${rental.duration} ${rental.rate_period === "monthly" ? "شهر" : "يوم"}`} />
-                  <Detail label={`${translate("السعر", language)} ${translate(rateLabels[rental.rate_period], language)}`} value={formatDzd(amount(rental.rental_rate))} />
+                  <Detail label="نهاية الكراء" value={rental.end_date ? formatDate(dateLabel(rental.end_date)) : "غير محدد · مستمر"} highlight={isDueSoon} />
+                  <Detail label="مدة الكراء" value={rental.rate_period === "shift" ? `${savedCalculation.days} يوم · ${savedCalculation.totalShifts} وردية` : `${rental.end_date ? rental.duration : savedCalculation.duration} ${rental.rate_period === "monthly" ? "شهر" : "يوم"}`} />
+                  <Detail label={rental.rate_period === "shift" ? (language === "fr" ? "Tarif par poste" : "سعر الوردية") : `${translate("السعر", language)} ${translate(rateLabels[rental.rate_period], language)}`} value={formatDzd(amount(rental.rental_rate))} />
                   <Detail label="المبلغ المدفوع" value={formatDzd(amount(rental.paid_amount))} />
-                  <Detail label="المبلغ المتبقي" value={formatDzd(amount(rental.remaining))} highlight={amount(rental.remaining) > 0} />
+                  <Detail label="المبلغ المتبقي" value={formatDzd(displayedRemaining)} highlight={displayedRemaining > 0} />
                   {isDueSoon ? (
                     <Detail label="تنبيه النهاية" value={left < 0 ? `انتهى منذ ${Math.abs(left)} يوم` : left === 0 ? "ينتهي اليوم" : `خلال ${left} يوم`} highlight />
                   ) : null}
@@ -674,7 +722,10 @@ export default function RentalsSection() {
                   <View style={styles.actionsRow}>
                     {canEdit ? <ActionButton label="تعديل البيانات" onPress={() => startEdit(rental)} icon={<Pencil size={14} color={colors.blue} />} /> : null}
                     {canEdit && rental.status === "active" ? (
-                      <ActionButton label="إنهاء الكراء" onPress={() => void changeStatus(rental, "completed")} icon={<Check size={14} color={colors.green} />} />
+                      <ActionButton label="إنهاء الكراء" onPress={() => {
+                        if (!rental.end_date) { startEdit(rental); setError("حدد تاريخ نهاية الكراء في النموذج قبل إنهاء عقد مستمر."); }
+                        else void changeStatus(rental, "completed");
+                      }} icon={<Check size={14} color={colors.green} />} />
                     ) : null}
                     {canAddAttachments && rental.attachments.length < 5 ? (
                       <ActionButton label="إضافة مستند" onPress={() => void addAttachments(rental)} icon={<FilePlus2 size={14} color={colors.blue} />} />
@@ -804,7 +855,7 @@ const styles = {
   searchCard: { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1, borderRadius: 14, padding: 10, gap: 10 },
   searchBox: { minHeight: 42, borderRadius: 10, backgroundColor: "#FBFCFE", borderWidth: 1, borderColor: colors.border, paddingHorizontal: 10, flexDirection: "row" as const, alignItems: "center" as const, gap: 8 },
   searchInput: { flex: 1, color: colors.ink, textAlign: "right" as const, fontSize: 11, paddingVertical: 7 },
-  filtersRow: { flexDirection: "row" as const, gap: 7 },
+  filtersRow: { flexDirection: "row" as const, flexWrap: "wrap" as const, gap: 7 },
   listHeading: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const },
   listTitle: { color: colors.navy, fontSize: 15, fontWeight: "900" as const, textAlign: "right" as const },
   listCount: { color: colors.muted, fontSize: 10 },
