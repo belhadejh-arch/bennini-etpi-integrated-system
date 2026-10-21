@@ -24,6 +24,7 @@ import { frenchNotificationCopy } from "./notification-copy";
 import { retryDatabaseRead } from "./read-recovery";
 import { memberLookupQuery, memberReadinessQuery } from "./member-queries";
 import { validRental, openRentalRefresher } from "./rental-data";
+import { registerPrintRoutes } from "./print-routes";
 import { FinanceError, prepareFinanceSchema, positiveId, ensureCustomerInvoice, synchronizeChequeInvoices, resolveTransactionAccount } from "./finance-data";
 import { allSectionIds, type SectionId } from "../shared/sections";
 import {
@@ -1160,9 +1161,10 @@ app.get("/api/me", async (req: AuthenticatedRequest, res) => {
 });
 
 registerPreferencesRoutes(app, pool, authenticate);
+registerPrintRoutes(app, pool, authenticate, async(member)=>(await loadNotifications(member,true)).items);
 
-app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, res) => {
-  const member = req.member!;
+async function loadNotifications(member: Member, unlimited=false) {
+  const sourceQuery = (sql:string,values?:unknown[]) => pool.query(unlimited?sql.replace(/\bLIMIT \d+\b/g,""):sql,values);
   const canSeeField = hasPermission(member, "field", "view");
   const canReviewField = hasPermission(member, "field", "edit");
   const canSeeTransactions = member.role !== "partner" && hasPermission(member, "finance", "view");
@@ -1183,7 +1185,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
 
     const sources: Array<Promise<{ rows: Array<Record<string, unknown>> }>> = [];
     if (canSeeCheques) {
-      sources.push(pool.query(`
+      sources.push(sourceQuery(`
         SELECT 'cheque_due' AS type, id AS record_id, cheque_number AS label,
           due_date::text AS date_value, due_date - CURRENT_DATE AS days_left, created_at
         FROM cheques
@@ -1192,7 +1194,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
       `));
     }
     if (canSeeRentals) {
-      sources.push(pool.query(`
+      sources.push(sourceQuery(`
         SELECT 'rental_ending' AS type, r.id AS record_id, COALESCE(m.name, r.equipment) AS label,
           r.end_date::text AS date_value, r.end_date - CURRENT_DATE AS days_left, r.created_at
         FROM rentals r
@@ -1202,7 +1204,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
       `));
     }
     if (canSeeTransactions) {
-      sources.push(pool.query(`
+      sources.push(sourceQuery(`
         SELECT 'new_expense' AS type, id AS record_id, party AS label,
           reason AS detail, created_at
         FROM transactions
@@ -1212,7 +1214,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
       `, [member.clerk_user_id]));
     }
     if (canSeeField && canSeeAllField) {
-      sources.push(pool.query(`
+      sources.push(sourceQuery(`
         SELECT 'field_operation' AS type, id AS record_id, category AS label,
           site_name AS detail, created_by_name, created_at
         FROM field_expenses
@@ -1221,7 +1223,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
       `, [member.clerk_user_id]));
     }
     if (canReviewField && canSeeAllField) {
-      sources.push(pool.query(`
+      sources.push(sourceQuery(`
         SELECT 'field_review' AS type, id AS record_id, category AS label,
           site_name AS detail, created_by_name, created_at
         FROM field_expenses
@@ -1230,7 +1232,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
       `, [member.clerk_user_id]));
     }
     if (canSeeInventory) {
-      sources.push(pool.query(`
+      sources.push(sourceQuery(`
         SELECT 'low_inventory' AS type, id AS record_id, name AS label,
           remaining_quantity, quantity, created_at
         FROM inventory_items
@@ -1240,7 +1242,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
       `));
     }
     if (canSeeMachinery) {
-      sources.push(pool.query(`
+      sources.push(sourceQuery(`
         SELECT 'low_spare_part' AS type, id AS record_id, machinery_id AS machine_id, name AS label,
           stock_quantity, quantity, created_at
         FROM machinery_spare_parts
@@ -1249,7 +1251,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
       `));
     }
     if (canSeeDriverAlerts) {
-      sources.push(pool.query(`
+      sources.push(sourceQuery(`
         WITH current_month AS (
           SELECT date_trunc('month', CURRENT_DATE)::date AS month_start,
             (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month - 1 day')::date AS month_end
@@ -1349,7 +1351,7 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
         createdAt: row.created_at,
       };
     }).sort((a, b) => new Date(String(b.createdAt)).getTime() - new Date(String(a.createdAt)).getTime())
-      .slice(0, 100);
+      .slice(0, unlimited ? undefined : 100);
 
     const readRows = notifications.length
       ? await pool.query(
@@ -1359,11 +1361,15 @@ app.get("/api/notifications", authenticate, async (req: AuthenticatedRequest, re
       : { rows: [] as Array<{ notification_id: string }> };
     const readIds = new Set(readRows.rows.map((row) => row.notification_id));
     const items = notifications.map((item) => ({ ...item, read: readIds.has(item.id) }));
-    res.json({ items, unreadCount: items.filter((item) => !item.read).length });
+    return { items, unreadCount: items.filter((item) => !item.read).length };
   } catch (error) {
     console.error("Notification list failed:", error);
-    fail(res, 500, "تعذر تحميل الإشعارات.");
+    throw error;
   }
+}
+app.get("/api/notifications",authenticate,async(req:AuthenticatedRequest,res)=>{
+  try {res.json(await loadNotifications(req.member!));}
+  catch {fail(res,500,"تعذر تحميل الإشعارات.");}
 });
 
 app.post("/api/notifications/read", authenticate, async (req: AuthenticatedRequest, res) => {

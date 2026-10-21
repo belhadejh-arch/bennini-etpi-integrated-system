@@ -69,8 +69,9 @@ test("mounted native style references react to theme and language without remoun
     accent: { color: theme.colors.onAccent },
   });
   assert.equal(definitions.surface.backgroundColor, theme.palettes.light.surface);
-  assert.equal(definitions.text.fontSize, 14);
-  assert.ok(definitions.text.lineHeight >= 14 * 1.55);
+  // Slightly smaller Changa labels were explicitly requested; retain a readable floor.
+  assert.equal(definitions.text.fontSize, 13);
+  assert.ok(definitions.text.lineHeight >= 13 * 1.55);
   assert.equal(definitions.text.fontWeight, "500");
   theme.setActivePalette("dark");
   theme.setActiveLanguage("fr");

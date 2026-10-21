@@ -12,3 +12,4 @@
 - [Interface accessibility](interface-accessibility-policy.md) — readable text app-wide; Arabic/light defaults, optional French and dark/system per account, user data never translated.
 - [Portable dependencies](portable-dependencies.md) — inspect lockfile source hosts after package installation; external builders cannot use internal workspace URLs.
 - [Rental shift rules](rental-shift-policy.md) — inclusive shift days, persistent historical overrides, ongoing accrual and optional bulk exclusions; retain legacy billing.
+- [Branding and printing](brand-and-print-policy.md) — supplied BE identity, transparent dashboard logo, Changa, and functional complete RTL printing across business sections.

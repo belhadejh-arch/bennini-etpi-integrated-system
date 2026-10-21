@@ -300,7 +300,7 @@ function StatCard({
         <View style={[styles.statIcon, { backgroundColor: palette.bg }]}><Icon size={19} color={palette.fg} /></View>
         <ChevronLeft size={16} color="#A6B2C1" />
       </View>
-      <Text style={styles.statTitle}>{title}</Text>
+      <Text style={styles.statTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.9}>{title}</Text>
       <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
       {detail ? <Text style={styles.statDetail}>{detail}</Text> : null}
       <View style={[styles.statAccent, { backgroundColor: palette.fg }]} />

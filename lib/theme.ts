@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 export type ThemeMode = "light" | "dark";
+export const appFontFamily = "Changa";
 export const palettes = {
   light: {
     navy: "#183449", deepBlue: "#123C58", blue: "#174D6A", royal: "#245E7C",
@@ -101,9 +102,9 @@ export function makeStylesReactive<T extends StyleTree>(definitions: T): T {
         delete record.height;
       }
       const originalSize = record.fontSize;
-      const safeSize = Math.max(14, originalSize);
-      if (originalSize < 14) {
-        Object.defineProperty(record, "fontSize", { enumerable: true, configurable: false, get: () => Math.max(14, originalSize) });
+      const safeSize = Math.max(13, originalSize);
+      if (originalSize < 13) {
+        Object.defineProperty(record, "fontSize", { enumerable: true, configurable: false, get: () => Math.max(13, originalSize) });
       }
       if (typeof record.lineHeight !== "number" || record.lineHeight < safeSize * 1.55) {
         const originalLineHeight = record.lineHeight;

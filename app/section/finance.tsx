@@ -9,6 +9,7 @@ import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextIn
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
+import { PrintRecordButton } from "../components/PrintingProvider";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
@@ -537,6 +538,7 @@ export default function FinanceSection() {
                       <View style={styles.detailPanel}>
                         <Text style={styles.detailTitle}>تفاصيل العملية</Text>
                         <RecordNotes entity="transaction" recordId={item.id} initialNotes={item.notes} editable={canEdit} />
+                        <PrintRecordButton report="finance" id={item.id} />
                         <Text style={styles.detailText}>المعرف: {item.id} · سجلها: {item.recorded_by_name}</Text>
                         <View style={styles.attachmentList}>
                           {item.attachments?.length ? item.attachments.map((attachment) => (

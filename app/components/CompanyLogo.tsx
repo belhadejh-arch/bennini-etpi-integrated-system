@@ -1,5 +1,4 @@
 import { Image, View } from "react-native";
-import { useAuth } from "../../lib/auth";
 
 type CompanyLogoProps = {
   width: number;
@@ -8,27 +7,16 @@ type CompanyLogoProps = {
 };
 
 export function CompanyLogo({ width, height, framed = false }: CompanyLogoProps) {
-  const { isDark } = useAuth();
   return (
     <View
       accessibilityLabel="شعار شركة BENNINI ETPI"
-      style={[
-        (framed || isDark) && {
-          width: width + 10,
-          height: height + 8,
-          paddingHorizontal: 5,
-          paddingVertical: 4,
-          borderRadius: 9,
-          backgroundColor: "#FFFFFF",
-          alignItems: "center",
-          justifyContent: "center",
-        },
-      ]}
+      style={{ width: width + (framed ? 8 : 0), height: height + (framed ? 8 : 0), alignItems: "center", justifyContent: "center" }}
     >
       <Image
-        source={require("../assets/company-logo.png")}
+        source={require("../assets/brand-mark-cropped.png")}
         resizeMode="contain"
         style={{ width, height }}
+        accessible={false}
         accessibilityLabel="شعار شركة BENNINI ETPI"
       />
     </View>

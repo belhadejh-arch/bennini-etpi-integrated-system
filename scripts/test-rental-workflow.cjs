@@ -16,7 +16,7 @@ async function main() {
   const db = new pg.Client({ connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL });
   const memberId = `test-rental-${randomUUID()}`;
   const profile = mkdtempSync(path.join(os.tmpdir(), "rental-browser-"));
-  let browser, ws, machineId;
+  let browser, ws, machineId, closeBrowser;
   const rentalIds = [];
   await db.connect();
   try {
@@ -82,23 +82,30 @@ async function main() {
     const pending = new Map();
     ws.on("message", (raw) => {
       const message = JSON.parse(String(raw));
+      if(message.method==="Page.javascriptDialogOpening"){
+        ws.send(JSON.stringify({id:++seq,method:"Page.handleJavaScriptDialog",params:{accept:true},sessionId:message.sessionId}));
+        return;
+      }
       if (!message.id) return;
       const item = pending.get(message.id);
       if (!item) return;
       pending.delete(message.id);
+      clearTimeout(item.timer);
       if (message.error) item.reject(new Error(message.error.message));
       else item.resolve(message.result);
     });
     const call = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
       const id = ++seq;
-      pending.set(id, { resolve, reject });
+      const timer=setTimeout(()=>{pending.delete(id);reject(new Error(`Browser operation timed out: ${method}`));},15000);
+      pending.set(id, { resolve, reject,timer });
       ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
     });
+    closeBrowser=()=>call("Browser.close");
     const target = await call("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await call("Target.attachToTarget", { targetId: target.targetId, flatten: true });
     const cdp = (method, params) => call(method, params, sessionId);
     const evaluate = async (expression) => {
-      const result = await cdp("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+      const result = await cdp("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true,userGesture:true });
       if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
       return result.result.value;
     };
@@ -145,15 +152,51 @@ async function main() {
       assert.ok(await evaluate(`document.documentElement.scrollWidth <= window.innerWidth + 1`), `No horizontal overflow at ${width}px`);
     }
     console.log("Signed-in browser: daily custom edit, save/reopen and responsive widths 375/768/1366 passed.");
+    await clickText("إغلاق النموذج");
+    await wait(`document.body.innerText.includes("تعديل البيانات")`);
+    assert.ok(await evaluate(`(() => {
+        const label=[...document.querySelectorAll('div,span')].find(e=>e.textContent==='إدارة الكراء'&&e.children.length===0);
+      return !!label && getComputedStyle(label).fontFamily.includes('Changa');
+    })()`),"Changa is applied to rendered text");
+    await evaluate(`(()=>{const buttons=[...document.querySelectorAll('[aria-label="طباعة"]')];buttons[buttons.length-1].click()})()`);
+    await wait(`document.body.innerText.includes("الطباعة والتقارير")`);
+    await wait(`(() => {
+      const button=[...document.querySelectorAll('[role="button"]')].find(e=>e.textContent==="معاينة والطباعة");
+      return !!button && button.getAttribute("aria-disabled")!=="true" && !button.hasAttribute("disabled");
+    })()`);
+    await clickText("معاينة والطباعة");
+    let previewTarget;
+    for(let i=0;i<100;i++){
+      const targets=await call("Target.getTargets");
+      previewTarget=targets.targetInfos.find((info)=>info.type==="page"&&info.targetId!==target.targetId&&info.title.includes("عقود الكراء"));
+      if(previewTarget)break;
+      await new Promise((r)=>setTimeout(r,100));
+    }
+    assert.ok(previewTarget,"Real print preview opens");
+    const previewSession=await call("Target.attachToTarget",{targetId:previewTarget.targetId,flatten:true});
+    const previewCall=(method,params)=>call(method,params,previewSession.sessionId);
+    const content=await previewCall("Runtime.evaluate",{expression:"document.body.innerText",returnByValue:true});
+    assert.ok(content.result.value.includes("الورديات اليومية"));
+    assert.ok(content.result.value.includes("2026-10-05"));
+    assert.ok(content.result.value.includes("1.75")||content.result.value.includes("١٫٧٥"));
+    await previewCall("Runtime.evaluate",{expression:"document.fonts.ready",awaitPromise:true});
+    const pdf=await previewCall("Page.printToPDF",{printBackground:true,preferCSSPageSize:true});
+    const pdfBuffer=Buffer.from(pdf.data,"base64");
+    assert.ok(pdfBuffer.subarray(0,5).toString()==="%PDF-");
+    assert.ok(pdfBuffer.length>10000,"PDF contains embedded fonts and logo");
+    await call("Target.closeTarget",{targetId:previewTarget.targetId});
+    console.log("Printing browser: selected rental preview includes daily shifts; a real PDF was generated successfully.");
   } finally {
-    if (ws) ws.close();
-    if (browser) { browser.kill("SIGTERM"); await new Promise((r) => browser.once("exit", r)); }
-    rmSync(profile, { recursive: true, force: true });
     if (rentalIds.length) await db.query("DELETE FROM rentals WHERE id=ANY($1::bigint[])", [rentalIds]);
     if (machineId) await db.query("DELETE FROM machinery WHERE id=$1", [machineId]);
     await db.query("DELETE FROM audit_logs WHERE performed_by_id=$1", [memberId]);
     await db.query("DELETE FROM members WHERE clerk_user_id=$1", [memberId]);
     await db.end();
+    try{await closeBrowser?.();}catch{}
+    if (ws) ws.close();
+    if (browser && browser.exitCode===null) { browser.kill("SIGTERM"); await new Promise((r) => browser.once("exit", r)); }
+    try {rmSync(profile, { recursive: true, force: true, maxRetries:10,retryDelay:200 });}
+    catch {console.warn("Temporary browser profile could not be removed immediately.");}
   }
 }
-main().catch((error) => { console.error(error.message); process.exitCode = 1; });
+main().catch((error) => { console.error(error.stack); process.exitCode = 1; });

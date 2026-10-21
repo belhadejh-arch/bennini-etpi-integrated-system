@@ -1,13 +1,14 @@
 import type { ReactNode } from "react";
-import { useRouter } from "expo-router";
+import { useRouter, usePathname } from "expo-router";
 import { Pressable, Text, View, useWindowDimensions } from "react-native";
-import { Bell, Menu } from "lucide-react-native";
+import { Bell, Menu, Printer } from "lucide-react-native";
 import { colors, makeStylesReactive } from "../../lib/theme";
 import { CompanyLogo } from "./CompanyLogo";
 import { useSidebarAction } from "./AppSidebar";
 import { useNotificationBadge } from "./NotificationContext";
 import { useAuth } from "../../lib/auth";
 import { translate } from "../../lib/localization";
+import { usePrinting } from "./PrintingProvider";
 
 type AppHeaderProps = {
   title: string;
@@ -47,11 +48,14 @@ export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
   const sidebar = useSidebarAction();
   const router = useRouter();
   const { unreadCount } = useNotificationBadge();
-  const logoWidth = compact ? 58 : 68;
-  const logoHeight = compact ? 31 : 37;
+  const {openPrint}=usePrinting();
+  const pathname=usePathname();
+  const report=pathname.startsWith("/section/")?pathname.split("/")[2]:pathname==="/members"?"users":pathname==="/notifications"?"notifications":pathname==="/settings"?"profile":"dashboard";
+  const logoWidth = compact ? 34 : 54;
+  const logoHeight = compact ? 34 : 44;
 
   return (
-    <View style={[styles.header, { backgroundColor: colors.action, direction: language === "ar" ? "rtl" : "ltr" }]}>
+    <View style={[styles.header, { paddingHorizontal:compact?10:18,gap:compact?5:12,backgroundColor: colors.action, direction: language === "ar" ? "rtl" : "ltr" }]}>
       <View style={styles.actionSlot}>
         {sidebar?.visible ? (
           <HeaderAction label={translate("فتح قائمة الأقسام", language)} onPress={sidebar.toggle}>
@@ -59,12 +63,13 @@ export function AppHeader({ title, leftAction, rightAction }: AppHeaderProps) {
           </HeaderAction>
         ) : leftAction}
       </View>
-      <View style={styles.brand}>
-        <CompanyLogo width={logoWidth} height={logoHeight} framed />
-        <Text style={[styles.title, { textAlign: language === "ar" ? "right" : "left" }]}>{title}</Text>
+      <View style={[styles.brand,{gap:compact?5:12}]}>
+        <CompanyLogo width={logoWidth} height={logoHeight} />
+        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={[styles.title, { textAlign: language === "ar" ? "right" : "left" }]}>{title}</Text>
       </View>
       <View style={[styles.actionSlot, styles.rightActions]}>
         {rightAction}
+        <HeaderAction label="طباعة" onPress={()=>openPrint({report})}><Printer size={18} color={colors.lightBeige}/></HeaderAction>
         <View style={styles.notificationWrap}>
           <HeaderAction label={`${language === "ar" ? "الإشعارات" : "Notifications"}${unreadCount ? `, ${unreadCount}` : ""}`} onPress={() => router.push("/notifications")}>
             <Bell size={19} color={colors.lightBeige} />

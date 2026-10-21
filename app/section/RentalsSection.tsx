@@ -21,6 +21,7 @@ import { canUploadFiles, hasPermission } from "../../shared/access";
 import { translate, translateTemplate } from "../../lib/localization";
 import RentalDatePicker from "../components/RentalDatePicker";
 import RentalShiftDays from "../components/RentalShiftDays";
+import { PrintRecordButton } from "../components/PrintingProvider";
 import { rentalCalculation, rentalToday, validRentalDate } from "../../shared/rental-calculation";
 import type { DailyShift, RatePeriod } from "../../shared/rental-calculation";
 
@@ -705,6 +706,7 @@ export default function RentalsSection() {
                   ) : null}
                 </View>
                 <RecordNotes entity="rental" recordId={rental.id} initialNotes={rental.notes} editable={canEdit} />
+                <PrintRecordButton report="rentals" id={rental.id} />
                 {rental.attachments.length ? (
                   <View style={styles.attachmentBlock}>
                     <Text style={styles.fieldLabel}>العقد والوثائق</Text>

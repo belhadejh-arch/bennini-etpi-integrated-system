@@ -3,9 +3,9 @@ name: Interface language and readability
 description: User requirements for app-wide readability, bilingual display and opt-in appearance.
 ---
 
-Apply readability improvements throughout the app, not only field review: secondary text should be at least 14px, no text below 12px, medium weight, comfortable line spacing, AA text contrast, and support for the phone's font size.
+Apply readability improvements throughout the app, not only field review. Use Changa, medium weight, comfortable line spacing, AA text contrast, and support for the phone's font size. Keep compact labels readable (13px minimum); fit short dashboard labels on one line without truncating financial values or user notes.
 
-**Why:** The user explicitly reported small metadata, dates, empty-state text and placeholders as hard to read on phones.
+**Why:** The user previously reported small text as hard to read, then explicitly requested Changa and a slight font reduction for single-line labels. The newer request should not undo general readability.
 
 **How to apply:** Check both themes, large system text and Arabic/French layouts when introducing screens. Avoid controls with fixed heights that clip scaled text.
 

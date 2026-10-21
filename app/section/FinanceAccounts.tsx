@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
+import { PrintRecordButton } from "../components/PrintingProvider";
 import { apiRequest, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
@@ -257,6 +258,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                       </View>
                       <Text style={heading}>{detail.account.name}</Text>
                     </View>
+                    <PrintRecordButton report={kind === "customer" ? "customers" : "partners"} id={detail.account.id} />
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7 }}>
                       <Summary label="الهاتف" value={detail.account.phone || "—"} />
                       <Summary label="العنوان" value={detail.account.address || "—"} />
@@ -293,6 +295,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                       <Text style={heading}>فواتير الزبون والشيكات المرتبطة</Text>
                       {detail.invoices.length ? detail.invoices.map((invoice) => (
                         <View key={invoice.id} style={line}>
+                          <PrintRecordButton report="customerInvoices" id={invoice.id} />
                           <View style={{ flex: 1 }}>
                             <Text style={value}>فاتورة {invoice.invoice_number} · {formatDzd(Number(invoice.amount))}</Text>
                             <Text style={hint}>{formatDate(invoice.invoice_date)} · {invoice.paid ? "مدفوعة" : "غير مدفوعة"}</Text>
@@ -307,6 +310,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                     <Text style={heading}>{kind === "partner" ? "الإيداعات والسحوبات والفوائد" : "الحركة المالية"}</Text>
                     {detail.transactions.length ? detail.transactions.map((transaction) => (
                       <View key={transaction.id} style={line}>
+                        <PrintRecordButton report="finance" id={transaction.id} />
                         <View style={{ flex: 1, gap: 4 }}>
                           <Text style={value}>{transaction.type === "income" ? "إيداع / دخل" : "سحب / مصروف"} · {formatDzd(Number(transaction.amount))}</Text>
                           <Text style={hint}>{formatDate(transaction.date)} · {transaction.reason} · {transaction.recorded_by_name || "—"} · {translate(transaction.payment_method, language)}</Text>

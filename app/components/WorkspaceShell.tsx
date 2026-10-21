@@ -6,6 +6,7 @@ import { colors } from "../../lib/theme";
 import { AppSidebar, SidebarBackdrop, SidebarProvider, type SidebarEntry } from "./AppSidebar";
 import { BottomNavigation } from "./BottomNavigation";
 import { NotificationProvider } from "./NotificationContext";
+import { PrintingProvider } from "./PrintingProvider";
 
 export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -56,7 +57,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
   const canShowSidebar = !!visibleMember && !isAuthRoute;
 
   return (
-    <NotificationProvider>
+    <PrintingProvider><NotificationProvider>
       <SidebarProvider value={sidebarAction}>
         <View style={[styles.shell, canShowSidebar && !compact && styles.desktopShell, { backgroundColor: colors.background, direction: language === "ar" ? "rtl" : "ltr" }]}>
           {canShowSidebar && !compact ? (
@@ -72,7 +73,7 @@ export function WorkspaceShell({ children }: { children: React.ReactNode }) {
         </View>
         {canShowSidebar && compact ? <BottomNavigation member={visibleMember!} activeId={activeId} /> : null}
       </SidebarProvider>
-    </NotificationProvider>
+    </NotificationProvider></PrintingProvider>
   );
 }
 

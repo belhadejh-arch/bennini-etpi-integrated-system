@@ -1,14 +1,38 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
+import { useColorScheme, View } from "react-native";
+import { useFonts } from "expo-font";
+import * as SplashScreen from "expo-splash-screen";
 import { AuthProvider } from "../lib/auth";
 import { WorkspaceShell } from "./components/WorkspaceShell";
 import { useAuth } from "../lib/auth";
 import { palettes } from "../lib/theme";
-import { useColorScheme } from "react-native";
+import { StartupSplash } from "./components/StartupSplash";
+
+void SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   return (
     <AuthProvider>
+      <AppShell />
+    </AuthProvider>
+  );
+}
+
+function AppShell() {
+  const { isLoaded } = useAuth();
+  const [fontsLoaded, fontError] = useFonts({ Changa: require("./assets/fonts/Changa.ttf") });
+
+  useEffect(() => {
+    if (!fontsLoaded && !fontError) return;
+    void SplashScreen.hideAsync();
+  }, [fontsLoaded, fontError]);
+
+  if ((!fontsLoaded && !fontError) || !isLoaded) return <StartupSplash />;
+
+  return (
+    <View style={{ flex: 1, minHeight: "100%" }}>
       <AdaptiveStatusBar />
       <WorkspaceShell>
         <Stack screenOptions={{ headerShown: false, animation: "fade" }}>
@@ -21,7 +45,7 @@ export default function RootLayout() {
           <Stack.Screen name="notifications" />
         </Stack>
       </WorkspaceShell>
-    </AuthProvider>
+    </View>
   );
 }
 
