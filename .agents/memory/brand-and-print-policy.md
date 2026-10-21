@@ -14,3 +14,9 @@ Printing must be functional across business sections, support individual/selecte
 **Why:** The user explicitly rejected a merely decorative print button and required accurate, complete final documents.
 
 **How to apply:** Apply the same account permissions as the on-screen data; never print only the currently loaded page or silently crop wide tables. Native printer availability depends on the device's system printing service.
+
+The mobile WebView wrapper is generated using **Median.co**, as identified by the user. PDF preview and printing must work there, not just in a desktop browser.
+
+**Why:** Median's native downloader cannot consume a page-local Blob URL or forward the site's Bearer header. Its documented native PDF viewer provides the Print action.
+
+**How to apply:** Use in-page PDF rendering plus the documented Median native viewer/download integration with short-lived document-scoped URLs. Do not promise physical-device verification based only on a browser simulation.

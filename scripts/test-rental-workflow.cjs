@@ -5,7 +5,7 @@
 const assert = require("node:assert/strict");
 const { createHmac, randomBytes, randomInt, randomUUID, scryptSync } = require("node:crypto");
 const { spawn } = require("node:child_process");
-const { mkdtempSync, rmSync } = require("node:fs");
+const { mkdtempSync, rmSync,writeFileSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const pg = require("pg");
@@ -106,11 +106,11 @@ async function main() {
     const cdp = (method, params) => call(method, params, sessionId);
     const evaluate = async (expression) => {
       const result = await cdp("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true,userGesture:true });
-      if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
+      if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description??result.exceptionDetails.text);
       return result.result.value;
     };
     const wait = async (expression) => {
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < 450; i++) {
         if (await evaluate(expression)) return;
         await new Promise((r) => setTimeout(r, 100));
       }
@@ -165,27 +165,53 @@ async function main() {
       return !!button && button.getAttribute("aria-disabled")!=="true" && !button.hasAttribute("disabled");
     })()`);
     await clickText("معاينة والطباعة");
-    let previewTarget;
-    for(let i=0;i<100;i++){
-      const targets=await call("Target.getTargets");
-      previewTarget=targets.targetInfos.find((info)=>info.type==="page"&&info.targetId!==target.targetId&&info.title.includes("عقود الكراء"));
-      if(previewTarget)break;
-      await new Promise((r)=>setTimeout(r,100));
+    await wait(`!!document.querySelector('[role="dialog"][aria-label="معاينة المستند"] canvas')?.width &&
+      !document.body.innerText.includes("جارٍ تحميل المستند...")&&!document.body.innerText.includes("جارٍ عرض الصفحة")`);
+    const fileUrl=await evaluate(`performance.getEntriesByType('resource').map(x=>x.name).find(x=>x.includes('/api/document-files/'))`);
+    assert.ok(fileUrl,"The inline viewer fetches an actual PDF");
+    const pdfInfo=await evaluate(`(async()=>{const r=await fetch(${JSON.stringify(fileUrl)});const b=await r.arrayBuffer();
+      const pdf=await window.benniniPdfJs.getDocument({url:${JSON.stringify(fileUrl)},isEvalSupported:false}).promise;
+      let text="";for(let p=1;p<=pdf.numPages;p++){text+=(await (await pdf.getPage(p)).getTextContent()).items.map(i=>i.str||"").join(" ")}
+      const info={status:r.status,size:b.byteLength,magic:String.fromCharCode(...new Uint8Array(b).slice(0,5)),text,pages:pdf.numPages};
+      await pdf.destroy();return info;})()`);
+    assert.equal(pdfInfo.status,200);assert.equal(pdfInfo.magic,"%PDF-");assert.ok(pdfInfo.size>10000);
+    assert.ok(pdfInfo.text.includes("2026-10-05"));
+    assert.ok(pdfInfo.text.includes("1.75")||pdfInfo.text.includes("١٫٧٥"));
+    for(const width of [375,768,1366]){
+      await cdp("Emulation.setDeviceMetricsOverride",{width,height:900,deviceScaleFactor:1,mobile:width<600});
+      await new Promise((resolve)=>setTimeout(resolve,300));
+      assert.ok(await evaluate("document.documentElement.scrollWidth<=innerWidth+1"),`PDF layout at ${width}px`);
+      if(width===375){
+        const image=await cdp("Page.captureScreenshot",{format:"png"});
+        writeFileSync("/tmp/bennini-pdf-preview-mobile.png",Buffer.from(image.data,"base64"));
+      }
     }
-    assert.ok(previewTarget,"Real print preview opens");
-    const previewSession=await call("Target.attachToTarget",{targetId:previewTarget.targetId,flatten:true});
-    const previewCall=(method,params)=>call(method,params,previewSession.sessionId);
-    const content=await previewCall("Runtime.evaluate",{expression:"document.body.innerText",returnByValue:true});
-    assert.ok(content.result.value.includes("الورديات اليومية"));
-    assert.ok(content.result.value.includes("2026-10-05"));
-    assert.ok(content.result.value.includes("1.75")||content.result.value.includes("١٫٧٥"));
-    await previewCall("Runtime.evaluate",{expression:"document.fonts.ready",awaitPromise:true});
-    const pdf=await previewCall("Page.printToPDF",{printBackground:true,preferCSSPageSize:true});
-    const pdfBuffer=Buffer.from(pdf.data,"base64");
-    assert.ok(pdfBuffer.subarray(0,5).toString()==="%PDF-");
-    assert.ok(pdfBuffer.length>10000,"PDF contains embedded fonts and logo");
-    await call("Target.closeTarget",{targetId:previewTarget.targetId});
-    console.log("Printing browser: selected rental preview includes daily shifts; a real PDF was generated successfully.");
+    await cdp("Network.setUserAgentOverride",{userAgent:"Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 Chrome/138.0 Mobile Safari/537.36 MedianAndroid/1.0 median"});
+    await evaluate(`window.__medianCalls=[];window.median={share:{downloadFile:(options)=>window.__medianCalls.push(options)}}`);
+    await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"] button[aria-label="طباعة أو فتح"]').click()`);
+    await wait("window.__medianCalls.length===1");
+    assert.deepEqual(await evaluate("window.__medianCalls.map(x=>({open:x.open,https:x.url.startsWith('https://'),blob:x.url.startsWith('blob:')}))"),
+      [{open:true,https:true,blob:false}]);
+    await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"] button[aria-label="تنزيل"]').click()`);
+    await wait("window.__medianCalls.length===2");
+    assert.equal(await evaluate("window.__medianCalls[1].open"),false);
+    const formData=new FormData();
+    formData.append("files",new Blob([Buffer.from(await (await fetch(fileUrl)).arrayBuffer())],{type:"application/pdf"}),"verified.pdf");
+    const uploaded=await fetch(`${base}/api/rentals/${id}/attachments`,{
+      method:"POST",headers:{Authorization:`Bearer ${token}`},body:formData});
+    assert.equal(uploaded.status,201,"Upload a real PDF attachment");
+    await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"] button[aria-label="إغلاق"]').click()`);
+    await wait(`document.body.innerText.includes("الطباعة والتقارير")`);
+    await evaluate(`document.querySelector('[aria-label="إغلاق"]').click()`);
+    await cdp("Page.navigate",{url:`${base}/section/rentals?focusId=${id}`});
+    await wait(`!!document.querySelector('[aria-label="فتح verified.pdf"]')`);
+    await evaluate(`document.querySelector('[aria-label="فتح verified.pdf"]').click()`);
+    await wait(`!!document.querySelector('[role="dialog"][aria-label="معاينة المستند"] canvas')?.width &&
+      !document.body.innerText.includes("جارٍ تحميل المستند...")&&!document.body.innerText.includes("جارٍ عرض الصفحة")`);
+    assert.ok(await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"]').textContent.includes("verified.pdf")`),
+      "An existing PDF attachment uses the same in-app renderer");
+    assert.equal((await call("Target.getTargets")).targetInfos.filter((info)=>info.type==="page"&&info.title.includes("عقود الكراء")).length,0,"No popup is opened");
+    console.log("PDF: saved shifts, inline rendering at 375/768/1366px, existing PDF attachment preview, and Median open/download bridge simulation passed.");
   } finally {
     if (rentalIds.length) await db.query("DELETE FROM rentals WHERE id=ANY($1::bigint[])", [rentalIds]);
     if (machineId) await db.query("DELETE FROM machinery WHERE id=$1", [machineId]);

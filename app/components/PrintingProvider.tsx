@@ -5,12 +5,16 @@ import { useAuth } from "../../lib/auth";
 import { apiRequest } from "../../lib/api";
 import { colors } from "../../lib/theme";
 import { printLabels, type PrintOptions, type PrintReport } from "../../shared/printing";
-import { openPrintWindow, outputPrintHtml } from "../../lib/printing";
+import { outputPrintHtml } from "../../lib/printing";
+import {openDeviceDocument,type DocumentFile} from "../../lib/document-bridge";
+import DocumentPreview from "./DocumentPreview";
 import { translate } from "../../lib/localization";
 import RentalDatePicker from "./RentalDatePicker";
 
 type PrintRequest = { report?:string; ids?:string[]; accountId?:number };
-const PrintingContext=createContext<{openPrint:(request?:PrintRequest)=>void}>({openPrint:()=>{}});
+const PrintingContext=createContext<{openPrint:(request?:PrintRequest)=>void;openAttachment:(url:string,download:boolean)=>Promise<void>}>({
+  openPrint:()=>{},openAttachment:async()=>{throw new Error("معاينة المستند غير متاحة.")},
+});
 export const usePrinting=()=>useContext(PrintingContext);
 export function PrintRecordButton({report,id,accountId}:{report:string;id?:string|number;accountId?:number}) {
   const {openPrint}=usePrinting();
@@ -36,12 +40,18 @@ export function PrintingProvider({children}:{children:ReactNode}) {
   const [error,setError]=useState("");
   const [paper,setPaper]=useState<PrintOptions["paper"]>("A4");
   const [landscape,setLandscape]=useState(false);
+  const [documentFile,setDocumentFile]=useState<DocumentFile|null>(null);
   const t=(text:string)=>translate(text,language);
   const openPrint=(next:PrintRequest={})=>{
     setRequest(next);setKey(next.report??"dashboard");setSelected(next.ids??[]);
     setScope(next.ids?.length ? "selected":"all");setSearch("");setFrom("");setTo("");setPage(0);setError("");setReport(null);
   };
-  useEffect(()=>{if(!member){setRequest(null);setReport(null);setSelected([]);}},[member]);
+  useEffect(()=>{if(!member){setRequest(null);setReport(null);setSelected([]);setDocumentFile(null);}},[member]);
+  const openAttachment=async(url:string,download:boolean)=>{
+    const file=await apiRequest<DocumentFile>("/attachment-document",getToken,{method:"POST",body:JSON.stringify({url})});
+    if(download)await openDeviceDocument(file,true);
+    else setDocumentFile(file);
+  };
   useEffect(()=>{
     if(!request||!member) return;
     let active=true;
@@ -71,24 +81,27 @@ export function PrintingProvider({children}:{children:ReactNode}) {
   const hasFilter=!!(search.trim()||from||to);
   const count=scope==="selected"?validSelected.length:filtered.length;
   const preview=async(pdf:boolean)=>{
-    let windowRef:Window|null=null;
     try {
       setError("");
-      if(Platform.OS==="web") windowRef=openPrintWindow();
       setBusy(true);
       const ids=scope==="selected"?validSelected:hasFilter?filtered.map((row)=>String(row.id)):undefined;
-      const result=await apiRequest<{html:string}>(`/print-preview/${key}`,getToken,{
-        method:"POST",body:JSON.stringify({paper,landscape,ids,accountId:request?.accountId}),
-      });
-      await outputPrintHtml(result.html,{paper,landscape},pdf,windowRef);
-    }catch(caught){windowRef?.close();setError(caught instanceof Error?caught.message:"تعذر إعداد مستند الطباعة.");}
+      const options={method:"POST",body:JSON.stringify({paper,landscape,ids,accountId:request?.accountId})};
+      if(Platform.OS==="web"){
+        const file=await apiRequest<DocumentFile>(`/print-document/${key}`,getToken,options);
+        setDocumentFile(file);
+        if(pdf)await openDeviceDocument(file,true);
+      }else{
+        const result=await apiRequest<{html:string}>(`/print-preview/${key}`,getToken,options);
+        await outputPrintHtml(result.html,{paper,landscape},pdf);
+      }
+    }catch(caught){setError(caught instanceof Error?caught.message:"تعذر إعداد مستند الطباعة.");}
     finally{setBusy(false);}
   };
   const chip=(label:string,active:boolean,onPress:()=>void)=><Pressable key={label} accessibilityRole="button" accessibilityState={{selected:active}} onPress={onPress}
     style={{minHeight:42,paddingHorizontal:12,paddingVertical:8,borderRadius:9,borderWidth:1,borderColor:active?colors.blue:colors.border,backgroundColor:active?colors.blueSoft:colors.surface,justifyContent:"center"}}>
     <Text style={{color:colors.ink,fontSize:13,fontWeight:active?"700":"500"}}>{t(label)}</Text></Pressable>;
-  return <PrintingContext.Provider value={{openPrint}}>{children}
-    <Modal visible={!!request} animationType="slide" onRequestClose={()=>!busy&&setRequest(null)}>
+  return <PrintingContext.Provider value={{openPrint,openAttachment}}>{children}
+    <Modal visible={!!request&&!documentFile} animationType="slide" onRequestClose={()=>!busy&&setRequest(null)}>
       <View style={{flex:1,backgroundColor:colors.background,direction:language==="ar"?"rtl":"ltr"}}>
         <View style={{padding:16,flexDirection:"row",alignItems:"center",justifyContent:"space-between",gap:12}}>
           <Text style={{fontSize:20,color:colors.navy,fontWeight:"800"}}>الطباعة والتقارير</Text>
@@ -140,5 +153,7 @@ export function PrintingProvider({children}:{children:ReactNode}) {
         </View>
       </View>
     </Modal>
+    {documentFile&&Platform.OS==="web"?<DocumentPreview document={documentFile} onClose={()=>setDocumentFile(null)}
+      onDownload={()=>openDeviceDocument(documentFile,true)} onNativeOpen={()=>openDeviceDocument(documentFile)}/>:null}
   </PrintingContext.Provider>;
 }

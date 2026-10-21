@@ -5,6 +5,8 @@ import { FinanceError, positiveId } from "./finance-data";
 import { availablePrintReports, loadPrintReport, addPrintDetails, type NotificationPrintLoader } from "./print-data";
 import { renderPrintHtml } from "./print-html";
 import type { PrintOptions } from "../shared/printing";
+import {renderPdf} from "./pdf-renderer";
+import {createDocumentFile} from "./document-files";
 
 export function registerPrintRoutes(app: Express, pool: pg.Pool, authenticate: RequestHandler,notifications?:NotificationPrintLoader) {
   app.get("/api/print-reports",authenticate,(req:AuthenticatedRequest,res) => {
@@ -15,7 +17,7 @@ export function registerPrintRoutes(app: Express, pool: pg.Pool, authenticate: R
       res.json(await loadPrintReport(pool,req.member!,String(req.params.report),positiveId(req.query.accountId) ?? undefined,notifications));
     } catch(error) { fail(res,error); }
   });
-  app.post("/api/print-preview/:report",authenticate,async(req:AuthenticatedRequest,res) => {
+  const preview=async(req:AuthenticatedRequest,res:import("express").Response,pdf:boolean)=>{
     try {
       const {paper="A4",landscape=false,ids,accountId} = req.body ?? {};
       if (!["A4","A3","Letter"].includes(paper) || typeof landscape!=="boolean" ||
@@ -29,9 +31,17 @@ export function registerPrintRoutes(app: Express, pool: pg.Pool, authenticate: R
         if(report.rows.length!==selected.size) throw new FinanceError(404,"بعض السجلات المحددة غير موجودة أو غير متاحة لك.");
       }
       await addPrintDetails(pool,report,req.member!);
-      res.json({html:renderPrintHtml(report,{paper,landscape,ids} as PrintOptions),count:report.rows.length});
+      const options={paper,landscape,ids} as PrintOptions;
+      const html=renderPrintHtml(report,options);
+      res.setHeader("Cache-Control","no-store");
+      if(pdf){
+        const bytes=await renderPdf(html,options);
+        res.json({...await createDocumentFile(pool,req.member!,bytes,`${report.title}.pdf`),count:report.rows.length});
+      }else res.json({html,count:report.rows.length});
     }catch(error){ fail(res,error); }
-  });
+  };
+  app.post("/api/print-preview/:report",authenticate,(req,res)=>void preview(req,res,false));
+  app.post("/api/print-document/:report",authenticate,(req,res)=>void preview(req,res,true));
 }
 function fail(res: import("express").Response,error:unknown) {
   if(error instanceof FinanceError) return res.status(error.status).json({error:error.message});

@@ -7,6 +7,8 @@ import { ActivityIndicator, Alert, Platform, Pressable, Text, View } from "react
 import { apiRequest, apiUrl } from "../../lib/api";
 import { colors, makeStylesReactive } from "../../lib/theme";
 import type { SectionId } from "../../shared/sections";
+import {usePrinting} from "./PrintingProvider";
+import {isMedianApp} from "../../lib/document-bridge";
 
 export type AttachmentFile = {
   id: number;
@@ -29,10 +31,17 @@ export default function AttachmentActions({
   onDeleted: (id: number) => void;
 }) {
   const { getToken } = useAuth();
+  const {openAttachment}=usePrinting();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const openOrDownload = async (action: "open" | "download") => {
+    if(Platform.OS==="web"&&(attachment.mime_type==="application/pdf"||action==="download"&&isMedianApp())){
+      try{setBusy(true);setError("");await openAttachment(url,action==="download");}
+      catch(caught){setError(caught instanceof Error?caught.message:"تعذر فتح الملف.");}
+      finally{setBusy(false);}
+      return;
+    }
     let openedWindow: Window | null = null;
     try {
       setBusy(true);

@@ -25,6 +25,7 @@ import { retryDatabaseRead } from "./read-recovery";
 import { memberLookupQuery, memberReadinessQuery } from "./member-queries";
 import { validRental, openRentalRefresher } from "./rental-data";
 import { registerPrintRoutes } from "./print-routes";
+import {registerDocumentFiles} from "./document-files";
 import { FinanceError, prepareFinanceSchema, positiveId, ensureCustomerInvoice, synchronizeChequeInvoices, resolveTransactionAccount } from "./finance-data";
 import { allSectionIds, type SectionId } from "../shared/sections";
 import {
@@ -388,7 +389,9 @@ async function authenticate(req: AuthenticatedRequest, res: Response, next: Next
       );
       const readNotification = req.method === "POST" && req.path === "/api/notifications/read";
       const ownPreferences = req.method === "PATCH" && req.path === "/api/me/preferences";
-      if (!ownRead && !readNotification && !ownPreferences) return fail(res, 403, "حساب الشريك مخصص للاطلاع على حساباته فقط.");
+      const ownDocuments = req.method==="GET"&&(/^\/api\/print-data\/[a-zA-Z]+$/.test(req.path)||req.path==="/api/print-reports")||
+        req.method==="POST"&&(/^\/api\/print-(preview|document)\/[a-zA-Z]+$/.test(req.path)||req.path==="/api/attachment-document");
+      if (!ownRead && !readNotification && !ownPreferences&&!ownDocuments) return fail(res, 403, "حساب الشريك مخصص للاطلاع على حساباته فقط.");
     }
     next();
   } catch (error) {
@@ -1162,6 +1165,16 @@ app.get("/api/me", async (req: AuthenticatedRequest, res) => {
 
 registerPreferencesRoutes(app, pool, authenticate);
 registerPrintRoutes(app, pool, authenticate, async(member)=>(await loadNotifications(member,true)).items);
+registerDocumentFiles(app,pool,authenticate);
+app.get("/pdf-assets/pdf.worker.min.mjs",(_req,res)=>res.sendFile(path.resolve("node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs")));
+app.get("/pdf-assets/pdf.mjs",(_req,res)=>res.sendFile(path.resolve("node_modules/pdfjs-dist/legacy/build/pdf.mjs")));
+app.get("/pdf-assets/viewer-loader.mjs",(_req,res)=>{
+  res.type("application/javascript").setHeader("Cache-Control","no-cache");
+  res.send('import * as pdfjs from "/pdf-assets/pdf.mjs"; window.benniniPdfJs=pdfjs;');
+});
+for(const directory of ["cmaps","standard_fonts","wasm"]){
+  app.use(`/pdf-assets/${directory}`,express.static(path.resolve("node_modules/pdfjs-dist",directory),{immutable:true,maxAge:"1y",index:false}));
+}
 
 async function loadNotifications(member: Member, unlimited=false) {
   const sourceQuery = (sql:string,values?:unknown[]) => pool.query(unlimited?sql.replace(/\bLIMIT \d+\b/g,""):sql,values);

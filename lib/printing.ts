@@ -3,21 +3,8 @@ import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import type { PrintOptions } from "../shared/printing";
 
-export function openPrintWindow() {
-  if (Platform.OS !== "web") return null;
-  const preview=window.open("","_blank");
-  if(!preview) throw new Error("اسمح بفتح نافذة المعاينة من إعدادات المتصفح.");
-  preview.document.write('<!doctype html><html dir="rtl"><meta charset="utf-8"><title>BENNINI ETPI</title><body style="font-family:sans-serif;padding:30px">جارٍ إعداد معاينة الطباعة…</body></html>');
-  return preview;
-}
-
-export async function outputPrintHtml(html:string, options:PrintOptions, pdf:boolean, preview:Window|null) {
-  if(Platform.OS==="web") {
-    if(!preview) throw new Error("تعذر فتح نافذة المعاينة.");
-    preview.document.open(); preview.document.write(html); preview.document.close();
-    preview.focus();
-    return;
-  }
+export async function outputPrintHtml(html:string, options:PrintOptions, pdf:boolean) {
+  if(Platform.OS==="web")throw new Error("استخدم معاينة PDF داخل التطبيق.");
   if(pdf) {
     const paper=options.paper==="A3" ? [842,1191] : options.paper==="Letter" ? [612,792] : [595,842];
     const [width,height]=options.landscape ? [paper[1],paper[0]] : paper;
