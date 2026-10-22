@@ -27,6 +27,7 @@ import { validRental, openRentalRefresher } from "./rental-data";
 import { registerPrintRoutes } from "./print-routes";
 import {registerDocumentFiles} from "./document-files";
 import { FinanceError, prepareFinanceSchema, positiveId, ensureCustomerInvoice, synchronizeChequeInvoices, resolveTransactionAccount } from "./finance-data";
+import { withSchemaRecovery } from "./schema-recovery";
 import { allSectionIds, type SectionId } from "../shared/sections";
 import {
   effectivePermissions,
@@ -127,6 +128,7 @@ const adminSections = [...allSectionIds];
 let memberSchemaPromise: Promise<void> | null = null;
 let auditLogSchemaPromise: Promise<void> | null = null;
 let notificationSchemaPromise: Promise<void> | null = null;
+let inventorySchemaRecoveryPromise: Promise<void> | null = null;
 
 function cacheSchemaSetup(
   getCurrent: () => Promise<void> | null,
@@ -151,6 +153,19 @@ function cacheSchemaSetup(
     }, 3000);
   });
   return attempt;
+}
+
+function recoverInventorySchema() {
+  return cacheSchemaSetup(
+    () => inventorySchemaRecoveryPromise,
+    (value) => { inventorySchemaRecoveryPromise = value; },
+    async () => {
+      await pool.query("CREATE SCHEMA IF NOT EXISTS bennini");
+      await pool.query(readFileSync(path.resolve(process.cwd(), "server/schema.sql"), "utf8"));
+      await pool.query(readFileSync(path.resolve(process.cwd(), "server/finance-schema.sql"), "utf8"));
+      await ensureAuditLogSchema();
+    },
+  );
 }
 
 function serialLookup(serial: string) {
@@ -1673,43 +1688,68 @@ app.post("/api/inventory", authenticate, requireSection("inventory"), requirePer
   const purchase = validInventoryPurchase(req.body ?? {});
   if (!purchase) return fail(res, 400, "تحقق من اسم السلعة والكمية والأسعار والمورد وتاريخ الشراء.");
 
-  const client = await pool.connect();
+  const requestId = res.getHeader("X-Request-Id");
+  const createPurchase = async () => {
+    const client = await pool.connect();
+    let transactionStarted = false;
+    try {
+      await client.query("BEGIN");
+      transactionStarted = true;
+      const member = req.member!;
+      const customerId = positiveId(req.body?.customerId);
+      if (!customerId) throw new FinanceError(400, "اختر الزبون المرتبط بعملية الشراء.");
+      const customerInvoiceId = await ensureCustomerInvoice(client, customerId, purchase.invoiceNumber,
+        typeof purchase.purchaseDate === "string" ? purchase.purchaseDate : new Date().toISOString().slice(0, 10), member);
+      const links = await ensureSupplierInvoice(
+        client,
+        purchase.supplier,
+        purchase.invoiceNumber,
+        typeof purchase.purchaseDate === "string" ? purchase.purchaseDate : null,
+        member,
+      );
+      const result = await client.query(
+        `INSERT INTO inventory_items
+          (name, quantity, remaining_quantity, buy_price, total_cost, sale_price, supplier, invoice_number,
+           supplier_id, invoice_id, purchase_date, notes, recorded_by_id, recorded_by_name, customer_id, customer_invoice_id)
+         VALUES ($1, $2, $2, $3, $2 * $3, $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE), $10, $11, $12, $13, $14)
+         RETURNING id`,
+        [purchase.name, purchase.quantity, purchase.buyPrice, purchase.salePrice, purchase.supplier,
+          purchase.invoiceNumber, links.supplierId, links.invoiceId, purchase.purchaseDate ?? null,
+          purchase.notes, member.clerk_user_id, member.name, customerId, customerInvoiceId],
+      );
+      const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [result.rows[0].id]);
+      await writeAuditWithClient(client, member, "تسجيل عملية شراء", `${purchase.name} — ${purchase.quantity} قطعة من ${purchase.supplier} بقيمة ${purchase.quantity * purchase.buyPrice} دج.`,
+        { section: "inventory", eventType: "create", entityId: result.rows[0].id, data: { name: purchase.name, quantity: purchase.quantity, supplier: purchase.supplier, totalCost: purchase.quantity * purchase.buyPrice } });
+      await client.query("COMMIT");
+      transactionStarted = false;
+      return item.rows[0];
+    } catch (error) {
+      if (transactionStarted) {
+        try {
+          await client.query("ROLLBACK");
+        } catch (rollbackError) {
+          console.error("Inventory purchase rollback failed:", { requestId }, rollbackError);
+        }
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+
   try {
-    await client.query("BEGIN");
-    const member = req.member!;
-    const customerId = positiveId(req.body?.customerId);
-    if (!customerId) throw new FinanceError(400, "اختر الزبون المرتبط بعملية الشراء.");
-    const customerInvoiceId = await ensureCustomerInvoice(client, customerId, purchase.invoiceNumber,
-      typeof purchase.purchaseDate === "string" ? purchase.purchaseDate : new Date().toISOString().slice(0, 10), member);
-    const links = await ensureSupplierInvoice(
-      client,
-      purchase.supplier,
-      purchase.invoiceNumber,
-      typeof purchase.purchaseDate === "string" ? purchase.purchaseDate : null,
-      member,
+    const item = await withSchemaRecovery(
+      createPurchase,
+      async () => {
+        console.warn("Inventory schema mismatch; applying safe schema recovery before one retry.", { requestId });
+        await recoverInventorySchema();
+      },
     );
-    const result = await client.query(
-      `INSERT INTO inventory_items
-        (name, quantity, remaining_quantity, buy_price, total_cost, sale_price, supplier, invoice_number,
-         supplier_id, invoice_id, purchase_date, notes, recorded_by_id, recorded_by_name, customer_id, customer_invoice_id)
-       VALUES ($1, $2, $2, $3, $2 * $3, $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE), $10, $11, $12, $13, $14)
-       RETURNING id`,
-      [purchase.name, purchase.quantity, purchase.buyPrice, purchase.salePrice, purchase.supplier,
-        purchase.invoiceNumber, links.supplierId, links.invoiceId, purchase.purchaseDate ?? null,
-        purchase.notes, member.clerk_user_id, member.name, customerId, customerInvoiceId],
-    );
-    const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [result.rows[0].id]);
-    await writeAuditWithClient(client, member, "تسجيل عملية شراء", `${purchase.name} — ${purchase.quantity} قطعة من ${purchase.supplier} بقيمة ${purchase.quantity * purchase.buyPrice} دج.`,
-      { section: "inventory", eventType: "create", entityId: result.rows[0].id, data: { name: purchase.name, quantity: purchase.quantity, supplier: purchase.supplier, totalCost: purchase.quantity * purchase.buyPrice } });
-    await client.query("COMMIT");
-    res.status(201).json({ item: item.rows[0] });
+    res.status(201).json({ item });
   } catch (error) {
-    await client.query("ROLLBACK");
     if (error instanceof FinanceError) return fail(res, error.status, error.message);
-    console.error("Inventory purchase creation failed:", error);
+    console.error("Inventory purchase creation failed:", { requestId }, error);
     fail(res, 500, "تعذر تسجيل عملية الشراء.");
-  } finally {
-    client.release();
   }
 });
 
