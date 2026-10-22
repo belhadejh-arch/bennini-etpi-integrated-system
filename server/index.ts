@@ -1711,7 +1711,7 @@ app.post("/api/inventory", authenticate, requireSection("inventory"), requirePer
         `INSERT INTO inventory_items
           (name, quantity, remaining_quantity, buy_price, total_cost, sale_price, supplier, invoice_number,
            supplier_id, invoice_id, purchase_date, notes, recorded_by_id, recorded_by_name, customer_id, customer_invoice_id)
-         VALUES ($1, $2, $2, $3, $2 * $3, $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE), $10, $11, $12, $13, $14)
+         VALUES ($1, $2, $2, $3, ($2::integer * $3::numeric), $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE), $10, $11, $12, $13, $14)
          RETURNING id`,
         [purchase.name, purchase.quantity, purchase.buyPrice, purchase.salePrice, purchase.supplier,
           purchase.invoiceNumber, links.supplierId, links.invoiceId, purchase.purchaseDate ?? null,
@@ -1805,8 +1805,8 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
       req.member!,
     );
     await client.query(
-      `UPDATE inventory_items SET name = $1, quantity = $2, remaining_quantity = $2 - $3,
-        buy_price = $4, total_cost = $2 * $4, sale_price = $5, supplier = $6,
+      `UPDATE inventory_items SET name = $1, quantity = $2, remaining_quantity = $2::integer - $3::integer,
+        buy_price = $4, total_cost = ($2::integer * $4::numeric), sale_price = $5, supplier = $6,
         invoice_number = $7, supplier_id = $8, invoice_id = $9, purchase_date = $10, notes = $11,
         customer_id = $13, customer_invoice_id = $14
        WHERE id = $12`,

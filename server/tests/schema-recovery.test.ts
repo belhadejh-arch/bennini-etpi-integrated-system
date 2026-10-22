@@ -1,6 +1,14 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { isMissingSchemaObject, withSchemaRecovery } from "../schema-recovery";
+
+test("purchase totals cast PostgreSQL bind parameters before arithmetic", () => {
+  const source = readFileSync("server/index.ts", "utf8");
+  assert.match(source, /\(\$2::integer \* \$3::numeric\)/);
+  assert.match(source, /\$2::integer - \$3::integer/);
+  assert.match(source, /\(\$2::integer \* \$4::numeric\)/);
+});
 
 test("purchase schema recovery retries only missing-schema PostgreSQL errors once", async () => {
   for (const code of ["3F000", "42P01", "42703"]) {

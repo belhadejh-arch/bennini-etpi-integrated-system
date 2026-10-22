@@ -14,3 +14,9 @@ For inventory purchases, retry the transaction at most once only after PostgreSQ
 **Why:** Production showed schema drift, but replaying an ambiguous or already-committed financial write could create a duplicate purchase.
 
 **How to apply:** Keep automatic recovery limited to PostgreSQL codes `3F000`, `42P01`, and `42703`; log the request ID and original database error so any remaining failure can be traced.
+
+Explicitly cast bind parameters before combining them in PostgreSQL arithmetic expressions, including `INSERT ... VALUES` expressions; the target column may not supply enough context to resolve an operator.
+
+**Why:** PostgreSQL reported `operator is not unique: unknown * unknown` for the inventory total when quantity and unit price were multiplied directly as untyped parameters.
+
+**How to apply:** Cast quantities to `integer` and monetary operands to `numeric` in the SQL expression; do not rely on implicit parameter inference.
