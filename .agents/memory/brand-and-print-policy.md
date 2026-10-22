@@ -24,3 +24,9 @@ The supplied Android download was verified to be **AppCreator24**, despite the e
 **Why:** AppCreator24 prints the main WebView through its own native bridge; hidden iframe printing does not invoke it. Both wrappers need real HTTPS downloads rather than page-local Blob links.
 
 **How to apply:** Preserve full report and attachment page coverage, scoped expiring file URLs and runtime bridge detection. Do not call browser simulation a physical-device test, or a workspace test proof that the existing published server was updated.
+
+The AppCreator24 application opens https://bennini-etpi.vercel.app, not the AppCreator24 download page.
+
+**Why:** The user confirmed the actual website address after the download link was mistaken for the WebView target.
+
+**How to apply:** Check that Vercel address and its Render API separately before claiming an installed-app fix. Workspace preview success does not update either published service.
