@@ -112,10 +112,12 @@ test("all report SQL, selection, receipts, invoices and shifts work on isolated 
       assert.equal((await post("inventory",{paper:"<script>"})).status,400);
       assert.equal((await post("inventory",{ids:[]})).status,400);
       const actual=await fetch(`http://127.0.0.1:${address.port}/api/print-document/rentals`,{
-        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:["1"]})});
+        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:["1"],includePrintHtml:true})});
       assert.equal(actual.status,200);
       const file=await actual.json();
       assert.equal(file.count,1);
+      assert.ok(file.printHtml.includes('dir="rtl"'));
+      assert.ok(file.printHtml.includes("2026-10-01"));
       assert.ok(/^\/api\/document-files\/[a-f0-9]{64}$/.test(file.url));
       const readFile=()=>fetch(`http://127.0.0.1:${address.port}${file.url}`);
       const pdf=await readFile();

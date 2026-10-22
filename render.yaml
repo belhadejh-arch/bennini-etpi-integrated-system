@@ -2,7 +2,7 @@ services:
   - type: web
     name: bennini-etpi-api
     runtime: node
-    buildCommand: npm ci && npm run typecheck && npm run setup:pdf-browser
+    buildCommand: npm ci && npm run typecheck
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:

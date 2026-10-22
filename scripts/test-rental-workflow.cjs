@@ -5,7 +5,7 @@
 const assert = require("node:assert/strict");
 const { createHmac, randomBytes, randomInt, randomUUID, scryptSync } = require("node:crypto");
 const { spawn } = require("node:child_process");
-const { mkdtempSync, rmSync,writeFileSync } = require("node:fs");
+const { mkdtempSync, rmSync,writeFileSync,readFileSync,readdirSync } = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const pg = require("pg");
@@ -16,6 +16,7 @@ async function main() {
   const db = new pg.Client({ connectionString: process.env.NEON_DATABASE_URL || process.env.DATABASE_URL });
   const memberId = `test-rental-${randomUUID()}`;
   const profile = mkdtempSync(path.join(os.tmpdir(), "rental-browser-"));
+  const downloads=mkdtempSync(path.join(os.tmpdir(),"bennini-downloads-"));
   let browser, ws, machineId, closeBrowser;
   const rentalIds = [];
   await db.connect();
@@ -180,7 +181,10 @@ async function main() {
       await pdf.destroy();return info;})()`);
     assert.equal(pdfInfo.status,200);assert.equal(pdfInfo.magic,"%PDF-");assert.ok(pdfInfo.size>10000);
     assert.ok(pdfInfo.text.includes("2026-10-05"));
-    assert.ok(pdfInfo.text.includes("1.75")||pdfInfo.text.includes("١٫٧٥"));
+    assert.ok(pdfInfo.text.includes("1.75")||pdfInfo.text.includes("1,75")||pdfInfo.text.includes("١٫٧٥"));
+    const canvasDirection=await evaluate(`(()=>{const c=document.querySelector('[role="dialog"][aria-label="معاينة المستند"] canvas');return{direction:getComputedStyle(c).direction,html:c.outerHTML}})()`);
+    assert.equal(canvasDirection.direction,"ltr",
+      "PDF drawing must not inherit RTL: "+canvasDirection.html);
     for(const width of [375,768,1366]){
       await cdp("Emulation.setDeviceMetricsOverride",{width,height:900,deviceScaleFactor:1,mobile:width<600});
       await new Promise((resolve)=>setTimeout(resolve,300));
@@ -218,6 +222,20 @@ async function main() {
       "Preview, save/download and print reuse the same prepared PDF");
     const download=await fetch(`${fileUrl}?download=1`);
     assert.ok(download.headers.get("content-disposition")?.startsWith("attachment;"),"Save endpoint forces a real file download");
+    await cdp("Network.setUserAgentOverride",{userAgent:"Mozilla/5.0 (Linux; Android 14; wv) AppleWebKit/537.36 Version/4.0 Chrome/138.0 Mobile Safari/537.36"});
+    await evaluate(`delete window.median;window.__ac24Prints=[];window.AC24_INTERNAL_PRINT_BRIDGE_2026={print:()=>window.__ac24Prints.push(document.getElementById("bennini-native-print").innerHTML)}`);
+    await evaluate(`[...document.querySelectorAll('[role="button"]')].filter(e=>e.textContent==="طباعة").at(-1).click()`);
+    await wait("window.__ac24Prints.length===1");
+    assert.ok(await evaluate(`window.__ac24Prints[0].includes("2026-10-05")`),"AppCreator main-WebView print receives all saved days");
+    assert.ok(await evaluate(`window.__ac24Prints[0].includes("1.75")||window.__ac24Prints[0].includes("1,75")`),
+      "Actual native print source includes the custom shift");
+    await evaluate(`window.dispatchEvent(new Event("afterprint"))`);
+    await call("Browser.setDownloadBehavior",{behavior:"allow",downloadPath:downloads,eventsEnabled:true});
+    await clickText("حفظ وتنزيل PDF");
+    for(let i=0;i<100&&!readdirSync(downloads).some(name=>name.endsWith(".pdf"));i++)await new Promise(resolve=>setTimeout(resolve,100));
+    const downloadedPdf=readdirSync(downloads).find(name=>name.endsWith(".pdf"));
+    assert.ok(downloadedPdf,"WebView save starts a real HTTPS attachment download");
+    assert.equal(readFileSync(path.join(downloads,downloadedPdf)).subarray(0,5).toString(),"%PDF-");
     await evaluate(`document.querySelector('[aria-label="إغلاق"]').click()`);
     await cdp("Page.navigate",{url:`${base}/section/rentals?focusId=${id}`});
     await wait(`!!document.querySelector('[aria-label="فتح verified.pdf"]')`);
@@ -226,13 +244,19 @@ async function main() {
       !document.body.innerText.includes("جارٍ تحميل المستند...")&&!document.body.innerText.includes("جارٍ عرض الصفحة")`);
     assert.ok(await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"]').textContent.includes("verified.pdf")`),
       "An existing PDF attachment uses the same in-app renderer");
+    await evaluate(`window.__ac24Prints=[];window.AC24_INTERNAL_PRINT_BRIDGE_2026={print:()=>window.__ac24Prints.push(document.querySelectorAll("#bennini-native-print img").length)}`);
+    await evaluate(`document.querySelector('[role="dialog"][aria-label="معاينة المستند"] button[aria-label="طباعة"]').click()`);
+    await wait("window.__ac24Prints.length===1");
+    assert.equal(await evaluate("window.__ac24Prints[0]"),pdfInfo.pages,"Existing PDF attachment prints ALL pages through AppCreator");
+    await evaluate(`window.dispatchEvent(new Event("afterprint"))`);
     assert.equal((await call("Target.getTargets")).targetInfos.filter((info)=>info.type==="page"&&info.title.includes("عقود الكراء")).length,0,"No popup is opened");
-    console.log("PDF: saved shifts, inline rendering at 375/768/1366px, existing PDF attachment preview, and Median open/download bridge simulation passed.");
+    console.log("PDF: actual generation, full previews, Median bridge, AppCreator main-WebView printing, ALL attachment pages, and a real downloaded PDF passed.");
   } finally {
     if (rentalIds.length) await db.query("DELETE FROM rentals WHERE id=ANY($1::bigint[])", [rentalIds]);
     if (machineId) await db.query("DELETE FROM machinery WHERE id=$1", [machineId]);
     await db.query("DELETE FROM audit_logs WHERE performed_by_id=$1", [memberId]);
     await db.query("DELETE FROM members WHERE clerk_user_id=$1", [memberId]);
+    rmSync(downloads,{recursive:true,force:true});
     await db.end();
     try{await closeBrowser?.();}catch{}
     if (ws) ws.close();

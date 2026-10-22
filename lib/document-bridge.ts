@@ -1,6 +1,7 @@
 import {apiUrl} from "./api";
 import {fetchWithRecovery} from "./http-recovery";
-export type DocumentFile={url:string;title:string;expiresAt:string};
+import {hasAppCreatorPrintBridge,printInAppCreator} from "./appcreator-print";
+export type DocumentFile={url:string;title:string;expiresAt:string;printHtml?:string};
 type FileBridge={share?:{downloadFile?:(options:{url:string;open:boolean})=>void|Promise<unknown>}};
 type MedianWindow=Window & {median?:FileBridge;gonative?:FileBridge};
 export function isMedianApp(){
@@ -19,6 +20,7 @@ export function absoluteDocumentUrl(file:DocumentFile){
 export async function openDeviceDocument(file:DocumentFile,download=false){
   const url=absoluteDocumentUrl(file);
   if(download)url.searchParams.set("download","1");
+  if(hasAppCreatorPrintBridge()&&!download){await printInAppCreator(file);return;}
   if(isMedianApp()){
     for(let i=0;i<15;i++){
       const host=window as MedianWindow;
@@ -37,6 +39,12 @@ export async function openDeviceDocument(file:DocumentFile,download=false){
   }
   if(download){
     url.searchParams.set("download","1");
+    if(hasAppCreatorPrintBridge()||(/Android/i.test(navigator.userAgent)&&
+      (navigator.userAgent.includes("; wv")||navigator.userAgent.includes("Version/4.0")))){
+      // AppCreator's DownloadListener needs a real HTTPS response with attachment
+      // headers; Blob anchors and iframe print() never reach its native handlers.
+      window.location.assign(url.href);return;
+    }
     const link=document.createElement("a");link.href=url.href;link.download=file.title;
     link.referrerPolicy="no-referrer";document.body.appendChild(link);link.click();link.remove();return;
   }

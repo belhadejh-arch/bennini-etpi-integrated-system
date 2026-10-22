@@ -32,12 +32,12 @@ export function registerPrintRoutes(app: Express, pool: pg.Pool, authenticate: R
       }
       await addPrintDetails(pool,report,req.member!);
       const options={paper,landscape,ids} as PrintOptions;
-      const html=renderPrintHtml(report,options);
       res.setHeader("Cache-Control","no-store");
       if(pdf){
-        const bytes=await renderPdf(html,options);
-        res.json({...await createDocumentFile(pool,req.member!,bytes,`${report.title}.pdf`),count:report.rows.length});
-      }else res.json({html,count:report.rows.length});
+        const bytes=await renderPdf(report,options);
+        res.json({...await createDocumentFile(pool,req.member!,bytes,`${report.title}.pdf`),count:report.rows.length,
+          ...(req.body?.includePrintHtml===true?{printHtml:renderPrintHtml(report,options)}:{})});
+      }else res.json({html:renderPrintHtml(report,options),count:report.rows.length});
     }catch(error){ fail(res,error); }
   };
   app.post("/api/print-preview/:report",authenticate,(req,res)=>void preview(req,res,false));

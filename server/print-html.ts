@@ -12,15 +12,16 @@ const enums: Record<string,Record<string,string>> = {
   role:{admin:"مدير",finance:"إدارة مالية",field:"ميدان",supervisor:"مشرف",partner:"شريك",pending:"قيد التفعيل"},
   language:{ar:"العربية",fr:"الفرنسية"},appearance:{light:"فاتح",dark:"داكن",system:"حسب النظام"},
 };
-function cell(row: Record<string,unknown>, column: PrintColumn) {
+export function formatPrintCell(row: Record<string,unknown>, column: PrintColumn):string {
   const value = row[column.key];
   if (value === null || value === undefined || value === "") return column.key === "end_date" ? "غير محدد" : "—";
   if (typeof value === "boolean") return value ? "نعم" : "لا";
   if (column.numeric && Number.isFinite(Number(value))) return new Intl.NumberFormat("ar-DZ",{maximumFractionDigits:4}).format(Number(value));
-  if (Array.isArray(value)) return escapeHtml(value.join("، "));
-  if (typeof value === "object") return escapeHtml(JSON.stringify(value,null,2));
-  return escapeHtml(enums[column.key]?.[String(value)] ?? value);
+  if (Array.isArray(value)) return value.join("، ");
+  if (typeof value === "object") return JSON.stringify(value,null,2);
+  return String(enums[column.key]?.[String(value)] ?? value);
 }
+const cell=(row:Record<string,unknown>,column:PrintColumn)=>escapeHtml(formatPrintCell(row,column));
 function totals(columns: PrintColumn[], rows: Record<string,unknown>[]) {
   const sums = columns.filter((column) => column.sum);
   return sums.length ? `<div class="totals">${sums.map((column) => {

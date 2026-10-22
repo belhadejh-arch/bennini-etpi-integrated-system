@@ -19,8 +19,8 @@ Printing must be functional across business sections, support individual/selecte
 
 **How to apply:** Apply the same account permissions as the on-screen data; never print only the currently loaded page or silently crop wide tables. Native printer availability depends on the device's system printing service.
 
-The mobile WebView wrapper is generated using **Median.co**, as identified by the user. PDF preview and printing must work there, not just in a desktop browser.
+The supplied Android download was verified to be **AppCreator24**, despite the earlier Median description. Keep Median compatibility, but detect the actual wrapper rather than assuming its bridge exists.
 
-**Why:** Median's native downloader cannot consume a page-local Blob URL or forward the site's Bearer header. Its documented native PDF viewer provides the Print action.
+**Why:** AppCreator24 prints the main WebView through its own native bridge; hidden iframe printing does not invoke it. Both wrappers need real HTTPS downloads rather than page-local Blob links.
 
-**How to apply:** Use in-page PDF rendering plus the documented Median native viewer/download integration with short-lived document-scoped URLs. Do not promise physical-device verification based only on a browser simulation.
+**How to apply:** Preserve full report and attachment page coverage, scoped expiring file URLs and runtime bridge detection. Do not call browser simulation a physical-device test, or a workspace test proof that the existing published server was updated.

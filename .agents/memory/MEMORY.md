@@ -10,6 +10,7 @@
 - [Machinery reference policy](machinery-reference-policy.md) — one shared machinery register; retain history and distinguish accrued driver salary from payments.
 - [Financial account rules](finance-account-policy.md) — separate customer/partner accounts, per-transaction interest, optional sale prices, and cheque settlement without cash changes.
 - [Interface accessibility](interface-accessibility-policy.md) — readable text app-wide; Arabic/light defaults, optional French and dark/system per account, user data never translated.
-- [Portable dependencies](portable-dependencies.md) — keep lockfile hosts public and provision PDF browsers explicitly on external hosts.
+- [Portable dependencies](portable-dependencies.md) — public lockfile hosts, browser-free PDF production and ESM worker boundaries.
+- [PDF canvas direction](pdf-canvas-direction.md) — explicitly LTR canvases prevent corrupted glyph positions inside the Arabic RTL interface.
 - [Rental shift rules](rental-shift-policy.md) — inclusive shift days, persistent historical overrides, ongoing accrual and optional bulk exclusions; retain legacy billing.
 - [Branding and printing](brand-and-print-policy.md) — supplied BE identity, transparent dashboard logo, Changa, and functional complete RTL printing across business sections.

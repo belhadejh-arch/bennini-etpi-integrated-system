@@ -7,6 +7,7 @@ import { colors } from "../../lib/theme";
 import { printLabels, type PrintOptions, type PrintReport } from "../../shared/printing";
 import { outputPrintHtml } from "../../lib/printing";
 import {openDeviceDocument,type DocumentFile} from "../../lib/document-bridge";
+import {hasAppCreatorPrintBridge,clearAppCreatorPrint} from "../../lib/appcreator-print";
 import DocumentPreview from "./DocumentPreview";
 import { translate } from "../../lib/localization";
 import RentalDatePicker from "./RentalDatePicker";
@@ -48,7 +49,7 @@ export function PrintingProvider({children}:{children:ReactNode}) {
     setRequest(next);setKey(next.report??"dashboard");setSelected(next.ids??[]);
     setScope(next.ids?.length ? "selected":"all");setSearch("");setFrom("");setTo("");setPage(0);setError("");setReport(null);
   };
-  useEffect(()=>{if(!member){preparedDocument.current=null;setRequest(null);setReport(null);setSelected([]);setDocumentFile(null);}},[member]);
+  useEffect(()=>{if(!member){clearAppCreatorPrint();preparedDocument.current=null;setRequest(null);setReport(null);setSelected([]);setDocumentFile(null);}},[member]);
   const openAttachment=async(url:string,download:boolean)=>{
     const file=await apiRequest<DocumentFile>("/attachment-document",getToken,{method:"POST",body:JSON.stringify({url})});
     if(download)await openDeviceDocument(file,true);
@@ -87,7 +88,8 @@ export function PrintingProvider({children}:{children:ReactNode}) {
       setError("");
       setBusy(true);
       const ids=scope==="selected"?validSelected:hasFilter?filtered.map((row)=>String(row.id)):undefined;
-      const options={method:"POST",body:JSON.stringify({paper,landscape,ids,accountId:request?.accountId})};
+      const options={method:"POST",body:JSON.stringify({paper,landscape,ids,accountId:request?.accountId,
+        includePrintHtml:Platform.OS==="web"&&hasAppCreatorPrintBridge()})};
       if(Platform.OS==="web"){
         const signature=JSON.stringify([key,options.body,report,member?.clerk_user_id]);
         const cached=preparedDocument.current;

@@ -9,8 +9,14 @@ After adding dependencies in this workspace, verify that lockfile download URLs 
 
 **How to apply:** Check source-host portability before delivery after every dependency installation. This does not permit bypassing a package security rejection. Verify public tarballs against the recorded integrity values when correcting source metadata.
 
-PDF browser provisioning must be explicit on external hosts, not assumed from a successful Replit preview.
+Production PDF generation must not depend on Replit's system browser.
 
-**Why:** Replit's Nix Chromium is not present in a separately built Node/Render service. An installed Puppeteer client alone does not provide a browser executable.
+**Why:** Browser availability and native libraries differ between the Nix workspace and Node/Render hosts. A passing workspace browser test did not prove deployability; repeated PDF failures required removing that runtime dependency.
 
-**How to apply:** Provision the matching browser during the external build, while retaining the system browser where available. Treat downloaded browser binaries as generated build artifacts, never Git assets, and verify library revision exports/types when upgrading Puppeteer.
+**How to apply:** Keep production report rendering browser-free and isolated from financial API work. Chromium can remain a development verification tool, not a production prerequisite.
+
+ESM-only PDF dependencies must be imported from the actual ESM worker, not dynamically resolved inside a CJS module loaded through tsImport.
+
+**Why:** tsImport can use a data URL for CJS modules; resolving a bare ESM package there fails even though normal imports work in the main process.
+
+**How to apply:** Let the real-file ESM worker own ESM dependencies and pass their module API into the typed report renderer.

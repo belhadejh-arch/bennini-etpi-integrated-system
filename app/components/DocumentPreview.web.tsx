@@ -115,8 +115,13 @@ export default function DocumentPreview({ document: file, onClose, onDownload, o
       canvas.height = Math.ceil(viewport.height * pixelRatio);
       canvas.style.width = `${viewport.width}px`;
       canvas.style.height = `${viewport.height}px`;
+      // JSX style.direction is localized by the build transform, even for PDF
+      // canvases. Set the drawing direction explicitly through the DOM API.
+      canvas.dir="ltr";
+      canvas.style.setProperty("direction","ltr","important");
       const context = canvas.getContext("2d");
       if (!context) throw new Error(t("تعذر عرض صفحة المستند."));
+      context.direction="ltr";
       renderTask = loadedPage.render({
         canvas,
         canvasContext: context,
@@ -247,7 +252,7 @@ export default function DocumentPreview({ document: file, onClose, onDownload, o
             <div style={{ fontSize: 13, color: colors.muted, overflowWrap: "anywhere", marginBottom: 18 }}>{error}</div>
             <button className="doc-preview-action" type="button" onClick={retry} style={primaryButtonStyle}>{t("إعادة المحاولة")}</button>
           </div> : <div style={{ position: "relative", flex: "0 0 auto", minHeight: "100%", display: "flex", justifyContent: "center", alignItems: "flex-start" }}>
-            <canvas ref={canvasRef} aria-label={`${t("صفحة")} ${pageNumber}`} style={{ display: "block", maxWidth: "none", background: colors.surface, boxShadow: "0 16px 50px rgba(10, 30, 42, .28)" }} />
+            <canvas ref={canvasRef} dir="ltr" aria-label={`${t("صفحة")} ${pageNumber}`} style={{ display: "block", maxWidth: "none", background: colors.surface, boxShadow: "0 16px 50px rgba(10, 30, 42, .28)" }} />
             {rendering ? <div role="status" aria-label={t("جارٍ عرض الصفحة")} style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "rgba(238,243,243,.16)" }} /> : null}
           </div>}
         </div>
