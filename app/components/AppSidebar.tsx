@@ -75,7 +75,7 @@ export function AppSidebar({
   );
 
   return (
-    <View style={[styles.sidebar, drawer && styles.drawer, { backgroundColor: colors.deepBlue, direction: language === "ar" ? "rtl" : "ltr" }]}>
+    <View testID="workspace-sidebar" style={[styles.sidebar, drawer && styles.drawer, { backgroundColor: colors.deepBlue, direction: language === "ar" ? "rtl" : "ltr" }]}>
       <View style={styles.brand}>
         <CompanyLogo width={104} height={56} framed />
         <View style={styles.brandCopy}>
@@ -90,7 +90,7 @@ export function AppSidebar({
       </View>
 
       <Text style={styles.navCaption}>القائمة الرئيسية</Text>
-      <ScrollView style={styles.navScroll} contentContainerStyle={styles.navList} showsVerticalScrollIndicator={false}>
+      <ScrollView testID="workspace-sidebar-scroll" style={styles.navScroll} contentContainerStyle={styles.navList} showsVerticalScrollIndicator={false}>
         {entries.map((entry) => {
           const Icon = entry.icon;
           const selected = entry.id === activeId;
@@ -116,7 +116,7 @@ export function AppSidebar({
         })}
       </ScrollView>
 
-      <View style={styles.account}>
+      <View testID="workspace-account" style={styles.account}>
         <View style={styles.avatar}><Text style={styles.avatarText}>{member.name?.trim().charAt(0) || "م"}</Text></View>
         <View style={styles.accountCopy}>
           <Text style={styles.accountName}>{member.name || "عضو الفريق"}</Text>
@@ -134,7 +134,9 @@ export function SidebarBackdrop({ onPress }: { onPress: () => void }) {
 const styles = {
   sidebar: {
     width: 256,
-    height: "100%" as const,
+    alignSelf: "stretch" as const,
+    minHeight: 0,
+    flexShrink: 0,
     backgroundColor: colors.deepBlue,
     borderLeftWidth: 1,
     borderLeftColor: "#FFFFFF12",
@@ -151,10 +153,10 @@ const styles = {
     bottom: 0,
     width: 292,
     maxWidth: "86%" as const,
-    height: "100%" as const,
     elevation: 16,
   },
   brand: {
+    flexShrink: 0,
     minHeight: 77,
     flexDirection: "row" as const,
     alignItems: "center" as const,
@@ -175,7 +177,7 @@ const styles = {
     borderRadius: 10,
     backgroundColor: "#FFFFFF14",
   },
-  navCaption: { color: colors.lightBlue, fontSize: 10, fontWeight: "700" as const, marginTop: 18, marginBottom: 9, paddingHorizontal: 10, textAlign: "right" as const },
+  navCaption: { flexShrink: 0, color: colors.lightBlue, fontSize: 10, fontWeight: "700" as const, marginTop: 18, marginBottom: 9, paddingHorizontal: 10, textAlign: "right" as const },
   navScroll: { flex: 1, minHeight: 0 },
   navList: { gap: 4, paddingBottom: 14 },
   navItem: {
@@ -194,6 +196,7 @@ const styles = {
   navLabel: { flex: 1, color: "#E9F0F5", fontSize: 12, fontWeight: "600" as const, textAlign: "right" as const },
   navLabelSelected: { color: colors.onAccent, fontWeight: "800" as const },
   account: {
+    flexShrink: 0,
     minHeight: 60,
     flexDirection: "row" as const,
     alignItems: "center" as const,

@@ -32,7 +32,7 @@ function AppShell() {
   if ((!fontsLoaded && !fontError) || !isLoaded) return <StartupSplash />;
 
   return (
-    <View style={{ flex: 1, minHeight: "100%" }}>
+    <View testID="app-viewport" style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
       <AdaptiveStatusBar />
       <WorkspaceShell>
         <Stack screenOptions={{ headerShown: false, animation: "fade" }}>

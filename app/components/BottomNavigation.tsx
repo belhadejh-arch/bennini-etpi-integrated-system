@@ -31,7 +31,7 @@ export function BottomNavigation({ member, activeId }: { member: Member; activeI
   };
 
   return (
-    <View style={styles.bar}>
+    <View testID="workspace-bottom-navigation" style={styles.bar}>
       <Tab label={translate("الرئيسية", language)} selected={activeId === "dashboard"} icon={LayoutDashboard} onPress={() => navigate("dashboard")} />
       {tabs.map((id) => {
         const section = sections.find((entry) => entry.id === id)!;
@@ -77,6 +77,7 @@ function Tab({
 
 const styles = {
   bar: {
+    flexShrink: 0,
     minHeight: 62,
     backgroundColor: colors.action,
     flexDirection: "row" as const,

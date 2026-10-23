@@ -14,3 +14,4 @@
 - [PDF canvas direction](pdf-canvas-direction.md) — explicitly LTR canvases prevent corrupted glyph positions inside the Arabic RTL interface.
 - [Rental shift rules](rental-shift-policy.md) — inclusive shift days, persistent historical overrides, ongoing accrual and optional bulk exclusions; retain legacy billing.
 - [Branding and printing](brand-and-print-policy.md) — supplied BE identity, transparent dashboard logo, Changa, and functional complete RTL printing across business sections.
+- [Desktop host validation](desktop-host-validation.md) — Windows 10/Websktop is a separate target; browser layout checks cannot establish a native-window fix.
