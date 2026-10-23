@@ -62,9 +62,39 @@ The engine is headless Chromium on Linux, **not Windows 10 or Websktop**.
 
 ## Remaining native-host investigation
 
-Obtain a full capture including the app frame and Windows taskbar, plus the
-Websktop Window configuration or native project. Without these, a specific
-host-setting change would be a guess.
+The supplied Websktop Settings screenshots show `Always on top` and `Always on
+bottom` both enabled, together with `Start in fullscreen`, `Start maximized`
+and `Hide from taskbar`. These request competing window-placement/launch
+behaviors. The accompanying monitor photographs are still cropped: they do
+not establish whether the strip belongs to the DOM or native client area.
+
+Recommended non-kiosk diagnostic configuration, using the actual labels in
+the supplied Settings screen:
+
+| Setting | Value |
+| --- | --- |
+| Width / Height | 1280 / 800 |
+| Resizable window | On |
+| Start in fullscreen | Off |
+| Center on launch | On |
+| Window decorations | On |
+| Window shadow | On |
+| Always on top | Off |
+| Always on bottom | Off |
+| Hide from taskbar | Off |
+| Maximizable | On |
+| Start maximized | On |
+| Minimizable | On |
+| Min/Max W/H | None |
+
+This removes conflicting host configuration; it is **not a confirmed diagnosis
+of the white strip**. Build and install a new Windows executable for native
+setting changes to take effect. Updating the website cannot change an existing
+binary's window settings. `Hide from taskbar` concerns the app's taskbar entry,
+not hiding the Windows taskbar.
+
+A full-window capture/native viewport measurements are still needed to locate
+the strip if it remains with the normalized configuration.
 
 When an inspector is available in a diagnostic build, collect:
 
@@ -78,7 +108,6 @@ bounds against the native client rectangle and Windows scaling/DPI. If a strip
 is outside the DOM and the web root fits the usable viewport, fix its native
 owner rather than introducing compensating page padding.
 
-The public [Websktop builder](https://websktop.net/build) currently documents
-Width/Height, Resizable window, Start in fullscreen, Center on launch and
-Window decorations. These labels are confirmed options, **not a confirmed
-remedy for the reported strip**. No documented strip-specific setting was found.
+The [public Websktop builder](https://websktop.net/build) and the supplied
+Settings screenshots confirm these option labels. No strip-specific
+removal setting has been established.
