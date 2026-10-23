@@ -755,14 +755,16 @@ async function requireRecordNotesSchema(_req: Request, res: Response, next: Next
 
 const inventoryItemSelect = `
   SELECT i.id, i.name, i.quantity, i.remaining_quantity, i.buy_price, i.total_cost,
+    i.total_sale, i.pricing_mode, i.manual_paid,
+    (i.manual_paid OR EXISTS (SELECT 1 FROM cheque_customer_invoices l JOIN cheques c ON c.id=l.cheque_id
+      WHERE l.invoice_id=i.customer_invoice_id AND l.active AND c.status <> 'cancelled')) AS paid,
     i.sale_price, COALESCE(s.name, i.supplier) AS supplier,
     COALESCE(pi.invoice_number, i.invoice_number) AS invoice_number,
     i.supplier_id, i.invoice_id, i.customer_id, i.customer_invoice_id,
     (SELECT name FROM finance_accounts WHERE id = i.customer_id) AS customer_name,
     i.recorded_by_id, i.recorded_by_name,
     i.purchase_date, i.notes, i.created_at,
-    CASE WHEN i.sale_price IS NULL THEN NULL
-      ELSE i.quantity * i.sale_price - i.total_cost END AS expected_profit,
+    COALESCE(i.total_sale, i.quantity * i.sale_price) - i.total_cost AS expected_profit,
     COALESCE(m.sold_quantity, 0)::int AS sold_quantity,
     COALESCE(m.used_quantity, 0)::int AS used_quantity,
     COALESCE(m.realized_profit, 0) AS realized_profit,
@@ -779,8 +781,8 @@ const inventoryItemSelect = `
     SELECT im.inventory_item_id,
       SUM(im.quantity) FILTER (WHERE im.movement_type = 'sale') AS sold_quantity,
       SUM(im.quantity) FILTER (WHERE im.movement_type = 'use') AS used_quantity,
-      SUM(CASE WHEN im.movement_type = 'sale'
-        THEN im.quantity * (im.unit_price - item.buy_price) ELSE 0 END) AS realized_profit
+      ROUND(SUM(CASE WHEN im.movement_type = 'sale'
+        THEN im.quantity * (im.unit_price - item.total_cost / NULLIF(item.quantity, 0)) ELSE 0 END), 2) AS realized_profit
     FROM inventory_movements im
     JOIN inventory_items item ON item.id = im.inventory_item_id
     GROUP BY im.inventory_item_id
@@ -791,8 +793,8 @@ const inventorySummaryQuery = `
     SELECT im.inventory_item_id,
       SUM(im.quantity) FILTER (WHERE im.movement_type = 'sale') AS sold_quantity,
       SUM(im.quantity) FILTER (WHERE im.movement_type = 'use') AS used_quantity,
-      SUM(CASE WHEN im.movement_type = 'sale'
-        THEN im.quantity * (im.unit_price - item.buy_price) ELSE 0 END) AS realized_profit
+      ROUND(SUM(CASE WHEN im.movement_type = 'sale'
+        THEN im.quantity * (im.unit_price - item.total_cost / NULLIF(item.quantity, 0)) ELSE 0 END), 2) AS realized_profit
     FROM inventory_movements im
     JOIN inventory_items item ON item.id = im.inventory_item_id
     GROUP BY im.inventory_item_id
@@ -803,9 +805,8 @@ const inventorySummaryQuery = `
     COALESCE(SUM(COALESCE(m.sold_quantity, 0)), 0)::bigint AS sold_quantity,
     COALESCE(SUM(COALESCE(m.used_quantity, 0)), 0)::bigint AS used_quantity,
     COALESCE(SUM(i.total_cost), 0) AS total_cost,
-    COALESCE(SUM(i.remaining_quantity * i.buy_price), 0) AS stock_value,
-    COALESCE(SUM(CASE WHEN i.sale_price IS NULL THEN 0
-      ELSE i.quantity * i.sale_price - i.total_cost END), 0) AS expected_profit,
+    COALESCE(SUM(ROUND(i.remaining_quantity * i.total_cost / NULLIF(i.quantity, 0), 2)), 0) AS stock_value,
+    COALESCE(SUM(COALESCE(i.total_sale, i.quantity * i.sale_price) - i.total_cost), 0) AS expected_profit,
     COALESCE(SUM(COALESCE(m.realized_profit, 0)), 0) AS realized_profit
   FROM inventory_items i
   LEFT JOIN movement_totals m ON m.inventory_item_id = i.id`;
@@ -823,9 +824,10 @@ function validInventoryPurchase(body: Record<string, unknown>) {
   const supplier = typeof body.supplier === "string" ? body.supplier.trim() : "";
   const invoiceNumber = typeof body.invoiceNumber === "string" ? body.invoiceNumber.trim() : "";
   const notes = typeof body.notes === "string" ? body.notes.trim() : "";
-  const quantity = Number(body.quantity);
-  const buyPrice = Number(body.buyPrice);
-  const salePrice = body.salePrice === "" || body.salePrice == null ? null : Number(body.salePrice);
+  const totals = body.totalPurchase !== undefined || body.totalSale !== undefined;
+  const quantity = totals ? 1 : Number(body.quantity);
+  const buyPrice = Number(totals ? body.totalPurchase : body.buyPrice);
+  const salePrice = totals ? Number(body.totalSale) : body.salePrice === "" || body.salePrice == null ? null : Number(body.salePrice);
   const purchaseDate = body.purchaseDate;
   const maxMoney = 99999999999999.99;
   if (!name || name.length > 200 || !supplier || supplier.length > 200 ||
@@ -834,10 +836,17 @@ function validInventoryPurchase(body: Record<string, unknown>) {
       !Number.isFinite(buyPrice) || buyPrice < 0 || buyPrice > maxMoney ||
       (salePrice !== null && (!Number.isFinite(salePrice) || salePrice < 0 || salePrice > maxMoney)) ||
       quantity * buyPrice > maxMoney || (salePrice !== null && quantity * salePrice > maxMoney) ||
+      (totals && (body.totalPurchase === "" || body.totalPurchase == null || body.totalSale === "" || body.totalSale == null ||
+        typeof body.totalPurchase === "boolean" || typeof body.totalSale === "boolean" ||
+        !/^\d+(\.\d{1,2})?$/.test(String(body.totalPurchase)) || !/^\d+(\.\d{1,2})?$/.test(String(body.totalSale)))) ||
+      (body.paymentStatus !== undefined && !["paid", "unpaid"].includes(String(body.paymentStatus))) ||
       (purchaseDate !== undefined && !validIsoDate(purchaseDate))) {
     return null;
   }
-  return { name, supplier, invoiceNumber, notes, quantity, buyPrice, salePrice, purchaseDate };
+  return { name, supplier, invoiceNumber, notes, quantity, buyPrice, salePrice, purchaseDate,
+    totalCost: quantity * buyPrice, totalSale: totals ? salePrice : null,
+    pricingMode: totals ? "total" : "unit", manualPaid: body.paymentStatus === "paid",
+    paymentSpecified: body.paymentStatus !== undefined };
 }
 
 const chequeStatuses = ["pending", "paid", "cancelled"] as const;
@@ -1474,7 +1483,7 @@ app.get("/api/dashboard", authenticate, requireSection("dashboard"), async (req:
       `))
       : Promise.resolve({ rows: [{ income: 0, outgoing: 0 }] });
     const purchasesQuery = canSeeFinance && canSeeInventory
-      ? pool.query("SELECT COALESCE(SUM(total_cost), 0) AS total, COALESCE(SUM(remaining_quantity * buy_price), 0) AS remaining_total FROM inventory_items")
+      ? pool.query("SELECT COALESCE(SUM(total_cost), 0) AS total, COALESCE(SUM(ROUND(remaining_quantity * total_cost / NULLIF(quantity, 0), 2)), 0) AS remaining_total FROM inventory_items")
       : Promise.resolve({ rows: [{ total: 0, remaining_total: 0 }] });
     const inventoryQuery = purchasesQuery.then((result) => ({ rows: [{ total: result.rows[0].remaining_total }] }));
     const chequesQuery = canSeeCheques
@@ -1686,7 +1695,7 @@ app.get("/api/inventory", authenticate, requireSection("inventory"), async (req,
 
 app.post("/api/inventory", authenticate, requireSection("inventory"), requirePermission("inventory", "create"), async (req: AuthenticatedRequest, res) => {
   const purchase = validInventoryPurchase(req.body ?? {});
-  if (!purchase) return fail(res, 400, "تحقق من اسم السلعة والكمية والأسعار والمورد وتاريخ الشراء.");
+  if (!purchase) return fail(res, 400, "تحقق من اسم السلعة وإجمالي الشراء والبيع والمورد وتاريخ الشراء.");
 
   const requestId = res.getHeader("X-Request-Id");
   const createPurchase = async () => {
@@ -1710,12 +1719,14 @@ app.post("/api/inventory", authenticate, requireSection("inventory"), requirePer
       const result = await client.query(
         `INSERT INTO inventory_items
           (name, quantity, remaining_quantity, buy_price, total_cost, sale_price, supplier, invoice_number,
-           supplier_id, invoice_id, purchase_date, notes, recorded_by_id, recorded_by_name, customer_id, customer_invoice_id)
-         VALUES ($1, $2, $2, $3, ($2::integer * $3::numeric), $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE), $10, $11, $12, $13, $14)
+           supplier_id, invoice_id, purchase_date, notes, recorded_by_id, recorded_by_name, customer_id, customer_invoice_id,
+           total_sale, pricing_mode, manual_paid)
+         VALUES ($1, $2, $2, $3, ($2::integer * $3::numeric), $4, $5, $6, $7, $8, COALESCE($9::date, CURRENT_DATE), $10, $11, $12, $13, $14, $15, $16, $17)
          RETURNING id`,
         [purchase.name, purchase.quantity, purchase.buyPrice, purchase.salePrice, purchase.supplier,
           purchase.invoiceNumber, links.supplierId, links.invoiceId, purchase.purchaseDate ?? null,
-          purchase.notes, member.clerk_user_id, member.name, customerId, customerInvoiceId],
+          purchase.notes, member.clerk_user_id, member.name, customerId, customerInvoiceId,
+          purchase.totalSale, purchase.pricingMode, purchase.manualPaid],
       );
       const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [result.rows[0].id]);
       await writeAuditWithClient(client, member, "تسجيل عملية شراء", `${purchase.name} — ${purchase.quantity} قطعة من ${purchase.supplier} بقيمة ${purchase.quantity * purchase.buyPrice} دج.`,
@@ -1763,7 +1774,7 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
   try {
     await client.query("BEGIN");
     const existing = await client.query(
-      "SELECT id, name, supplier, customer_id, customer_invoice_id, invoice_number, quantity, buy_price FROM inventory_items WHERE id = $1 FOR UPDATE",
+      "SELECT id, name, supplier, customer_id, customer_invoice_id, invoice_number, quantity, buy_price, total_cost, total_sale, manual_paid FROM inventory_items WHERE id = $1 FOR UPDATE",
       [id],
     );
     if (!existing.rowCount) {
@@ -1771,12 +1782,21 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
       return fail(res, 404, "عملية الشراء غير موجودة.");
     }
     const prior = existing.rows[0];
+    if (purchase.pricingMode === "total") {
+      // Preserve stock movements/quantities on historical records. The form
+      // edits financial totals, not their previously registered quantities.
+      purchase.quantity = Number(prior.quantity);
+      purchase.buyPrice = purchase.totalCost / purchase.quantity;
+      purchase.salePrice = purchase.totalSale! / purchase.quantity;
+    }
     const customerId = req.body?.customerId === undefined ? positiveId(prior.customer_id) : positiveId(req.body.customerId);
+    if (purchase.pricingMode === "total" && !customerId) throw new FinanceError(400, "اختر الزبون المرتبط بعملية الشراء.");
     await client.query("SELECT id FROM finance_accounts WHERE id = ANY($1::bigint[]) ORDER BY id FOR UPDATE",
       [[prior.customer_id, customerId].filter((value) => value !== null)]);
     const sameInvoice = customerId === positiveId(prior.customer_id) &&
       purchase.invoiceNumber.trim().toLocaleLowerCase() === String(prior.invoice_number).trim().toLocaleLowerCase();
-    const sameAmount = Number(prior.quantity) === purchase.quantity && Number(prior.buy_price) === purchase.buyPrice;
+    const sameAmount = Number(prior.total_cost) === purchase.totalCost &&
+      (prior.total_sale == null ? null : Number(prior.total_sale)) === purchase.totalSale;
     let customerInvoiceId = positiveId(prior.customer_invoice_id);
     if (customerInvoiceId) {
       await client.query("SELECT id FROM customer_invoices WHERE id = $1 FOR UPDATE", [customerInvoiceId]);
@@ -1784,6 +1804,10 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
       if (paid.rowCount && (!sameInvoice || !sameAmount)) {
         throw new FinanceError(409, "الفاتورة مرتبطة بشيك؛ أزل ربطها قبل تغيير الزبون أو رقم الفاتورة أو قيمتها.");
       }
+      if (paid.rowCount && purchase.paymentSpecified && !purchase.manualPaid) {
+        throw new FinanceError(409, "العملية مسددة بشيك؛ أزل ربط الفاتورة بالشيك قبل جعلها غير مدفوعة.");
+      }
+      if (paid.rowCount) purchase.paymentSpecified = false;
     }
     if (!sameInvoice || !sameAmount || (customerId && !customerInvoiceId)) {
       customerInvoiceId = await ensureCustomerInvoice(client, customerId, purchase.invoiceNumber,
@@ -1806,13 +1830,15 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
     );
     await client.query(
       `UPDATE inventory_items SET name = $1, quantity = $2, remaining_quantity = $2::integer - $3::integer,
-        buy_price = $4, total_cost = ($2::integer * $4::numeric), sale_price = $5, supplier = $6,
+        buy_price = $4, total_cost = $15::numeric, sale_price = $5, supplier = $6,
         invoice_number = $7, supplier_id = $8, invoice_id = $9, purchase_date = $10, notes = $11,
-        customer_id = $13, customer_invoice_id = $14
+        customer_id = $13, customer_invoice_id = $14, total_sale = $16, pricing_mode = $17,
+        manual_paid = CASE WHEN $18::boolean THEN $19::boolean ELSE manual_paid END
        WHERE id = $12`,
       [purchase.name, purchase.quantity, movements.rows[0].quantity, purchase.buyPrice, purchase.salePrice,
         purchase.supplier, purchase.invoiceNumber, links.supplierId, links.invoiceId,
-        purchase.purchaseDate, purchase.notes, id, customerId, customerInvoiceId],
+        purchase.purchaseDate, purchase.notes, id, customerId, customerInvoiceId, purchase.totalCost,
+        purchase.totalSale, purchase.pricingMode, purchase.paymentSpecified, purchase.manualPaid],
     );
     const item = await client.query(`${inventoryItemSelect} WHERE i.id = $1`, [id]);
     await writeAuditWithClient(client, req.member!, "تعديل بيانات شراء", `تحديث بيانات السلعة ${purchase.name}، رقم ${id}.`,
@@ -1827,6 +1853,35 @@ app.patch("/api/inventory/:id", authenticate, requireSection("inventory"), requi
   } finally {
     client.release();
   }
+});
+
+app.delete("/api/inventory/:id", authenticate, requireSection("inventory"), requirePermission("inventory", "delete"), async (req: AuthenticatedRequest, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return fail(res, 400, "رقم الشراء غير صالح.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query("SELECT id,name,customer_invoice_id FROM inventory_items WHERE id=$1 FOR UPDATE", [id]);
+    if (!result.rowCount) throw new FinanceError(404, "عملية الشراء غير موجودة.");
+    const invoiceId = result.rows[0].customer_invoice_id;
+    if (invoiceId) {
+      await client.query("SELECT id FROM customer_invoices WHERE id=$1 FOR UPDATE", [invoiceId]);
+      const cheque = await client.query("SELECT 1 FROM cheque_customer_invoices WHERE invoice_id=$1 AND active", [invoiceId]);
+      if (cheque.rowCount) throw new FinanceError(409, "أزل ربط الفاتورة بالشيك قبل حذف الشراء.");
+    }
+    const movements = await client.query("SELECT 1 FROM inventory_movements WHERE inventory_item_id=$1 LIMIT 1", [id]);
+    if (movements.rowCount) throw new FinanceError(409, "توجد حركات بيع أو استعمال مرتبطة بهذا الشراء؛ لا يمكن حذف تاريخه.");
+    await client.query("DELETE FROM inventory_items WHERE id=$1", [id]);
+    await writeAuditWithClient(client, req.member!, "حذف عملية شراء", result.rows[0].name,
+      { section: "inventory", eventType: "delete", entityId: id, data: { name: result.rows[0].name } });
+    await client.query("COMMIT");
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    if (error instanceof FinanceError) return fail(res, error.status, error.message);
+    console.error("Purchase deletion failed:", error);
+    fail(res, 500, "تعذر حذف عملية الشراء.");
+  } finally { client.release(); }
 });
 
 app.post("/api/inventory/:id/movements", authenticate, requireSection("inventory"), requirePermission("inventory", "create"), async (req: AuthenticatedRequest, res) => {
@@ -1984,7 +2039,7 @@ app.get("/api/cheques", authenticate, requireSection("cheques"), async (req, res
             FROM cheque_customer_invoices link WHERE link.cheque_id = c.id), '[]'::json) AS invoice_ids,
           COALESCE((SELECT json_agg(json_build_object(
             'id', ci.id, 'invoice_number', ci.invoice_number,
-            'amount', COALESCE((SELECT SUM(i.total_cost) FROM inventory_items i WHERE i.customer_invoice_id = ci.id), 0)
+            'amount', COALESCE((SELECT SUM(CASE WHEN i.pricing_mode='total' THEN i.total_sale ELSE i.total_cost END) FROM inventory_items i WHERE i.customer_invoice_id = ci.id), 0)
           ) ORDER BY ci.id) FROM cheque_customer_invoices link
             JOIN customer_invoices ci ON ci.id = link.invoice_id WHERE link.cheque_id = c.id), '[]'::json) AS invoices,
           COALESCE(pi.invoice_number, c.invoice_number) AS invoice_number,

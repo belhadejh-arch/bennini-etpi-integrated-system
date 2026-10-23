@@ -33,6 +33,10 @@ export function registerFinanceRoutes(app: Express, deps: Dependencies) {
   app.get("/api/finance/accounts", authenticate, async (req: AuthenticatedRequest, res) => {
     const member = req.member!;
     const kind = String(req.query.kind ?? "");
+    const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (search.length > 200) return res.status(400).json({ error: "عبارة البحث أطول من الحد المسموح." });
+    const searchClause = search ? " AND (a.name ILIKE $2 OR a.phone ILIKE $2)" : "";
+    const searchValues = search ? [kind, `%${search}%`] : [kind];
     if (!["customer", "partner"].includes(kind)) return res.status(400).json({ error: "اختر قسم الزبائن أو الشركاء." });
     if ((kind === "customer" && !customerAccess(member)) || (kind === "partner" && !hasPermission(member, "finance", "view"))) {
       return res.status(403).json({ error: "ليس لديك صلاحية عرض هذه الحسابات." });
@@ -43,10 +47,10 @@ export function registerFinanceRoutes(app: Express, deps: Dependencies) {
         return res.json({ items: result.rows.map(accountJson) });
       }
       if (!hasPermission(member, "finance", "view")) {
-        const result = await pool.query("SELECT id, name FROM finance_accounts WHERE kind = $1 ORDER BY name, id", [kind]);
+        const result = await pool.query(`SELECT a.id,a.name,a.phone FROM finance_accounts a WHERE a.kind=$1${searchClause} ORDER BY a.name,a.id`, searchValues);
         return res.json({ items: result.rows.map(accountJson) });
       }
-      const result = await pool.query(`${financeAccountSelect} WHERE a.kind = $1 ORDER BY a.name, a.id`, [kind]);
+      const result = await pool.query(`${financeAccountSelect} WHERE a.kind = $1${searchClause} ORDER BY a.name, a.id`, searchValues);
       res.json({ items: result.rows.map(accountJson) });
     } catch (error) { failed(res, error); }
   });
@@ -66,7 +70,7 @@ export function registerFinanceRoutes(app: Express, deps: Dependencies) {
       const account = await pool.query(`${financeAccountSelect} WHERE a.id = $1 ${member.role === "partner" ? "AND a.member_id = $2 AND a.kind = 'partner'" : ""}`,
         member.role === "partner" ? [id, member.clerk_user_id] : [id]);
       if (!account.rowCount) return res.status(404).json({ error: "الحساب غير موجود أو غير متاح لك." });
-      const [transactions, invoices] = await Promise.all([
+      const [transactions, invoices, purchases] = await Promise.all([
         pool.query(`
           SELECT t.id, t.type, t.amount, t.party, t.reason, t.payment_method, t.transaction_date::text AS date,
             t.account_id, t.interest_rate, ROUND(t.amount * t.interest_rate / 100, 2) AS interest_amount,
@@ -79,10 +83,50 @@ export function registerFinanceRoutes(app: Express, deps: Dependencies) {
         pool.query(`${customerInvoiceSelect} WHERE ci.customer_id = $1
           AND EXISTS (SELECT 1 FROM inventory_items i WHERE i.customer_invoice_id = ci.id)
           ORDER BY ci.invoice_date DESC, ci.id DESC`, [id]),
+        pool.query(`SELECT i.id, i.name, i.supplier, i.invoice_number, i.purchase_date::text, i.total_cost,
+          COALESCE(i.total_sale, i.quantity * i.sale_price) AS total_sale,
+          COALESCE(i.total_sale, i.quantity * i.sale_price) - i.total_cost AS profit,
+          i.notes, i.manual_paid,
+          EXISTS (SELECT 1 FROM cheque_customer_invoices l JOIN cheques c ON c.id=l.cheque_id
+            WHERE l.invoice_id=i.customer_invoice_id AND l.active AND c.status <> 'cancelled') AS paid_by_cheque
+          FROM inventory_items i WHERE i.customer_id=$1 ORDER BY i.purchase_date DESC, i.id DESC`, [id]),
       ]);
-      res.json({ account: accountJson(account.rows[0]), transactions: transactions.rows, invoices: invoices.rows.map(invoiceJson) });
+      res.json({ account: accountJson(account.rows[0]), transactions: transactions.rows, invoices: invoices.rows.map(invoiceJson),
+        purchases: purchases.rows.map((item) => ({ ...item, id: Number(item.id), paid: item.manual_paid || item.paid_by_cheque })) });
     } catch (error) { failed(res, error); }
   });
+
+  app.patch("/api/finance/accounts/:id/purchases/:purchaseId/payment",
+    authenticate, requireSection("finance"), requirePermission("finance", "edit"),
+    async (req: AuthenticatedRequest, res) => {
+      const client = await pool.connect();
+      try {
+        const accountId = positiveId(req.params.id);
+        const purchaseId = positiveId(req.params.purchaseId);
+        if (!accountId || !purchaseId || !["paid", "unpaid"].includes(req.body?.paymentStatus)) {
+          throw new FinanceError(400, "حالة الدفع أو معرّف الشراء غير صالح.");
+        }
+        await client.query("BEGIN");
+        const item = await client.query(`SELECT i.id, i.customer_invoice_id FROM inventory_items i
+          JOIN finance_accounts a ON a.id=i.customer_id AND a.kind='customer'
+          WHERE i.id=$1 AND i.customer_id=$2 FOR UPDATE OF i`, [purchaseId, accountId]);
+        if (!item.rowCount) throw new FinanceError(404, "عملية الشراء غير موجودة في حساب هذا الزبون.");
+        if (item.rows[0].customer_invoice_id) {
+          await client.query("SELECT id FROM customer_invoices WHERE id=$1 FOR UPDATE", [item.rows[0].customer_invoice_id]);
+          const cheque = await client.query(`SELECT 1 FROM cheque_customer_invoices l JOIN cheques c ON c.id=l.cheque_id
+            WHERE l.invoice_id=$1 AND l.active AND c.status <> 'cancelled'`, [item.rows[0].customer_invoice_id]);
+          if (cheque.rowCount) throw new FinanceError(409, "العملية مسددة بشيك؛ عدّل ربط الشيك قبل تغيير حالة الدفع.");
+        }
+        await client.query("UPDATE inventory_items SET manual_paid=$1 WHERE id=$2", [req.body.paymentStatus === "paid", purchaseId]);
+        await audit(client, req.member!, "تعديل حالة دفع شراء", `الشراء ${purchaseId}: ${req.body.paymentStatus === "paid" ? "مدفوعة" : "غير مدفوعة"}`,
+          { section: "finance", eventType: "update", entityId: accountId, data: { purchaseId, paymentStatus: req.body.paymentStatus } });
+        await client.query("COMMIT");
+        res.json({ ok: true });
+      } catch (error) {
+        await client.query("ROLLBACK");
+        failed(res, error);
+      } finally { client.release(); }
+    });
 
   for (const method of ["post", "patch"] as const) {
     app[method](method === "post" ? "/api/finance/accounts" : "/api/finance/accounts/:id",
@@ -143,6 +187,7 @@ export function registerFinanceRoutes(app: Express, deps: Dependencies) {
       if (!customerId) throw new FinanceError(400, "اختر الزبون أولاً.");
       const result = await pool.query(`${customerInvoiceSelect}
         WHERE ci.customer_id = $1 AND (c.id IS NULL OR c.id = $2)
+          AND NOT EXISTS (SELECT 1 FROM inventory_items paid_item WHERE paid_item.customer_invoice_id=ci.id AND paid_item.manual_paid)
           AND EXISTS (SELECT 1 FROM inventory_items i WHERE i.customer_invoice_id = ci.id)
         ORDER BY ci.invoice_date DESC, ci.id DESC`, [customerId, chequeId]);
       res.json({ items: result.rows.map(invoiceJson) });

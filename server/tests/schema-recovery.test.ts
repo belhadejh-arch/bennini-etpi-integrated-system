@@ -5,9 +5,11 @@ import { isMissingSchemaObject, withSchemaRecovery } from "../schema-recovery";
 
 test("purchase totals cast PostgreSQL bind parameters before arithmetic", () => {
   const source = readFileSync("server/index.ts", "utf8");
-  assert.match(source, /\(\$2::integer \* \$3::numeric\)/);
-  assert.match(source, /\$2::integer - \$3::integer/);
-  assert.match(source, /\(\$2::integer \* \$4::numeric\)/);
+  assert.ok(/\(\$2::integer \* \$3::numeric\)/.test(source), "creation arithmetic has explicit numeric types");
+  assert.ok(/\$2::integer - \$3::integer/.test(source), "remaining quantities have explicit integer types");
+  // The totals form now supplies the authoritative cost directly on edits,
+  // so old stock quantities cannot multiply it a second time.
+  assert.ok(/total_cost = \$15::numeric/.test(source), "edited cost binds the financial total with an explicit numeric type");
 });
 
 test("purchase schema recovery retries only missing-schema PostgreSQL errors once", async () => {

@@ -9,20 +9,24 @@ import {
   Search, ShoppingCart, Trash2, X,
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
 import CalendarDatePicker from "../components/CalendarDatePicker";
+import CustomerQuickCreate from "../components/CustomerQuickCreate";
 import RecordNotes from "../components/RecordNotes";
 import EntityPicker, { type FinanceEntity } from "../components/EntityPicker";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
-import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
+import { colors, formatDate, formatExactDzd as formatDzd, makeStylesReactive } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 import { translate } from "../../lib/localization";
 
 type Attachment = { id: number; file_name: string; mime_type: string; file_size: number };
 type InventoryItem = {
+  total_sale?: number | string | null;
+  pricing_mode?: "unit" | "total";
+  paid?: boolean;
   id: number;
   name: string;
   quantity: number;
@@ -66,7 +70,7 @@ type Summary = {
 };
 type InventoryResult = { items: InventoryItem[]; total: number; page: number; pageSize: number; summary: Summary };
 type PurchaseDraft = {
-  name: string; quantity: string; buyPrice: string; salePrice: string;
+  name: string; totalPurchase: string; totalSale: string; paymentStatus: string;
   supplier: string; invoiceNumber: string; purchaseDate: string; notes: string;
 };
 type Filters = {
@@ -77,7 +81,7 @@ type ApiError = Error & { status?: number; body?: { pending?: boolean } };
 type PickedDocument = DocumentPicker.DocumentPickerAsset;
 
 const emptyPurchase = (): PurchaseDraft => ({
-  name: "", quantity: "", buyPrice: "", salePrice: "", supplier: "", invoiceNumber: "", purchaseDate: localDate(), notes: "",
+  name: "", totalPurchase: "", totalSale: "", paymentStatus: "unpaid", supplier: "", invoiceNumber: "", purchaseDate: localDate(), notes: "",
 });
 const emptyFilters: Filters = {
   name: "", supplier: "", invoice: "", from: "", to: "",
@@ -124,6 +128,7 @@ export default function InventorySection() {
   const [purchaseOpen, setPurchaseOpen] = useState(false);
   const [purchase, setPurchase] = useState<PurchaseDraft>(emptyPurchase());
   const [purchaseCustomer, setPurchaseCustomer] = useState<FinanceEntity | null>(null);
+  const [customerFormOpen, setCustomerFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [pickedDocs, setPickedDocs] = useState<PickedDocument[]>([]);
   const [movementItem, setMovementItem] = useState<InventoryItem | null>(null);
@@ -190,6 +195,7 @@ export default function InventorySection() {
     setEditingItem(null);
     setPurchase(emptyPurchase());
     setPurchaseCustomer(null);
+    setCustomerFormOpen(false);
     setPickedDocs([]);
     setPurchaseOpen(true);
     setError("");
@@ -197,10 +203,12 @@ export default function InventorySection() {
 
   const startEdit = (item: InventoryItem) => {
     setEditingItem(item);
+    setCustomerFormOpen(false);
     setPickedDocs([]);
     setPurchase({
-      name: item.name, quantity: String(item.quantity), buyPrice: String(item.buy_price),
-      salePrice: item.sale_price == null ? "" : String(item.sale_price),
+      name: item.name, totalPurchase: String(item.total_cost),
+      totalSale: item.total_sale != null ? String(item.total_sale) : item.sale_price == null ? "" : String(Number(item.sale_price) * item.quantity),
+      paymentStatus: item.paid ? "paid" : "unpaid",
       supplier: item.supplier, invoiceNumber: item.invoice_number,
       purchaseDate: dateLabel(item.purchase_date), notes: item.notes || "",
     });
@@ -241,10 +249,9 @@ export default function InventorySection() {
 
   const savePurchase = async () => {
     if (!purchase.name.trim() || !purchase.supplier.trim() ||
-        !Number.isSafeInteger(Number(purchase.quantity)) || Number(purchase.quantity) < 1 ||
-        purchase.buyPrice === "" || !Number.isFinite(Number(purchase.buyPrice)) || Number(purchase.buyPrice) < 0 ||
-        (purchase.salePrice !== "" && (!Number.isFinite(Number(purchase.salePrice)) || Number(purchase.salePrice) < 0)) ||
-        (!editingItem && (!purchaseCustomer || !purchase.invoiceNumber.trim())) ||
+        !/^\d+(\.\d{1,2})?$/.test(purchase.totalPurchase) ||
+        !/^\d+(\.\d{1,2})?$/.test(purchase.totalSale) ||
+        !purchaseCustomer ||
         (purchaseCustomer && !purchase.invoiceNumber.trim()) ||
         !/^\d{4}-\d{2}-\d{2}$/.test(purchase.purchaseDate)) {
       setError("أكمل بيانات السلعة والمورد والتاريخ، واربط الشراء الجديد بزبون مسجل ورقم فاتورة.");
@@ -256,8 +263,8 @@ export default function InventorySection() {
     let savedDocuments = false;
     try {
       const payload = JSON.stringify({
-        name: purchase.name.trim(), quantity: Number(purchase.quantity),
-        buyPrice: Number(purchase.buyPrice), salePrice: purchase.salePrice.trim() ? Number(purchase.salePrice) : null,
+        name: purchase.name.trim(), totalPurchase: purchase.totalPurchase,
+        totalSale: purchase.totalSale, paymentStatus: purchase.paymentStatus,
         supplier: purchase.supplier.trim(), invoiceNumber: purchase.invoiceNumber.trim(),
         purchaseDate: purchase.purchaseDate, notes: purchase.notes.trim(), customerId: purchaseCustomer?.id ?? null,
       });
@@ -393,12 +400,23 @@ export default function InventorySection() {
     );
   }
 
-  const purchaseQuantity = Number(purchase.quantity) || 0;
-  const buyPrice = Number(purchase.buyPrice) || 0;
-  const salePrice = purchase.salePrice.trim() ? Number(purchase.salePrice) : null;
-  const totalCost = purchaseQuantity * buyPrice;
-  const expectedSales = salePrice == null ? null : purchaseQuantity * salePrice;
-  const expectedProfit = expectedSales == null ? null : expectedSales - totalCost;
+  const totalCost = amount(purchase.totalPurchase);
+  const expectedSales = purchase.totalSale.trim() ? amount(purchase.totalSale) : null;
+  const expectedProfit = expectedSales == null || !purchase.totalPurchase.trim() ? null : Math.round((expectedSales - totalCost) * 100) / 100;
+  const deletePurchase = (item: InventoryItem) => {
+    const remove = async () => {
+      setSaving(true); setError("");
+      try {
+        await apiRequest(`/inventory/${item.id}`, getToken, { method: "DELETE" });
+        if (editingItem?.id === item.id) { setPurchaseOpen(false); setEditingItem(null); }
+        await refresh();
+      } catch (caught) { setError(caught instanceof Error ? caught.message : "تعذر حذف الشراء."); }
+      finally { setSaving(false); }
+    };
+    const message = `حذف «${item.name}» سيزيل عملية الشراء ومرفقاتها ومبالغها من حساب الزبون. لا يمكن التراجع عن الحذف.`;
+    if (Platform.OS === "web") { if (window.confirm(message)) void remove(); }
+    else Alert.alert("حذف عملية الشراء", message, [{ text: "إلغاء", style: "cancel" }, { text: "حذف", style: "destructive", onPress: () => void remove() }]);
+  };
   const pageCount = Math.max(1, Math.ceil(total / 25));
 
   return (
@@ -447,19 +465,34 @@ export default function InventorySection() {
               <Field label="اسم السلعة *" value={purchase.name} onChange={(value) => setPurchaseField("name", value)} placeholder="مثال: أنبوب فولاذي" />
               <Field label="المورد *" value={purchase.supplier} onChange={(value) => setPurchaseField("supplier", value)} placeholder="اسم المورد" />
               <View style={{ flexGrow: 1, flexBasis: 205, minWidth: 145 }}>
-                <EntityPicker kind="customer" value={purchaseCustomer} onChange={setPurchaseCustomer} label={`الزبون${editingItem ? " (اختياري للسجلات القديمة)" : " *"}`} />
+                <EntityPicker kind="customer" value={purchaseCustomer} onChange={setPurchaseCustomer} label="الزبون *" showInitialResults
+                  onAdd={hasPermission(member, "finance", "create") ? () => setCustomerFormOpen(true) : undefined} />
               </View>
-              <Field label="الكمية *" value={purchase.quantity} onChange={(value) => setPurchaseField("quantity", value)} placeholder="0" numeric />
-              <Field label="رقم الفاتورة" value={purchase.invoiceNumber} onChange={(value) => setPurchaseField("invoiceNumber", value)} placeholder="اختياري" />
-              <Field label="سعر الشراء للوحدة (دج) *" value={purchase.buyPrice} onChange={(value) => setPurchaseField("buyPrice", value)} placeholder="0" numeric />
-              <Field label="سعر البيع للوحدة (دج) (اختياري)" value={purchase.salePrice} onChange={(value) => setPurchaseField("salePrice", value)} placeholder="غير محدد" numeric />
+              <Field label="رقم الفاتورة *" value={purchase.invoiceNumber} onChange={(value) => setPurchaseField("invoiceNumber", value)} placeholder="رقم الفاتورة" />
+              <Field label="إجمالي الشراء (دج) *" value={purchase.totalPurchase} onChange={(value) => setPurchaseField("totalPurchase", value)} placeholder="0" numeric />
+              <Field label="إجمالي البيع (دج) *" value={purchase.totalSale} onChange={(value) => setPurchaseField("totalSale", value)} placeholder="0" numeric />
+              <View style={styles.field}>
+                <Text style={styles.fieldLabel}>الفائدة (دج)</Text>
+                <Text accessibilityLabel="الفائدة المحسوبة" style={[styles.input, { color: colors.green, backgroundColor: colors.greenSoft, fontWeight: "800", paddingVertical: 12 }]}>
+                  {expectedProfit == null ? "—" : formatDzd(expectedProfit)}
+                </Text>
+              </View>
               <CalendarDatePicker label="تاريخ الشراء *" value={purchase.purchaseDate} onChange={(value) => setPurchaseField("purchaseDate", value)} />
               <Field label="ملاحظات" value={purchase.notes} onChange={(value) => setPurchaseField("notes", value)} placeholder="تفاصيل إضافية" />
             </View>
+            {customerFormOpen ? <CustomerQuickCreate onCancel={() => setCustomerFormOpen(false)} onSaved={(customer) => { setPurchaseCustomer(customer); setCustomerFormOpen(false); }} /> : null}
+            <Text style={styles.fieldLabel}>حالة الدفع</Text>
+            <View style={styles.chipRow}>
+              {[{ value: "paid", label: "مدفوعة" }, { value: "unpaid", label: "غير مدفوعة" }].map((option) => <Pressable key={option.value} onPress={() => setPurchaseField("paymentStatus", option.value)}
+                accessibilityRole="radio" accessibilityState={{ selected: purchase.paymentStatus === option.value }}
+                style={[styles.smallOutlineButton, purchase.paymentStatus === option.value && { backgroundColor: colors.blueSoft, borderColor: colors.blue }]}>
+                <Text style={styles.outlineButtonText}>{option.label}</Text>
+              </Pressable>)}
+            </View>
             <View style={styles.calculationBox}>
               <Calculation label="إجمالي التكلفة" value={formatDzd(totalCost)} />
-              {expectedSales != null ? <Calculation label="قيمة البيع المتوقعة" value={formatDzd(expectedSales)} /> : null}
-              {expectedProfit != null ? <Calculation label="الربح المتوقع" value={formatDzd(expectedProfit)} highlight /> : null}
+              {expectedSales != null ? <Calculation label="إجمالي البيع" value={formatDzd(expectedSales)} /> : null}
+              {expectedProfit != null ? <Calculation label="الفائدة" value={formatDzd(expectedProfit)} highlight /> : null}
             </View>
             {canAddAttachments ? (
               <View style={styles.actionsRow}>
@@ -482,7 +515,7 @@ export default function InventorySection() {
                 ))}
               </View>
             ) : null}
-            <Pressable onPress={() => void savePurchase()} disabled={saving} style={[styles.saveButton, saving && styles.disabled]}>
+            <Pressable onPress={() => void savePurchase()} disabled={saving || customerFormOpen} style={[styles.saveButton, (saving || customerFormOpen) && styles.disabled]}>
               {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveText}>{editingItem ? "حفظ التعديلات" : "حفظ عملية الشراء"}</Text>}
             </Pressable>
           </View>
@@ -564,6 +597,12 @@ export default function InventorySection() {
               </View>
             </View>
             <View style={styles.metricsGrid}>
+              {item.pricing_mode === "total" ? <>
+                <Metric label="إجمالي الشراء" value={formatDzd(amount(item.total_cost))} />
+                <Metric label="إجمالي البيع" value={formatDzd(amount(item.total_sale))} />
+                <Metric label="الفائدة" value={formatDzd(amount(item.expected_profit))} accent="#15803D" />
+                <Metric label="حالة الدفع" value={item.paid ? "مدفوعة" : "غير مدفوعة"} />
+              </> : <>
               <Metric label="الكمية المشراة" value={`${item.quantity} قطعة`} />
               <Metric label="المباع" value={`${item.sold_quantity} قطعة`} />
               <Metric label="المستعمل" value={`${item.used_quantity} قطعة`} />
@@ -572,9 +611,11 @@ export default function InventorySection() {
               <Metric label="إجمالي التكلفة" value={formatDzd(amount(item.total_cost))} />
               <Metric label="الربح المتوقع" value={item.sale_price == null || item.expected_profit == null ? "غير محدد" : profitLabel(item.expected_profit)} accent="#15803D" />
               <Metric label="الربح المحقق" value={profitLabel(item.realized_profit)} accent="#B45309" />
+              </>}
             </View>
             <RecordNotes entity="inventory" recordId={item.id} initialNotes={item.notes} editable={canEdit} />
             <View style={styles.actionsRow}>
+              {hasPermission(member, "inventory", "delete") ? <Pressable disabled={saving} onPress={() => deletePurchase(item)} style={styles.smallOutlineButton}><Trash2 size={14} color={colors.red} /><Text style={{ color: colors.red }}>حذف الشراء</Text></Pressable> : null}
               {canCreate && item.remaining_quantity > 0 ? (
                 <>
                   <ActionButton label="تسجيل بيع" onPress={() => startMovement(item, "sale")} />
@@ -664,6 +705,7 @@ function Field({ label, value, onChange, placeholder, numeric = false }: {
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
+        accessibilityLabel={label}
         value={value}
         onChangeText={onChange}
         placeholder={placeholder}

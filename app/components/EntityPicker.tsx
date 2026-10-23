@@ -1,5 +1,5 @@
 import { useAuth } from "../../lib/auth";
-import { Search, X } from "lucide-react-native";
+import { Plus, Search, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
 import { apiRequest } from "../../lib/api";
@@ -8,13 +8,15 @@ import { colors } from "../../lib/theme";
 export type FinanceEntity = { id: number; name: string; phone?: string | null; invoice_total?: number | string };
 
 export default function EntityPicker({
-  kind, value, onChange, label, disabled = false,
+  kind, value, onChange, label, disabled = false, onAdd, showInitialResults = false,
 }: {
   kind: "customer" | "partner";
   value: FinanceEntity | null;
   onChange: (entity: FinanceEntity | null) => void;
   label: string;
   disabled?: boolean;
+  onAdd?: () => void;
+  showInitialResults?: boolean;
 }) {
   const { getToken, language } = useAuth();
   const [query, setQuery] = useState(value?.name ?? "");
@@ -24,7 +26,7 @@ export default function EntityPicker({
 
   useEffect(() => { setQuery(value?.name ?? ""); }, [value?.id, value?.name]);
   useEffect(() => {
-    if (disabled || value || query.trim().length < 1) { setResults([]); return; }
+    if (disabled || value || (!showInitialResults && !query.trim())) { setResults([]); return; }
     let current = true;
     const timer = setTimeout(() => {
       setLoading(true);
@@ -35,7 +37,7 @@ export default function EntityPicker({
         .finally(() => { if (current) setLoading(false); });
     }, 250);
     return () => { current = false; clearTimeout(timer); };
-  }, [disabled, getToken, kind, query, value]);
+  }, [disabled, getToken, kind, query, value, showInitialResults]);
 
   return (
     <View style={{ gap: 6, position: "relative" }}>
@@ -63,6 +65,9 @@ export default function EntityPicker({
           ))}
         </View>
       ) : null}
+      {onAdd && !disabled ? <Pressable accessibilityRole="button" onPress={onAdd} style={{ flexDirection: "row", gap: 6, minHeight: 38, alignItems: "center" }}>
+        <Plus size={15} color={colors.blue} /><Text style={{ color: colors.blue, fontWeight: "700", fontSize: 13 }}>إضافة زبون جديد</Text>
+      </Pressable> : null}
     </View>
   );
 }

@@ -3,13 +3,14 @@ import type { Member } from "./index";
 import { hasPermission } from "../shared/access";
 import { printLabels, type PrintReport, type PrintRow, type PrintTable } from "../shared/printing";
 import { rentalCalculation } from "../shared/rental-calculation";
-import { FinanceError } from "./finance-data";
+import { FinanceError, financeAccountSelect } from "./finance-data";
 import { printDefinitions } from "./print-definitions";
 import { driverCostsByMachinery } from "./machinery-costs";
 
 const financialKeys = new Set(["amount","buy_price","sale_price","total_cost","total","monthly_salary","repair_expense",
   "rental_rate","total_amount","paid_amount","remaining","interest_rate","interest_amount","incoming","outgoing","balance",
-  "driver_total_cost","total_expenses","invoice_total","invoice_paid","invoice_unpaid"]);
+  "driver_total_cost","total_expenses","invoice_total","invoice_paid","invoice_unpaid",
+  "total_sale","profit","purchase_total","sale_total","profit_total"]);
 export function availablePrintReports(member: Member) {
   return Object.entries(printLabels).filter(([key]) => {
     if (member.role === "partner") return ["dashboard","finance","partners","notifications","profile"].includes(key);
@@ -57,7 +58,7 @@ export async function loadPrintReport(pool: pg.Pool, member: Member, key: string
       if (!partner) outgoing += Number((await pool.query("SELECT COALESCE(SUM(amount),0) AS amount FROM field_expenses")).rows[0].amount);
       add("income","إجمالي الدخل (دج)",income); add("outgoing","إجمالي الخرج (دج)",outgoing); add("balance","الرصيد (دج)",income-outgoing);
       if (!partner && hasPermission(member,"inventory","view")) {
-        const data = (await pool.query("SELECT COALESCE(SUM(total_cost),0) AS purchases,COALESCE(SUM(remaining_quantity*buy_price),0) AS stock FROM inventory_items")).rows[0];
+        const data = (await pool.query("SELECT COALESCE(SUM(total_cost),0) AS purchases,COALESCE(SUM(ROUND(remaining_quantity*total_cost/NULLIF(quantity,0),2)),0) AS stock FROM inventory_items")).rows[0];
         add("purchases","إجمالي المشتريات (دج)",data.purchases); add("stock","قيمة المخزون (دج)",data.stock);
       }
       if (!partner && hasPermission(member,"rentals","view")) {
@@ -98,17 +99,15 @@ export async function loadPrintReport(pool: pg.Pool, member: Member, key: string
     });
   }
   if(key==="customers") {
-    const invoiceTotals=await pool.query(`SELECT i.customer_id,SUM(i.total_cost) AS invoice_total,
-      SUM(CASE WHEN EXISTS(SELECT 1 FROM cheque_customer_invoices l JOIN cheques c ON c.id=l.cheque_id
-        WHERE l.invoice_id=i.customer_invoice_id AND l.active AND c.status<>'cancelled') THEN i.total_cost ELSE 0 END) AS invoice_paid
-      FROM inventory_items i WHERE i.customer_id IS NOT NULL GROUP BY i.customer_id`);
-    const totals=new Map(invoiceTotals.rows.map((row)=>[String(row.customer_id),row]));
+    const invoiceTotals=await pool.query(`${financeAccountSelect} WHERE a.kind='customer'`);
+    const totals=new Map(invoiceTotals.rows.map((row)=>[String(row.id),row]));
     rows.forEach((row)=>{
       row.invoice_total=Number(totals.get(String(row.id))?.invoice_total??0);
-      row.invoice_paid=Number(totals.get(String(row.id))?.invoice_paid??0);
+      row.invoice_paid=Number(totals.get(String(row.id))?.paid_total??0);
       row.invoice_unpaid=Number(row.invoice_total)-Number(row.invoice_paid);
+      for (const key of ["purchase_total","sale_total","profit_total"]) row[key]=Number(totals.get(String(row.id))?.[key]??0);
     });
-    columns=[...columns,...[["invoice_total","إجمالي الفواتير (دج)"],["invoice_paid","الفواتير المسددة (دج)"],["invoice_unpaid","الفواتير غير المسددة (دج)"]]
+    columns=[...columns,...[["purchase_total","إجمالي الشراء (دج)"],["sale_total","إجمالي البيع (دج)"],["profit_total","إجمالي الفائدة (دج)"],["invoice_total","إجمالي المستحق (دج)"],["invoice_paid","المبالغ المدفوعة (دج)"],["invoice_unpaid","المبالغ المتبقية (دج)"]]
       .map(([key,label])=>({key,label,numeric:true,sum:true}))];
   }
   // Numeric sorting remains stable for paginated sections without imposing any row limit.
@@ -139,13 +138,15 @@ export async function addPrintDetails(pool: pg.Pool, report: PrintReport, member
     }
     if (["customerInvoices","supplierInvoices"].includes(report.key)) {
       const customer = report.key === "customerInvoices";
-      const items = await queryRows(`SELECT name,quantity,buy_price,total_cost,sale_price,notes FROM inventory_items
+      const items = await queryRows(`SELECT name,quantity,buy_price,total_cost,sale_price,notes,
+        COALESCE(total_sale,quantity*sale_price) AS total_sale,COALESCE(total_sale,quantity*sale_price)-total_cost AS profit FROM inventory_items
         WHERE ${customer ? "customer_invoice_id" : "invoice_id"}=$1 ORDER BY id`,row.id);
       if (!customer) items.push(...await queryRows(`SELECT name,quantity,buy_price,quantity*buy_price+repair_expense AS total_cost,
         NULL AS sale_price,notes FROM machinery_spare_parts WHERE invoice_id=$1 ORDER BY id`,row.id));
       details.push({title:`بنود الفاتورة ${row.invoice_number}`,columns:[
         {key:"name",label:"السلعة"},{key:"quantity",label:"الكمية",numeric:true,sum:true},
         ...(canMoney ? [{key:"buy_price",label:"سعر الوحدة (دج)",numeric:true},{key:"total_cost",label:"الإجمالي (دج)",numeric:true,sum:true}] : []),
+        ...(customer && canMoney ? [{key:"total_sale",label:"إجمالي البيع (دج)",numeric:true,sum:true},{key:"profit",label:"الفائدة (دج)",numeric:true,sum:true}] : []),
         {key:"notes",label:"ملاحظات"}],rows:items});
     }
     if (report.key === "customers" || report.key === "partners") {
@@ -155,9 +156,20 @@ export async function addPrintDetails(pool: pg.Pool, report: PrintReport, member
         !["party","account","recorded_by_name"].includes(column.key)),rows:transactions});
       if (report.key === "customers") {
         const invoices = await queryRows(`SELECT ci.invoice_number,ci.invoice_date::text,
-          COALESCE((SELECT SUM(total_cost) FROM inventory_items i WHERE i.customer_invoice_id=ci.id),0) AS amount
+          COALESCE((SELECT SUM(CASE WHEN i.pricing_mode='total' THEN i.total_sale ELSE i.total_cost END) FROM inventory_items i WHERE i.customer_invoice_id=ci.id),0) AS amount
           FROM customer_invoices ci WHERE customer_id=$1 ORDER BY invoice_date,id`,row.id);
         details.push({title:"فواتير الحساب",columns:[{key:"invoice_number",label:"الفاتورة"},{key:"invoice_date",label:"التاريخ"},{key:"amount",label:"المبلغ (دج)",numeric:true,sum:true}],rows:invoices});
+        const purchases = await queryRows(`SELECT i.name,i.supplier,i.invoice_number,i.purchase_date::text,
+          i.total_cost,COALESCE(i.total_sale,i.quantity*i.sale_price) AS total_sale,
+          COALESCE(i.total_sale,i.quantity*i.sale_price)-i.total_cost AS profit,i.notes,
+          CASE WHEN i.manual_paid OR EXISTS(SELECT 1 FROM cheque_customer_invoices l JOIN cheques c ON c.id=l.cheque_id
+            WHERE l.invoice_id=i.customer_invoice_id AND l.active AND c.status<>'cancelled') THEN 'paid' ELSE 'unpaid' END AS status
+          FROM inventory_items i WHERE i.customer_id=$1 ORDER BY i.purchase_date,i.id`,row.id);
+        details.push({title:"عمليات شراء الزبون",columns:[
+          {key:"name",label:"السلعة"},{key:"supplier",label:"المورد"},{key:"invoice_number",label:"الفاتورة"},{key:"purchase_date",label:"التاريخ"},
+          ...(canMoney ? [{key:"total_cost",label:"إجمالي الشراء (دج)",numeric:true,sum:true},
+            {key:"total_sale",label:"إجمالي البيع (دج)",numeric:true,sum:true},{key:"profit",label:"الفائدة (دج)",numeric:true,sum:true}] : []),
+          {key:"status",label:"حالة الدفع"},{key:"notes",label:"ملاحظات"}],rows:purchases});
       }
     }
     row._details = details;

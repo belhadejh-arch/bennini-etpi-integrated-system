@@ -33,7 +33,10 @@ ALTER TABLE transactions
   ADD COLUMN IF NOT EXISTS interest_rate NUMERIC(8,4) NOT NULL DEFAULT 0 CHECK (interest_rate >= 0 AND interest_rate <= 100);
 ALTER TABLE inventory_items
   ADD COLUMN IF NOT EXISTS customer_id BIGINT REFERENCES finance_accounts(id) ON DELETE RESTRICT,
-  ADD COLUMN IF NOT EXISTS customer_invoice_id BIGINT;
+  ADD COLUMN IF NOT EXISTS customer_invoice_id BIGINT,
+  ADD COLUMN IF NOT EXISTS total_sale NUMERIC(16,2) CHECK (total_sale IS NULL OR total_sale >= 0),
+  ADD COLUMN IF NOT EXISTS pricing_mode TEXT NOT NULL DEFAULT 'unit' CHECK (pricing_mode IN ('unit','total')),
+  ADD COLUMN IF NOT EXISTS manual_paid BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE cheques
   ADD COLUMN IF NOT EXISTS customer_id BIGINT REFERENCES finance_accounts(id) ON DELETE RESTRICT;
 

@@ -24,8 +24,11 @@ export function positiveId(value: unknown): number | null {
 
 export const customerInvoiceSelect = `
   SELECT ci.id, ci.customer_id, ci.invoice_number, ci.invoice_date::text,
-    COALESCE((SELECT SUM(i.total_cost) FROM inventory_items i WHERE i.customer_invoice_id = ci.id), 0) AS amount,
-    (c.id IS NOT NULL) AS paid, c.id AS cheque_id, c.cheque_number, c.status AS cheque_status,
+    COALESCE((SELECT SUM(CASE WHEN i.pricing_mode = 'total' THEN i.total_sale ELSE i.total_cost END)
+      FROM inventory_items i WHERE i.customer_invoice_id = ci.id), 0) AS amount,
+    (c.id IS NOT NULL OR COALESCE((SELECT BOOL_AND(i.manual_paid) FROM inventory_items i
+      WHERE i.customer_invoice_id = ci.id), FALSE)) AS paid,
+    c.id AS cheque_id, c.cheque_number, c.status AS cheque_status,
     c.issue_date::text AS cheque_date, ci.created_by_name, ci.created_at
   FROM customer_invoices ci
   LEFT JOIN cheque_customer_invoices link ON link.invoice_id = ci.id AND link.active
@@ -37,16 +40,22 @@ export const financeAccountSelect = `
     COALESCE(inv.invoice_total, 0) AS invoice_total,
     COALESCE(inv.paid_total, 0) AS paid_total,
     COALESCE(inv.invoice_total - inv.paid_total, 0) AS unpaid_total,
+    COALESCE(inv.purchase_total, 0) AS purchase_total,
+    COALESCE(inv.sale_total, 0) AS sale_total,
+    COALESCE(inv.profit_total, 0) AS profit_total,
     COALESCE(t.deposits, 0) AS deposits, COALESCE(t.withdrawals, 0) AS withdrawals,
     COALESCE(t.interest_total, 0) AS interest_total,
     COALESCE(t.deposits - t.withdrawals, 0) AS balance
   FROM finance_accounts a
   LEFT JOIN LATERAL (
-    SELECT SUM(i.total_cost) AS invoice_total,
-      SUM(CASE WHEN EXISTS (
+    SELECT SUM(CASE WHEN i.pricing_mode = 'total' THEN i.total_sale ELSE i.total_cost END) AS invoice_total,
+      SUM(i.total_cost) AS purchase_total,
+      SUM(COALESCE(i.total_sale, i.quantity * i.sale_price)) AS sale_total,
+      SUM(COALESCE(i.total_sale, i.quantity * i.sale_price) - i.total_cost) AS profit_total,
+      SUM(CASE WHEN i.manual_paid OR EXISTS (
         SELECT 1 FROM cheque_customer_invoices link JOIN cheques c ON c.id = link.cheque_id
         WHERE link.invoice_id = i.customer_invoice_id AND link.active AND c.status <> 'cancelled'
-      ) THEN i.total_cost ELSE 0 END) AS paid_total
+      ) THEN CASE WHEN i.pricing_mode = 'total' THEN i.total_sale ELSE i.total_cost END ELSE 0 END) AS paid_total
     FROM inventory_items i WHERE i.customer_id = a.id
   ) inv ON TRUE
   LEFT JOIN LATERAL (
@@ -117,6 +126,10 @@ export async function synchronizeChequeInvoices(
     WHERE customer_invoice_id = ANY($1::bigint[])
   `, [invoiceIds]);
   if (Number(hasPurchases.rows[0].total) !== invoiceIds.length) throw new FinanceError(400, "إحدى الفواتير لا تحتوي على مشتريات.");
+  if (status !== "cancelled") {
+    const manual = await client.query("SELECT 1 FROM inventory_items WHERE customer_invoice_id = ANY($1::bigint[]) AND manual_paid LIMIT 1", [invoiceIds]);
+    if (manual.rowCount) throw new FinanceError(409, "توجد مشتريات مسددة مباشرة في هذه الفاتورة؛ ألغِ التسديد المباشر قبل ربطها بشيك.");
+  }
   if (status !== "cancelled") {
     const conflict = await client.query(`
       SELECT 1 FROM cheque_customer_invoices WHERE invoice_id = ANY($1::bigint[]) AND active AND cheque_id <> $2

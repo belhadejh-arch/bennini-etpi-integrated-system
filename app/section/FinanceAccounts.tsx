@@ -1,5 +1,5 @@
 import { useAuth } from "../../lib/auth";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import { ArrowRight, FilePlus2, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react-native";
 import { useCallback, useEffect, useState } from "react";
@@ -7,14 +7,16 @@ import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextIn
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
 import CalendarDatePicker from "../components/CalendarDatePicker";
+import CustomerPurchases, { type CustomerPurchase } from "../components/CustomerPurchases";
 import { PrintRecordButton } from "../components/PrintingProvider";
 import { apiRequest, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
-import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
+import { colors, formatDate, formatDzd, formatExactDzd, makeStylesReactive } from "../../lib/theme";
 import { translate } from "../../lib/localization";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 
 type Account = {
+  purchase_total: number | string; sale_total: number | string; profit_total: number | string;
   id: number; kind: "customer" | "partner"; name: string; phone: string | null; address: string | null; notes: string | null;
   member_id: string | null; invoice_total: number | string; paid_total: number | string; unpaid_total: number | string;
   deposits: number | string; withdrawals: number | string; interest_total: number | string; balance: number | string;
@@ -25,7 +27,7 @@ type Transaction = {
   recorded_by_name: string; notes: string; attachments?: Array<{ id: number; file_name: string; mime_type: string; file_size: number }>;
 };
 type Invoice = { id: number; invoice_number: string; invoice_date: string; amount: number | string; paid: boolean; cheque_id: number | null; cheque_number: string | null; cheque_status: string | null; cheque_date: string | null };
-type Detail = { account: Account; transactions: Transaction[]; invoices: Invoice[] };
+type Detail = { account: Account; transactions: Transaction[]; invoices: Invoice[]; purchases: CustomerPurchase[] };
 type MemberOption = { clerk_user_id: string; name: string };
 type Draft = { name: string; phone: string; address: string; notes: string; memberId: string };
 type OperationDraft = { type: "income" | "expense"; amount: string; interestRate: string; reason: string; paymentMethod: string; date: string; notes: string };
@@ -72,8 +74,8 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
     } catch (e) { setError(e instanceof Error ? e.message : "تعذر تحميل الحسابات."); }
     finally { setLoading(false); }
   }, [getToken, kind, member?.clerk_user_id, partnerViewer, requestedCustomerId]);
-  useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => {
+  useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
+  useFocusEffect(useCallback(() => {
     if (selected == null) { setDetail(null); return; }
     let active = true;
     setDetail(null);
@@ -83,7 +85,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
       .catch((e) => { if (active) setError(e instanceof Error ? e.message : "تعذر تحميل الحساب."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [getToken, selected]);
+  }, [getToken, selected]));
   useEffect(() => {
     if (!mayLinkMember || kind !== "partner") return;
     let active = true;
@@ -98,6 +100,19 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
     if (!account) setSelected(null);
     setDraft(account ? { name: account.name, phone: account.phone ?? "", address: account.address ?? "", notes: account.notes ?? "", memberId: account.member_id ?? "" } : blankDraft());
     setEditing(true); setError("");
+  };
+  const updatePurchasePayment = async (purchase: CustomerPurchase) => {
+    if (!selected || saving) return;
+    setSaving(true); setError("");
+    try {
+      await apiRequest(`/finance/accounts/${selected}/purchases/${purchase.id}/payment`, getToken, {
+        method: "PATCH", body: JSON.stringify({ paymentStatus: purchase.paid ? "unpaid" : "paid" }),
+      });
+      const updated = await apiRequest<Detail>(`/finance/accounts/${selected}`, getToken);
+      setDetail(updated);
+      await refresh();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "تعذر تعديل حالة الدفع."); }
+    finally { setSaving(false); }
   };
   const saveAccount = async () => {
     if (!draft.name.trim()) { setError("اسم الحساب مطلوب."); return; }
@@ -203,9 +218,11 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
         {error ? <View style={{ padding: 12, borderRadius: 10, backgroundColor: colors.redSoft }}><Text style={{ color: colors.red, textAlign: "right" }}>{error}</Text></View> : null}
         {kind === "customer" ? (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            <Summary label="قيمة الفواتير" value={formatDzd(total("invoice_total"))} />
-            <Summary label="فواتير مسددة بشيك" value={formatDzd(total("paid_total"))} />
-            <Summary label="المتبقي" value={formatDzd(total("unpaid_total"))} />
+            <Summary label="إجمالي الشراء" value={formatExactDzd(total("purchase_total"))} />
+            <Summary label="إجمالي البيع" value={formatExactDzd(total("sale_total"))} />
+            <Summary label="إجمالي الفائدة" value={formatExactDzd(total("profit_total"))} green />
+            <Summary label="إجمالي المدفوع" value={formatExactDzd(total("paid_total"))} />
+            <Summary label="المتبقي" value={formatExactDzd(total("unpaid_total"))} />
           </View>
         ) : (
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
@@ -244,7 +261,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                 <Pressable key={account.id} onPress={() => { setSelected(account.id); setEditing(false); }} style={[card, { borderColor: selected === account.id ? colors.blue : colors.border, borderWidth: selected === account.id ? 2 : 1 }]}>
                   <Text style={heading}>{account.name}</Text>
                   <Text style={hint}>{account.phone || "دون رقم هاتف"}</Text>
-                  {kind === "customer" ? <Text style={value}>متبقٍ: {formatDzd(Number(account.unpaid_total))}</Text> : <Text style={value}>الرصيد الصافي: {formatDzd(Number(account.balance))}</Text>}
+                  {kind === "customer" ? <Text style={value}>متبقٍ: {formatExactDzd(Number(account.unpaid_total))}</Text> : <Text style={value}>الرصيد الصافي: {formatDzd(Number(account.balance))}</Text>}
                 </Pressable>
               ))}
             </View>
@@ -264,9 +281,11 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                       <Summary label="الهاتف" value={detail.account.phone || "—"} />
                       <Summary label="العنوان" value={detail.account.address || "—"} />
                       {kind === "customer" ? <>
-                        <Summary label="الفواتير" value={formatDzd(Number(detail.account.invoice_total))} />
-                        <Summary label="المدفوع" value={formatDzd(Number(detail.account.paid_total))} />
-                        <Summary label="المتبقي" value={formatDzd(Number(detail.account.unpaid_total))} />
+                        <Summary label="إجمالي الشراء" value={formatExactDzd(Number(detail.account.purchase_total))} />
+                        <Summary label="إجمالي البيع" value={formatExactDzd(Number(detail.account.sale_total))} />
+                        <Summary label="إجمالي الفائدة" value={formatExactDzd(Number(detail.account.profit_total))} green />
+                        <Summary label="المدفوع" value={formatExactDzd(Number(detail.account.paid_total))} />
+                        <Summary label="المتبقي" value={formatExactDzd(Number(detail.account.unpaid_total))} />
                       </> : <>
                         <Summary label="الإيداعات" value={formatDzd(Number(detail.account.deposits))} />
                         <Summary label="السحوبات" value={formatDzd(Number(detail.account.withdrawals))} />
@@ -275,6 +294,8 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                       </>}
                     </View>
                   </View>
+                  {kind === "customer" ? <View style={card}><CustomerPurchases purchases={detail.purchases ?? []} canEdit={canEdit}
+                    saving={saving} onPayment={(purchase) => void updatePurchasePayment(purchase)} /></View> : null}
                   {operationOpen ? (
                     <View style={card}>
                       <Text style={heading}>تسجيل حركة الشريك</Text>
@@ -298,7 +319,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                         <View key={invoice.id} style={line}>
                           <PrintRecordButton report="customerInvoices" id={invoice.id} />
                           <View style={{ flex: 1 }}>
-                            <Text style={value}>فاتورة {invoice.invoice_number} · {formatDzd(Number(invoice.amount))}</Text>
+                            <Text style={value}>فاتورة {invoice.invoice_number} · {formatExactDzd(Number(invoice.amount))}</Text>
                             <Text style={hint}>{formatDate(invoice.invoice_date)} · {invoice.paid ? "مدفوعة" : "غير مدفوعة"}</Text>
                             {invoice.cheque_id ? <Text style={hint}>شيك {invoice.cheque_number || invoice.cheque_id} · {formatDate(invoice.cheque_date)}</Text> : null}
                           </View>

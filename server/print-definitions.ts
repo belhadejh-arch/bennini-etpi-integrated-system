@@ -18,10 +18,17 @@ export const printDefinitions: Record<string, PrintDefinition> = {
   },
   inventory: {
     section: "inventory",
-    sql: `SELECT id,name,quantity,remaining_quantity,buy_price,sale_price,total_cost,supplier,invoice_number,
-      purchase_date::text,recorded_by_name,notes FROM inventory_items`,
+    sql: `SELECT i.id,i.name,i.quantity,i.remaining_quantity,i.buy_price,i.sale_price,i.total_cost,i.supplier,i.invoice_number,
+      i.purchase_date::text,i.recorded_by_name,i.notes,
+      COALESCE(i.total_sale,i.quantity*i.sale_price) AS total_sale,
+      COALESCE(i.total_sale,i.quantity*i.sale_price)-i.total_cost AS profit,
+      (SELECT name FROM finance_accounts WHERE id=i.customer_id) AS customer,
+      CASE WHEN i.manual_paid OR EXISTS(SELECT 1 FROM cheque_customer_invoices l JOIN cheques c ON c.id=l.cheque_id
+        WHERE l.invoice_id=i.customer_invoice_id AND l.active AND c.status<>'cancelled') THEN 'paid' ELSE 'unpaid' END AS status
+      FROM inventory_items i`,
     columns: [id,col("name","السلعة"),col("quantity","الكمية",true,true),col("remaining_quantity","المتبقي",true,true),
       money("buy_price","سعر الشراء (دج)",false),money("sale_price","سعر البيع (دج)",false),money("total_cost","التكلفة (دج)"),
+      money("total_sale","إجمالي البيع (دج)"),money("profit","الفائدة (دج)"),col("customer","الزبون"),col("status","حالة الدفع"),
       col("supplier","المورد"),col("invoice_number","رقم الفاتورة"),col("purchase_date","تاريخ الشراء"),col("recorded_by_name","سجله"),col("notes","ملاحظات")],
   },
   movements: {
@@ -101,9 +108,11 @@ export const printDefinitions: Record<string, PrintDefinition> = {
   customerInvoices: {
     section: "finance",
     sql: `SELECT ci.id,ci.customer_id,a.name AS customer,a.phone,a.address,ci.invoice_number,ci.invoice_date::text,
-      COALESCE((SELECT SUM(i.total_cost) FROM inventory_items i WHERE i.customer_invoice_id=ci.id),0) AS amount,
+      COALESCE((SELECT SUM(CASE WHEN i.pricing_mode='total' THEN i.total_sale ELSE i.total_cost END) FROM inventory_items i WHERE i.customer_invoice_id=ci.id),0) AS amount,
       CASE WHEN EXISTS(SELECT 1 FROM cheque_customer_invoices l JOIN cheques c ON c.id=l.cheque_id
-        WHERE l.invoice_id=ci.id AND l.active AND c.status<>'cancelled') THEN 'paid' ELSE 'unpaid' END AS status
+        WHERE l.invoice_id=ci.id AND l.active AND c.status<>'cancelled')
+        OR COALESCE((SELECT BOOL_AND(i.manual_paid) FROM inventory_items i WHERE i.customer_invoice_id=ci.id),FALSE)
+        THEN 'paid' ELSE 'unpaid' END AS status
       FROM customer_invoices ci JOIN finance_accounts a ON a.id=ci.customer_id`,
     columns: [id,col("invoice_number","رقم الفاتورة"),col("invoice_date","تاريخ الفاتورة"),col("customer","الزبون"),col("phone","الهاتف"),col("address","العنوان"),money("amount","الإجمالي (دج)"),col("status","حالة التسديد")],
   },

@@ -146,9 +146,12 @@ export function makeStylesReactive<T extends StyleTree>(definitions: T): T {
   return definitions;
 }
 
-export function formatDzd(value: number, language: "ar" | "fr" = activeLanguage) {
-  const number = new Intl.NumberFormat(language === "ar" ? "ar-DZ" : "fr-DZ", { maximumFractionDigits: 0 }).format(value);
+export function formatDzd(value: number, language: "ar" | "fr" = activeLanguage, maximumFractionDigits = 0) {
+  const number = new Intl.NumberFormat(language === "ar" ? "ar-DZ" : "fr-DZ", { maximumFractionDigits }).format(value);
   return language === "ar" ? `${number} دج` : `${number} DA`;
+}
+export function formatExactDzd(value: number, language: "ar" | "fr" = activeLanguage) {
+  return formatDzd(value, language, 2);
 }
 export function formatDateTime(value: string | Date, language: "ar" | "fr" = activeLanguage) {
   const date = value instanceof Date ? value : new Date(value);
