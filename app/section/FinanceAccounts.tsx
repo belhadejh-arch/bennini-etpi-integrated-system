@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
+import CalendarDatePicker from "../components/CalendarDatePicker";
 import { PrintRecordButton } from "../components/PrintingProvider";
 import { apiRequest, type Member } from "../../lib/api";
 import { attachmentPickerTypes } from "../../lib/attachments";
@@ -285,7 +286,7 @@ export default function FinanceAccounts({ kind, member, onNavigate }: { kind: "c
                       <TextInput style={input} value={operation.interestRate} onChangeText={(interestRate) => setOperation((o) => ({ ...o, interestRate }))} placeholder="نسبة الفائدة %" keyboardType="decimal-pad" />
                       <TextInput style={input} value={operation.reason} onChangeText={(reason) => setOperation((o) => ({ ...o, reason }))} placeholder="سبب الحركة" />
                       <TextInput style={input} value={operation.paymentMethod} onChangeText={(paymentMethod) => setOperation((o) => ({ ...o, paymentMethod }))} placeholder="طريقة الدفع" />
-                      <TextInput style={input} value={operation.date} onChangeText={(date) => setOperation((o) => ({ ...o, date }))} placeholder="YYYY-MM-DD" />
+                      <CalendarDatePicker label="تاريخ الحركة" value={operation.date} onChange={(date) => setOperation((o) => ({ ...o, date }))} />
                       <TextInput style={input} value={operation.notes} onChangeText={(notes) => setOperation((o) => ({ ...o, notes }))} placeholder="ملاحظات" />
                       <Pressable onPress={() => void saveOperation()} disabled={saving} style={primary}>{saving ? <ActivityIndicator color="#FFF" /> : <Text style={primaryText}>حفظ الحركة</Text>}</Pressable>
                     </View>

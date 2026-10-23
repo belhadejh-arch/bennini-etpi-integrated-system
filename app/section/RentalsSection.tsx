@@ -20,7 +20,7 @@ import { attachmentPickerTypes } from "../../lib/attachments";
 import { colors, formatDate, formatDzd, makeStylesReactive } from "../../lib/theme";
 import { canUploadFiles, hasPermission } from "../../shared/access";
 import { translate, translateTemplate } from "../../lib/localization";
-import RentalDatePicker from "../components/RentalDatePicker";
+import CalendarDatePicker from "../components/CalendarDatePicker";
 import RentalShiftDays from "../components/RentalShiftDays";
 import { PrintRecordButton } from "../components/PrintingProvider";
 import { rentalCalculation, rentalToday, validRentalDate } from "../../shared/rental-calculation";
@@ -552,15 +552,15 @@ export default function RentalsSection() {
                   </View>
                   <Field label="اسم السائق (اختياري)" value={newMachine.driverName} onChange={(value) => setNewMachine((current) => ({ ...current, driverName: value }))} placeholder="اسم السائق" />
                   <Field label="راتب السائق الشهري (دج)" value={newMachine.driverMonthlySalary} onChange={(value) => setNewMachine((current) => ({ ...current, driverMonthlySalary: value }))} placeholder="0" numeric />
-                  <RentalDatePicker label="تاريخ بداية عمل السائق" value={newMachine.driverStartDate} onChange={(value) => setNewMachine((current) => ({ ...current, driverStartDate: value }))} />
+              <CalendarDatePicker label="تاريخ بداية عمل السائق" value={newMachine.driverStartDate} onChange={(value) => setNewMachine((current) => ({ ...current, driverStartDate: value }))} />
                   <Pressable onPress={() => void saveNewMachine()} disabled={saving} style={styles.outlineButton}>
                     <Text style={styles.outlineButtonText}>{saving ? "جارٍ التسجيل..." : "حفظ الآلة واختيارها"}</Text>
                   </Pressable>
                 </View>
               ) : null}
               <Field label="اسم المستأجر / المؤجر *" value={draft.clientOrOwner} onChange={(value) => setField("clientOrOwner", value)} placeholder="الاسم أو الجهة" />
-              <RentalDatePicker label="تاريخ بداية الكراء *" value={draft.startDate} onChange={(value) => setField("startDate", value)} />
-              <RentalDatePicker label="تاريخ نهاية الكراء (اختياري)" value={draft.ongoing ? "" : draft.endDate} disabled={draft.ongoing}
+              <CalendarDatePicker label="تاريخ بداية الكراء *" value={draft.startDate} onChange={(value) => setField("startDate", value)} />
+              <CalendarDatePicker label="تاريخ نهاية الكراء (اختياري)" value={draft.ongoing ? "" : draft.endDate} disabled={draft.ongoing} minDate={draft.startDate}
                 onChange={(value) => setField("endDate", value)} />
               <Field label={draft.ratePeriod === "shift" ? (language === "fr" ? "Tarif par poste (DA)" : "سعر الوردية (دج)") : translateTemplate("السعر {{0}} (دج) *", [translate(rateLabels[draft.ratePeriod], language)])} value={draft.rentalRate} onChange={(value) => setField("rentalRate", value)} placeholder="0" numeric />
               <Field label="المبلغ المدفوع (دج)" value={draft.paidAmount} onChange={(value) => setField("paidAmount", value)} placeholder="0" numeric />
@@ -662,8 +662,8 @@ export default function RentalsSection() {
             ))}
           </View>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            <RentalDatePicker label="تداخل مع تاريخ من" value={dateFrom} onChange={setDateFrom} />
-            <RentalDatePicker label="تداخل مع تاريخ إلى" value={dateTo} onChange={setDateTo} />
+            <CalendarDatePicker label="تداخل مع تاريخ من" value={dateFrom} onChange={setDateFrom} />
+            <CalendarDatePicker label="تداخل مع تاريخ إلى" value={dateTo} onChange={setDateTo} minDate={dateFrom || undefined} />
             {dateFrom || dateTo ? <Pressable onPress={() => { setDateFrom(""); setDateTo(""); }} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 8 }}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>مسح التاريخ</Text></Pressable> : null}
           </View>
         </View>

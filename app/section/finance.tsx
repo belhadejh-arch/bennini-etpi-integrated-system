@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
+import CalendarDatePicker from "../components/CalendarDatePicker";
 import RecordNotes from "../components/RecordNotes";
 import { PrintRecordButton } from "../components/PrintingProvider";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
@@ -398,7 +399,7 @@ export default function FinanceSection() {
             </View>
             <View style={styles.formGrid}>
               <Field label="المبلغ (دج)" value={amount} onChangeText={setAmount} placeholder="0.00" keyboardType="decimal-pad" />
-              <Field label="التاريخ" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" />
+              <CalendarDatePicker label="التاريخ" value={date} onChange={setDate} />
               <Field label="المصدر / الجهة المستفيدة" value={party} onChangeText={setParty} placeholder="اسم المصدر أو المستفيد" />
               <Field label="السبب" value={reason} onChangeText={setReason} placeholder="سبب الدخل أو المصروف" />
             </View>
@@ -469,8 +470,8 @@ export default function FinanceSection() {
           <View style={styles.filterCard}>
             <Text style={styles.filterTitle}>تصفية العمليات</Text>
             <View style={styles.formGrid}>
-              <Field label="من تاريخ" value={from} onChangeText={setFrom} placeholder="YYYY-MM-DD" />
-              <Field label="إلى تاريخ" value={to} onChangeText={setTo} placeholder="YYYY-MM-DD" />
+              <CalendarDatePicker label="من تاريخ" value={from} onChange={setFrom} />
+              <CalendarDatePicker label="إلى تاريخ" value={to} onChange={setTo} minDate={from || undefined} />
               <Field label="المصدر / المستفيد" value={filterParty} onChangeText={setFilterParty} placeholder="بحث باسم الجهة" />
               <Field label="المستخدم المسجل" value={filterRecorder} onChangeText={setFilterRecorder} placeholder="بحث باسم المستخدم" />
               <Field label="المبلغ من" value={minAmount} onChangeText={setMinAmount} placeholder="0" keyboardType="decimal-pad" />

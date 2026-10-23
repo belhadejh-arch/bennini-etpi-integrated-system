@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
+import CalendarDatePicker from "../components/CalendarDatePicker";
 import MachineryPicker, { type MachineryOption } from "../components/MachineryPicker";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
@@ -487,12 +488,8 @@ export default function FieldExpensesSection() {
           {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          <TextInput value={dateFrom} onChangeText={setDateFrom}
-            style={{ minWidth: 135, flex: 1, minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 14 }}
-            placeholder="تاريخ التسجيل من" placeholderTextColor={colors.placeholder} accessibilityLabel="تصفية المصاريف من تاريخ" />
-          <TextInput value={dateTo} onChangeText={setDateTo}
-            style={{ minWidth: 135, flex: 1, minHeight: 48, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 14 }}
-            placeholder="تاريخ التسجيل إلى" placeholderTextColor={colors.placeholder} accessibilityLabel="تصفية المصاريف إلى تاريخ" />
+          <CalendarDatePicker label="تصفية المصاريف من تاريخ" value={dateFrom} onChange={setDateFrom} placeholder="من تاريخ" />
+          <CalendarDatePicker label="تصفية المصاريف إلى تاريخ" value={dateTo} onChange={setDateTo} placeholder="إلى تاريخ" />
           {dateFrom || dateTo ? <Pressable onPress={() => { setDateFrom(""); setDateTo(""); }} style={{ minHeight: 42, justifyContent: "center", paddingHorizontal: 8 }}><Text style={{ color: colors.muted, fontSize: 14, fontWeight: "700" }}>مسح التاريخ</Text></Pressable> : null}
         </View>
 

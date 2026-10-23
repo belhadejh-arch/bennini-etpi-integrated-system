@@ -10,7 +10,7 @@ import {openDeviceDocument,type DocumentFile} from "../../lib/document-bridge";
 import {hasAppCreatorPrintBridge,clearAppCreatorPrint} from "../../lib/appcreator-print";
 import DocumentPreview from "./DocumentPreview";
 import { translate } from "../../lib/localization";
-import RentalDatePicker from "./RentalDatePicker";
+import CalendarDatePicker from "./CalendarDatePicker";
 
 type PrintRequest = { report?:string; ids?:string[]; accountId?:number };
 const PrintingContext=createContext<{openPrint:(request?:PrintRequest)=>void;openAttachment:(url:string,download:boolean)=>Promise<void>}>({
@@ -129,8 +129,8 @@ export function PrintingProvider({children}:{children:ReactNode}) {
           <TextInput value={search} onChangeText={(value)=>{setSearch(value);setPage(0)}} accessibilityLabel="بحث في سجلات الطباعة" placeholder="بحث في سجلات الطباعة"
             style={{minHeight:46,padding:10,borderWidth:1,borderColor:colors.border,borderRadius:9,color:colors.ink}}/>
           <View style={{flexDirection:"row",flexWrap:"wrap",gap:8}}>
-            <RentalDatePicker label="من تاريخ" value={from} onChange={(value)=>{setFrom(value);setPage(0)}}/>
-            <RentalDatePicker label="إلى تاريخ" value={to} onChange={(value)=>{setTo(value);setPage(0)}}/>
+            <CalendarDatePicker label="من تاريخ" value={from} onChange={(value)=>{setFrom(value);setPage(0)}}/>
+            <CalendarDatePicker label="إلى تاريخ" value={to} onChange={(value)=>{setTo(value);setPage(0)}} minDate={from || undefined}/>
             {from||to?chip("مسح التاريخ",false,()=>{setFrom("");setTo("");setPage(0)}):null}
           </View>
           <Text style={{color:colors.ink,fontSize:14}}>{t("عدد السجلات للطباعة")}: {count} / {report?.rows.length??0}</Text>

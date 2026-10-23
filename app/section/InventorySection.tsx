@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
+import CalendarDatePicker from "../components/CalendarDatePicker";
 import RecordNotes from "../components/RecordNotes";
 import EntityPicker, { type FinanceEntity } from "../components/EntityPicker";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
@@ -452,7 +453,7 @@ export default function InventorySection() {
               <Field label="رقم الفاتورة" value={purchase.invoiceNumber} onChange={(value) => setPurchaseField("invoiceNumber", value)} placeholder="اختياري" />
               <Field label="سعر الشراء للوحدة (دج) *" value={purchase.buyPrice} onChange={(value) => setPurchaseField("buyPrice", value)} placeholder="0" numeric />
               <Field label="سعر البيع للوحدة (دج) (اختياري)" value={purchase.salePrice} onChange={(value) => setPurchaseField("salePrice", value)} placeholder="غير محدد" numeric />
-              <Field label="تاريخ الشراء *" value={purchase.purchaseDate} onChange={(value) => setPurchaseField("purchaseDate", value)} placeholder="YYYY-MM-DD" />
+              <CalendarDatePicker label="تاريخ الشراء *" value={purchase.purchaseDate} onChange={(value) => setPurchaseField("purchaseDate", value)} />
               <Field label="ملاحظات" value={purchase.notes} onChange={(value) => setPurchaseField("notes", value)} placeholder="تفاصيل إضافية" />
             </View>
             <View style={styles.calculationBox}>
@@ -503,8 +504,8 @@ export default function InventorySection() {
                 <Field label="السلعة" value={draftFilters.name} onChange={(value) => setFilterField("name", value)} placeholder="اسم السلعة" />
                 <Field label="المورد" value={draftFilters.supplier} onChange={(value) => setFilterField("supplier", value)} placeholder="اسم المورد" />
                 <Field label="رقم الفاتورة" value={draftFilters.invoice} onChange={(value) => setFilterField("invoice", value)} placeholder="رقم الفاتورة" />
-                <Field label="من تاريخ" value={draftFilters.from} onChange={(value) => setFilterField("from", value)} placeholder="YYYY-MM-DD" />
-                <Field label="إلى تاريخ" value={draftFilters.to} onChange={(value) => setFilterField("to", value)} placeholder="YYYY-MM-DD" />
+                <CalendarDatePicker label="من تاريخ" value={draftFilters.from} onChange={(value) => setFilterField("from", value)} />
+                <CalendarDatePicker label="إلى تاريخ" value={draftFilters.to} onChange={(value) => setFilterField("to", value)} minDate={draftFilters.from || undefined} />
                 <Field label="سعر الشراء من (دج)" value={draftFilters.minPrice} onChange={(value) => setFilterField("minPrice", value)} placeholder="0" numeric />
                 <Field label="سعر الشراء إلى (دج)" value={draftFilters.maxPrice} onChange={(value) => setFilterField("maxPrice", value)} placeholder="—" numeric />
                 <Field label="سعر البيع من (دج)" value={draftFilters.minSalePrice} onChange={(value) => setFilterField("minSalePrice", value)} placeholder="0" numeric />
@@ -606,7 +607,7 @@ export default function InventorySection() {
                   <Field label={`الكمية (المتاح ${item.remaining_quantity}) *`} value={movementQuantity} onChange={setMovementQuantity} placeholder="0" numeric />
                   {movementType === "sale" ? <Field label="سعر البيع الفعلي للوحدة (دج) *" value={movementPrice} onChange={setMovementPrice} placeholder="0" numeric /> : null}
                   <Field label={movementType === "sale" ? "المشتري (اختياري)" : "موقع أو سبب الاستعمال"} value={movementParty} onChange={setMovementParty} placeholder="اسم الجهة أو الموقع" />
-                  <Field label="التاريخ *" value={movementDate} onChange={setMovementDate} placeholder="YYYY-MM-DD" />
+                  <CalendarDatePicker label="التاريخ *" value={movementDate} onChange={setMovementDate} />
                   <Field label="ملاحظات" value={movementNotes} onChange={setMovementNotes} placeholder="تفاصيل إضافية" />
                 </View>
                 <Text style={styles.mutedText}>{movementType === "sale" ? "يُحسب الربح المحقق من سعر البيع الفعلي وتكلفة الشراء للوحدة." : "يُخصم الاستعمال من المخزون ولا يُسجّل كربح بيع."}</Text>

@@ -11,6 +11,7 @@ import {
   ActivityIndicator, Platform, Pressable, ScrollView, Text, TextInput, View,
 } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
+import CalendarDatePicker from "../components/CalendarDatePicker";
 import AttachmentActions from "../components/AttachmentActions";
 import RecordNotes from "../components/RecordNotes";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
@@ -317,12 +318,8 @@ export default function MachinerySection() {
           {search ? <Pressable onPress={() => setSearch("")} accessibilityLabel="مسح البحث"><X size={16} color={colors.muted} /></Pressable> : null}
         </View>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-          <TextInput value={partDateFrom} onChangeText={setPartDateFrom}
-            style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
-            placeholder="تاريخ التركيب من" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية القطع من تاريخ" />
-          <TextInput value={partDateTo} onChangeText={setPartDateTo}
-            style={{ minWidth: 135, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
-            placeholder="تاريخ التركيب إلى" placeholderTextColor="#98A5B4" accessibilityLabel="تصفية القطع إلى تاريخ" />
+          <CalendarDatePicker label="تاريخ التركيب من" value={partDateFrom} onChange={setPartDateFrom} />
+          <CalendarDatePicker label="تاريخ التركيب إلى" value={partDateTo} onChange={setPartDateTo} minDate={partDateFrom || undefined} />
           {partDateFrom || partDateTo ? <Pressable onPress={() => { setPartDateFrom(""); setPartDateTo(""); }} style={{ minHeight: 38, justifyContent: "center", paddingHorizontal: 8 }}><Text style={{ color: colors.muted, fontSize: 10, fontWeight: "700" }}>مسح التاريخ</Text></Pressable> : null}
         </View>
 
@@ -348,7 +345,7 @@ export default function MachinerySection() {
             <Text style={styles.cardTitle}>بيانات السائق الحالي (اختياري)</Text>
             <Field label="اسم سائق الآلة" value={machineDraft.driverName} onChange={(value) => setMachineDraft((draft) => ({ ...draft, driverName: value }))} placeholder="اسم السائق" />
             <Field label="راتب السائق الشهري (دج)" value={machineDraft.driverMonthlySalary} onChange={(value) => setMachineDraft((draft) => ({ ...draft, driverMonthlySalary: value }))} placeholder="0" numeric />
-            <Field label="تاريخ بداية العمل" value={machineDraft.driverStartDate} onChange={(value) => setMachineDraft((draft) => ({ ...draft, driverStartDate: value }))} placeholder="YYYY-MM-DD" />
+            <CalendarDatePicker label="تاريخ بداية العمل" value={machineDraft.driverStartDate} onChange={(value) => setMachineDraft((draft) => ({ ...draft, driverStartDate: value }))} />
             <Field label="ملاحظات حول الآلية" value={machineDraft.notes} onChange={(value) => setMachineDraft((draft) => ({ ...draft, notes: value }))} placeholder="معلومات إضافية عن الآلية" multiline />
             <SaveButton label="حفظ المركبة أو الآلية" saving={saving} onPress={() => void saveMachinery()} />
           </View>
@@ -409,7 +406,7 @@ export default function MachinerySection() {
                 <Text style={styles.cardTitle}>تعيين سائق جديد</Text>
                 <Field label="اسم السائق *" value={driverDraft.driverName} onChange={(value) => setDriverDraft((draft) => ({ ...draft, driverName: value }))} placeholder="اسم السائق الجديد" />
                 <Field label="الراتب الشهري (دج) *" value={driverDraft.monthlySalary} onChange={(value) => setDriverDraft((draft) => ({ ...draft, monthlySalary: value }))} placeholder="0" numeric />
-                <Field label="تاريخ بداية العمل *" value={driverDraft.startDate} onChange={(value) => setDriverDraft((draft) => ({ ...draft, startDate: value }))} placeholder="YYYY-MM-DD" />
+                <CalendarDatePicker label="تاريخ بداية العمل *" value={driverDraft.startDate} onChange={(value) => setDriverDraft((draft) => ({ ...draft, startDate: value }))} />
                 <SaveButton label="حفظ السائق الجديد" saving={saving} onPress={() => void saveDriverChange()} />
               </View>
             ) : null}

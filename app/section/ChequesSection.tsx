@@ -13,6 +13,7 @@ import type { ReactNode } from "react";
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import AttachmentActions from "../components/AttachmentActions";
+import CalendarDatePicker from "../components/CalendarDatePicker";
 import RecordNotes from "../components/RecordNotes";
 import EntityPicker, { type FinanceEntity } from "../components/EntityPicker";
 import { apiRequest, apiUrl, type Member } from "../../lib/api";
@@ -541,8 +542,8 @@ export default function ChequesSection() {
               <Field label="المبلغ (دج) *" value={draft.amount} onChange={(value) => setField("amount", value)} placeholder="0" numeric />
               <Field label="المستفيد *" value={draft.beneficiary} onChange={(value) => setField("beneficiary", value)} placeholder="اسم المستفيد" />
               <Field label="البنك" value={draft.bank} onChange={(value) => setField("bank", value)} placeholder="اسم البنك" />
-              <Field label="تاريخ الإصدار *" value={draft.issueDate} onChange={(value) => setField("issueDate", value)} placeholder="YYYY-MM-DD" />
-              <Field label="تاريخ الاستحقاق *" value={draft.dueDate} onChange={(value) => setField("dueDate", value)} placeholder="YYYY-MM-DD" />
+              <CalendarDatePicker label="تاريخ الإصدار *" value={draft.issueDate} onChange={(value) => setField("issueDate", value)} />
+              <CalendarDatePicker label="تاريخ الاستحقاق *" value={draft.dueDate} onChange={(value) => setField("dueDate", value)} />
             </View>
             <View style={styles.invoiceChooser}>
               <EntityPicker
@@ -674,22 +675,8 @@ export default function ChequesSection() {
             ))}
           </ScrollView>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            <TextInput
-              value={dateFromInput}
-              onChangeText={setDateFromInput}
-              style={{ minWidth: 130, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
-              placeholder="استحقاق من YYYY-MM-DD"
-              placeholderTextColor="#98A5B4"
-              accessibilityLabel="تاريخ الاستحقاق من"
-            />
-            <TextInput
-              value={dateToInput}
-              onChangeText={setDateToInput}
-              style={{ minWidth: 130, flex: 1, minHeight: 38, borderWidth: 1, borderColor: colors.border, borderRadius: 9, paddingHorizontal: 9, color: colors.ink, textAlign: "right", fontSize: 11 }}
-              placeholder="استحقاق إلى YYYY-MM-DD"
-              placeholderTextColor="#98A5B4"
-              accessibilityLabel="تاريخ الاستحقاق إلى"
-            />
+            <CalendarDatePicker label="تاريخ الاستحقاق من" value={dateFromInput} onChange={setDateFromInput} placeholder="من تاريخ" />
+            <CalendarDatePicker label="تاريخ الاستحقاق إلى" value={dateToInput} onChange={setDateToInput} placeholder="إلى تاريخ" minDate={dateFromInput || undefined} />
             <Pressable
               onPress={() => {
                 const validDate = (value: string) => !value || (/^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().startsWith(value));

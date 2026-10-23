@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { AppHeader, HeaderAction } from "../components/AppHeader";
 import RecordNotes from "../components/RecordNotes";
+import CalendarDatePicker from "../components/CalendarDatePicker";
 import { apiRequest, type Member } from "../../lib/api";
 import { colors, formatDzd, formatDateTime, makeStylesReactive } from "../../lib/theme";
 import { sections, type SectionId } from "../../shared/sections";
@@ -294,18 +295,7 @@ function FilterChip({ label, selected, onPress }: { label: string; selected: boo
 
 function DateFilter({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
-    <View style={{ flex: 1 }}>
-      <Text style={styles.filterLabel}>{label}</Text>
-      <TextInput
-        style={styles.dateInput}
-        value={value}
-        onChangeText={onChange}
-        placeholder="YYYY-MM-DD"
-        placeholderTextColor="#98A5B4"
-        maxLength={10}
-        accessibilityLabel={label}
-      />
-    </View>
+    <CalendarDatePicker label={label} value={value} onChange={onChange} />
   );
 }
 
