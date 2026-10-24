@@ -16,3 +16,4 @@
 - [Branding and printing](brand-and-print-policy.md) — supplied BE identity, transparent dashboard logo, Changa, and functional complete RTL printing across business sections.
 - [Desktop host validation](desktop-host-validation.md) — Windows 10/Websktop is a separate target; browser layout checks cannot establish a native-window fix.
 - [RTL screenshot capture](rtl-screenshot-capture.md) — Chromium full-page captures can invent a white left strip; compare viewport captures and layout bounds before changing CSS.
+- [Production database boundaries](production-database-boundaries.md) — scope destructive production work to Bennini-owned tables and inspect cross-table references; the Neon database contains unrelated records.
